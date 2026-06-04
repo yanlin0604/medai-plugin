@@ -1,42 +1,25 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import AppLayout from './components/Layout/AppLayout';
-import Dashboard from './pages/Dashboard';
 import RoundWorkbench from './pages/RoundWorkbench';
-import DocEditor from './pages/DocEditor';
+import DocWorkspace from './pages/DocWorkspace';
 import Meeting from './pages/Meeting';
 import Settings from './pages/Settings';
-import Login from './pages/Login';
-import { useAuthStore } from './stores/useAuthStore';
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const token = useAuthStore((state) => state.token);
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-  return <>{children}</>;
-}
 
 export default function App() {
   return (
     <ConfigProvider locale={zhCN}>
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<Login />} />
           <Route
             path="/"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
+            element={<AppLayout />}
           >
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
+            <Route index element={<div className="h-full flex items-center justify-center text-slate-400 bg-white shadow-inner rounded-xl m-4 border-2 border-dashed border-slate-200">欢迎使用 AI 医疗查房与文书系统。请在左侧选择操作项。</div>} />
             <Route path="round" element={<RoundWorkbench />} />
-            <Route path="doc-editor" element={<DocEditor />} />
-            <Route path="doc-editor/:taskId" element={<DocEditor />} />
+            {/* 范式驱动文书工作区：按文书范式分发到对应容器 */}
+            <Route path="doc/:code" element={<DocWorkspace />} />
             <Route path="meeting" element={<Meeting />} />
             <Route path="settings" element={<Settings />} />
           </Route>
