@@ -1,7 +1,7 @@
 [package]
 name = "medai-plugin"
 version = "1.0.0"
-description = "住院部AI助手插件系统 - Tauri Rust后端"
+description = "AI智能病历书写助手插件系统 - Tauri Rust后端"
 authors = ["MedAi研发组"]
 edition = "2021"
 
@@ -27,6 +27,7 @@ chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
+whoami = "1"
 
 [features]
 default = ["custom-protocol"]

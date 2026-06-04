@@ -15,7 +15,7 @@ pub fn run() {
         .setup(|app| {
             // 初始化日志
             utils::logger::init();
-            log::info!("MedAi助手启动");
+            log::info!("AI智能病历书写助手启动");
 
             // 初始化音频状态
             let audio_state = audio::recorder::AudioState::default();
@@ -42,5 +42,5 @@ pub fn run() {
             commands::system_tray::get_system_info,
         ])
         .run(tauri::generate_context!())
-        .expect("MedAi助手启动失败");
+        .expect("AI智能病历书写助手启动失败");
 }

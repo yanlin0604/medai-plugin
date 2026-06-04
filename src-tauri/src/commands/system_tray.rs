@@ -12,8 +12,6 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
     Ok(SystemInfo {
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
-        hostname: hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_default(),
+        hostname: whoami::fallible::hostname().unwrap_or_default(),
     })
 }
