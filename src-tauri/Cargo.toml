@@ -28,6 +28,7 @@ log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
 whoami = "1"
+writeback-engine = { path = "crates/writeback-engine" }
 
 [features]
 default = ["custom-protocol"]

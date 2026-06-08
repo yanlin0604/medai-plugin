@@ -48,6 +48,10 @@ export interface DocumentPayload {
   patientId: string;
   /** 结构化字段（宿主系统按字段落库，如主诉/现病史/诊断…） */
   fields: Record<string, string>;
+  /** 字段中文名称（供前端展示） */
+  fieldLabels?: Record<string, string>;
+  /** 字段写入顺序（顺序粘贴模式依赖此顺序） */
+  fieldOrder?: string[];
   /** 完整正文 */
   content: string;
 }

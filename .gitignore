@@ -33,3 +33,4 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+/src-tauri/crates/writeback-engine/target

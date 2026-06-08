@@ -19,6 +19,7 @@ import WorkflowStepper from '../../components/clinical/WorkflowStepper';
 import QcAuditBox from '../../components/clinical/QcAuditBox';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
 import WritebackBar from '../../components/clinical/WritebackBar';
+import WritebackTargetBar from '../../components/clinical/WritebackTargetBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import SectionEditor from '../../components/clinical/SectionEditor';
 import { usePatientStore } from '../../stores/usePatientStore';
@@ -72,14 +73,37 @@ function optimizeText(text: string, mode: string): string {
   return text.replace(/疼痛/g, '压榨样疼痛');
 }
 
+function renderWritebackValue(
+  field: DocFieldDef,
+  value: FieldValue | undefined,
+  sectionOverride?: string,
+): string {
+  if (sectionOverride != null) return sectionOverride.trim();
+  switch (field.inputType) {
+    case 'static':
+      return ((value as string | undefined) ?? field.staticText ?? '').trim();
+    case 'options': {
+      const v = (value as string | undefined) ?? field.default ?? '';
+      return field.options?.find((o) => o.value === v)?.render ?? '';
+    }
+    case 'text':
+      return ((value as string | undefined) ?? field.default ?? '').trim();
+    case 'icd': {
+      const list = (value as IcdItem[] | undefined) ?? [];
+      return list.length ? list.map((d, i) => `${i + 1}. ${d.name} [${d.code}]`).join('；') : '';
+    }
+    default:
+      return '';
+  }
+}
+
 // 要素选项按钮
 function OptBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       onClick={onClick}
-      className={`px-2.5 py-1 rounded-md text-[11px] border transition-all ${
-        active ? 'bg-[#1E3A8A] border-[#1E3A8A] text-white font-bold' : 'bg-white border-slate-300 text-slate-700 hover:border-[#1E3A8A]'
-      }`}
+      className={`px-2.5 py-1 rounded-md text-[11px] border transition-all ${active ? 'bg-[#1E3A8A] border-[#1E3A8A] text-white font-bold' : 'bg-white border-slate-300 text-slate-700 hover:border-[#1E3A8A]'
+        }`}
     >
       {children}
     </button>
@@ -210,13 +234,13 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   // 患者上下文来自宿主病历系统当前选中患者（首页关联）
   const patient: PatientBrief = currentPatient
     ? {
-        name: currentPatient.name,
-        gender: currentPatient.gender,
-        age: currentPatient.age,
-        bed: currentPatient.bedNo,
-        admissionNo: currentPatient.id,
-        diagnosis: currentPatient.diagnosis,
-      }
+      name: currentPatient.name,
+      gender: currentPatient.gender,
+      age: currentPatient.age,
+      bed: currentPatient.bedNo,
+      admissionNo: currentPatient.id,
+      diagnosis: currentPatient.diagnosis,
+    }
     : admissionPatient;
 
   const [step, setStep] = useState(1);
@@ -331,9 +355,30 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     () => finalSections.map((s) => `【${s.section}】${s.text}`).join('\n'),
     [finalSections],
   );
-  const finalFields = useMemo(
-    () => Object.fromEntries(finalSections.map((s) => [s.section, s.text])),
-    [finalSections],
+
+  const sectionFieldCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    template?.fields.forEach((field) => {
+      counts.set(field.section, (counts.get(field.section) ?? 0) + 1);
+    });
+    return counts;
+  }, [template]);
+
+  const writebackFields = useMemo(
+    () =>
+      Object.fromEntries(
+        (template?.fields ?? []).map((field) => {
+          const sectionOverride =
+            sectionFieldCounts.get(field.section) === 1 ? sectionEdits[field.section] : undefined;
+          return [field.key, renderWritebackValue(field, values[field.key], sectionOverride)];
+        }),
+      ),
+    [template, sectionEdits, sectionFieldCounts, values],
+  );
+  const writebackFieldOrder = useMemo(() => template?.fields.map((field) => field.key) ?? [], [template]);
+  const writebackFieldLabels = useMemo(
+    () => Object.fromEntries((template?.fields ?? []).map((field) => [field.key, field.label])),
+    [template]
   );
 
   // 段落手动改写 / 重置（重置经 resetKeys 触发 SectionEditor remount 复位）
@@ -431,12 +476,14 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const doSubmit = async () => {
     if (!rendered) return;
     const content = finalContent;
-    const fields = finalFields;
+    const fields = writebackFields;
     const res = await submitDocument({
       docCode: doc.code,
       docName: doc.name,
       patientId: patient.admissionNo,
       fields,
+      fieldLabels: writebackFieldLabels,
+      fieldOrder: writebackFieldOrder,
       content,
     });
     if (res.ok) {
@@ -457,7 +504,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
         patientId: patient.admissionNo,
         content,
         fields,
-        editor: '李明 主治医师', // TODO: 取自 emsBridge.getHostSession
+        editor: '林志远 主治医师', // TODO: 取自 emsBridge.getHostSession
         timestamp: now,
         changeSummary: '医生确认并提交至病历系统',
       });
@@ -490,14 +537,14 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
             将回写至病历系统以下字段：
           </p>
           <ul className="mt-1.5 space-y-0.5 text-slate-600">
-            {Object.keys(finalFields).map((k) => (
-              <li key={k}>· {k}</li>
+            {(template?.fields ?? []).map((f) => (
+              <li key={f.key}>· {f.label}</li>
             ))}
           </ul>
           <p className="mt-1.5 text-amber-600">提交后生成版本快照，可在「历史」中查看与对比。</p>
         </div>
       ),
-      onOk: doSubmit,
+      onOk: () => { doSubmit(); },
     });
   };
 
@@ -526,11 +573,10 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
             setHistoryOpen(true);
           }}
           title="历史版本与修改记录"
-          className={`flex items-center gap-1 text-[11px] font-semibold border rounded-md px-2 py-1 transition-colors ${
-            versionCount === 0
+          className={`flex items-center gap-1 text-[11px] font-semibold border rounded-md px-2 py-1 transition-colors ${versionCount === 0
               ? 'text-slate-300 border-slate-200 cursor-not-allowed'
               : 'text-slate-500 hover:text-[#1E3A8A] border-slate-200 hover:border-[#1E3A8A]'
-          }`}
+            }`}
         >
           <HistoryOutlined />
           历史{versionCount > 0 ? `(${versionCount})` : ''}
@@ -594,9 +640,9 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                   病历要素填写（点选 / 手输；叙述病史可语音口述）
                 </div>
                 {dictateFields.length > 0 && <DictationPanel count={dictateFields.length} onApply={applyDictation} />}
-                  {elementFields.map((f) => (
-                    <FieldRow key={f.key} field={f} value={values[f.key]} onChange={(v) => setVal(f.key, v)} optimize={optimizeText} />
-                  ))}
+                {elementFields.map((f) => (
+                  <FieldRow key={f.key} field={f} value={values[f.key]} onChange={(v) => setVal(f.key, v)} optimize={optimizeText} />
+                ))}
                 <button onClick={() => goStep(2)} className="w-full bg-[#1E3A8A] hover:bg-[#172554] text-white text-xs font-bold py-2 rounded-lg transition-colors">
                   确认要素，进入诊断质控
                 </button>
@@ -742,6 +788,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
         )}
 
         {/* 唯一出口：提交至宿主病历系统 */}
+        <WritebackTargetBar docCode={doc.code} docName={doc.name} patientId={patient.admissionNo} />
         <WritebackBar
           label="提交至病历系统 (F8)"
           onWriteback={handleSubmit}

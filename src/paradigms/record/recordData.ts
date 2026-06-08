@@ -34,7 +34,7 @@ export interface RecordConfig {
 // 数据来源：doc_013_operation.html 原型
 
 const operationConfig: RecordConfig = {
-  patient: { name: '张三', gender: '男', age: '65岁', bed: '1床', admissionNo: '10082', diagnosis: '冠状动脉粥样硬化性心脏病' },
+  patient: { name: '陈建国', gender: '男', age: '65岁', bed: '1201', admissionNo: 'ZY20260001', diagnosis: '冠状动脉粥样硬化性心脏病' },
   form: {
     title: '心血管内科 — 冠脉造影及介入术手术记录单',
     fields: [
@@ -45,7 +45,7 @@ const operationConfig: RecordConfig = {
     contentLabel: '详细手术经过描述 (包含术中客观用药、穿刺路径、主观手术操作细节)',
     diagnosisLabel: '术后诊断',
   },
-  topCardText: '张三 (男 / 65岁) · 术中事件提取与口述交叉拼装',
+  topCardText: '陈建国 (男 / 65岁) · 术中事件提取与口述交叉拼装',
   timelineTitle: '手麻系统/手术医嘱客观时间轴静默集成',
   timeline: [
     { time: '14:00', text: '麻醉开始 (2%利多卡因局部浸润麻醉)', highlight: true },

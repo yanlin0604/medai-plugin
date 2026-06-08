@@ -1,4 +1,6 @@
+use crate::his::window_detect::{EmrContext, EmrContextState};
 use serde::Serialize;
+use tauri::State;
 
 #[derive(Serialize)]
 pub struct HisWindowInfo {
@@ -25,5 +27,20 @@ pub async fn get_clipboard_text() -> Result<String, String> {
 pub async fn set_clipboard_text(text: String) -> Result<(), String> {
     // TODO: 实现剪贴板写入
     log::info!("设置剪贴板内容");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_latest_emr_context(
+    state: State<'_, EmrContextState>,
+) -> Result<Option<EmrContext>, String> {
+    Ok(state.get_latest().await)
+}
+
+#[tauri::command]
+pub async fn clear_latest_emr_context(
+    state: State<'_, EmrContextState>,
+) -> Result<(), String> {
+    state.clear_latest().await;
     Ok(())
 }

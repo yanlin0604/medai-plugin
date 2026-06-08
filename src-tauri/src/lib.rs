@@ -1,7 +1,7 @@
 use tauri::Manager;
 
-mod commands;
 mod audio;
+mod commands;
 mod his;
 mod utils;
 
@@ -21,6 +21,12 @@ pub fn run() {
             let audio_state = audio::recorder::AudioState::default();
             app.manage(audio_state);
 
+            let emr_context_state = his::window_detect::EmrContextState::default();
+            app.manage(emr_context_state.clone());
+            tauri::async_runtime::spawn(his::window_detect::start_context_bridge(
+                emr_context_state,
+            ));
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -38,6 +44,12 @@ pub fn run() {
             commands::his_bridge::detect_his_window,
             commands::his_bridge::get_clipboard_text,
             commands::his_bridge::set_clipboard_text,
+            commands::his_bridge::get_latest_emr_context,
+            commands::his_bridge::clear_latest_emr_context,
+            commands::writeback::writeback_to_bs,
+            commands::writeback::writeback_to_cs,
+            commands::writeback::writeback_clipboard,
+            commands::writeback::writeback_mock,
             // 系统命令
             commands::system_tray::get_system_info,
         ])

@@ -9,18 +9,31 @@
 // TODO: 替换为真实接口实现（Tauri invoke / axios / event listen）。
 
 import type { Patient, DocumentPayload, SubmitResult, PatientConsistency } from './types';
+import { invoke } from '@tauri-apps/api/core';
+import { WRITEBACK_MODE_LABELS, getWritebackConfig, resolveBsUrl } from './writebackConfig';
+import { useClipboardWritebackStore } from '../stores/useClipboardWritebackStore';
+
+interface WritebackStats {
+  total: number;
+  success: number;
+  failed: number;
+  errors: Array<{ fieldKey: string; message: string }>;
+}
+
+const isTauriRuntime = () =>
+  typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
 /** 样例：宿主系统当前选中的患者（真实环境从 HIS 窗口焦点读取） */
 const SAMPLE_ACTIVE_PATIENT: Patient = {
-  id: '10082',
-  name: '张三',
+  id: 'ZY20260001',
+  name: '陈建国',
   gender: '男',
   age: '65岁',
-  bedNo: '1床',
-  deptName: '心血管内科一病区',
-  admissionDate: '2026-05-26',
-  admissionDays: 3,
-  doctor: '李明',
+  bedNo: '1201',
+  deptName: '心血管内科',
+  admissionDate: '2026-06-01',
+  admissionDays: 4,
+  doctor: '林志远',
   diagnosis: '冠状动脉粥样硬化性心脏病',
 };
 
@@ -40,7 +53,7 @@ export interface HostSession {
 /** 读取宿主系统登录会话 */
 export async function getHostSession(): Promise<HostSession> {
   // TODO: 对接 HIS 免登服务
-  return { online: true, doctorName: '李明 主治医师', deptName: '心血管内科' };
+  return { online: true, doctorName: '林志远 主治医师', deptName: '心血管内科' };
 }
 
 /**
@@ -48,15 +61,106 @@ export async function getHostSession(): Promise<HostSession> {
  * 插件侧不渲染目标表单，仅负责把结构化字段与正文交给宿主系统落库。
  */
 export async function submitDocument(payload: DocumentPayload): Promise<SubmitResult> {
-  // TODO: await invoke('his_write_document', { payload })
   const nextMap: Record<string, string> = {
     DOC001: 'DOC002', // 入院记录 → 首次病程记录
   };
-  return {
-    ok: true,
-    message: `「${payload.docName}」已提交至病历系统并写入对应字段`,
-    nextDocCode: nextMap[payload.docCode],
+  const config = getWritebackConfig();
+
+  try {
+    const stats = await executeWriteback(payload, config);
+
+    const ok = stats.failed === 0;
+    const modeLabel = WRITEBACK_MODE_LABELS[config.mode];
+    return {
+      ok,
+      message: ok
+        ? `「${payload.docName}」${modeLabel}完成：${stats.success}/${stats.total} 个字段已写入`
+        : `「${payload.docName}」${modeLabel}部分失败：${stats.success}/${stats.total} 个字段成功`,
+      nextDocCode: ok ? nextMap[payload.docCode] : undefined,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `「${payload.docName}」${WRITEBACK_MODE_LABELS[config.mode]}失败：${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function executeWriteback(payload: DocumentPayload, config = getWritebackConfig()): Promise<WritebackStats> {
+  if (!isTauriRuntime()) {
+    if (config.mode !== 'mock') {
+      throw new Error('真实回写需要在 Tauri 桌面应用中运行');
+    }
+    return mockWriteback(payload);
+  }
+
+  if (config.mode === 'bs-auto') {
+    const url = resolveBsUrl(config.bsUrlTemplate, {
+      patientId: payload.patientId,
+      docCode: payload.docCode,
+    });
+    return invoke<WritebackStats>('writeback_to_bs', { payload, url });
+  }
+
+  if (config.mode === 'bs-attached') {
+    const url = resolveBsUrl(config.bsUrlTemplate, {
+      patientId: payload.patientId,
+      docCode: payload.docCode,
+    });
+    return invoke<WritebackStats>('writeback_to_bs_attached', {
+      payload,
+      url,
+      webdriverUrl: config.bsWebDriverUrl,
+      debuggerAddress: config.bsDebuggerAddress,
+    });
+  }
+
+  if (config.mode === 'cs-auto') {
+    return invoke<WritebackStats>('writeback_to_cs', {
+      payload,
+      windowTitle: config.csWindowTitle,
+    });
+  }
+
+  if (config.mode === 'clipboard') {
+    return new Promise<WritebackStats>((resolve) => {
+      const fieldEntries = Object.entries(payload.fields);
+      const fields = fieldEntries.map(([key, content]) => ({
+        key,
+        label: payload.fieldLabels?.[key] || key,
+        content: content as string,
+      }));
+
+      const store = useClipboardWritebackStore.getState();
+      store.setOnComplete((successCount) => {
+        resolve({
+          total: fields.length,
+          success: successCount,
+          failed: fields.length - successCount,
+          errors: [],
+        });
+      });
+      
+      store.startWriteback(payload.docName, fields);
+    });
+  }
+
+  return invoke<WritebackStats>('writeback_mock', { payload });
+}
+
+function mockWriteback(payload: DocumentPayload): WritebackStats {
+  const fieldKeys = Object.keys(payload.fields);
+  const stats: WritebackStats = {
+    total: fieldKeys.length,
+    success: fieldKeys.length,
+    failed: 0,
+    errors: [],
   };
+  localStorage.setItem(
+    'medaiPlugin.lastMockWriteback',
+    JSON.stringify({ payload, stats, writtenAt: new Date().toISOString() }),
+  );
+  return stats;
 }
 
 /**

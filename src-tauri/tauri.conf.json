@@ -12,14 +12,17 @@
     "windows": [
       {
         "title": "AI智能病历书写助手",
-        "width": 390,
-        "height": 750,
-        "minWidth": 320,
-        "minHeight": 500,
-        "resizable": true,
+        "width": 200,
+        "height": 60,
+        "minWidth": 200,
+        "minHeight": 60,
+        "resizable": false,
         "decorations": false,
-        "transparent": false,
-        "center": true
+        "transparent": true,
+        "center": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {

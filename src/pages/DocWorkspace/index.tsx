@@ -7,6 +7,11 @@ import SummaryParadigm from '../../paradigms/SummaryParadigm';
 import RecordParadigm from '../../paradigms/RecordParadigm';
 import RecordingParadigm from '../../paradigms/RecordingParadigm';
 import SpecialParadigm from '../../paradigms/SpecialParadigm';
+import DischargeFlow from '../../paradigms/summary/DischargeFlow';
+
+const WORKSPACE_COMPONENTS = {
+  discharge: DischargeFlow,
+};
 
 /**
  * 文书工作区 —— 范式驱动路由分发器。
@@ -42,7 +47,12 @@ export default function DocWorkspace() {
     );
   }
 
-  // 范式分发
+  // 专属工作台优先；未配置时按范式分发
+  if (doc.workspace) {
+    const Workspace = WORKSPACE_COMPONENTS[doc.workspace];
+    return <Workspace doc={doc} />;
+  }
+
   switch (doc.paradigm) {
     case 'summary':
       return <SummaryParadigm doc={doc} />;

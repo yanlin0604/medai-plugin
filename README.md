@@ -50,6 +50,16 @@ MedAI Plugin 是一款面向医院住院部医生的 **AI智能病历书写桌�
 
 ## 🧩 功能模块
 
+### 0. 病案首页（Homepage）
+
+病案首页是住院病历的重要组成部分，包含患者基本信息、住院信息、诊断信息、手术信息、费用信息和医师签名等。
+
+- 📋 **自动填充**：从HIS/EMR系统自动拉取患者信息、诊断、费用等数据
+- 🏥 **ICD编码**：根据诊断自动匹配ICD-10编码
+- 💰 **费用汇总**：自动汇总住院期间全部费用
+- ✍️ **医师签名**：支持主任医师、主治医师、住院医师、编码员、质控医师签名
+- 📤 **一键回写**：生成完成后一键回写至EMR系统
+
 ### 1. 查房工作台（Round Workbench）
 
 一站式查房助手，支持床旁录音、患者信息自动对齐、实时ASR语音转写。
@@ -165,7 +175,11 @@ medai-plugin/
 │   │   ├── Audio/                 # 🚧 音频组件
 │   │   ├── Common/               # 🚧 通用组件
 │   │   ├── Editor/               # 🚧 编辑器组件
-│   │   └── Medical/              # 🚧 医疗业务组件
+│   │   ├── Medical/              # 🚧 医疗业务组件
+│   │   └── clinical/             # ✅ 临床业务组件
+│   │       ├── HomepageCard.tsx   # ✅ 病案首页卡片组件
+│   │       ├── EmrContextCard.tsx # ✅ EMR上下文卡片
+│   │       └── ...               # 其他临床组件
 │   │
 │   ├── pages/
 │   │   ├── Dashboard/             # 🚧 仪表盘
@@ -328,6 +342,7 @@ const sessionId = await invoke<string>('start_audio_recording', {
 | `get_clipboard_text` | his_bridge | - | `String` | 🔴 桩（返回空） |
 | `set_clipboard_text` | his_bridge | `text` | `()` | 🔴 桩（仅日志） |
 | `get_system_info` | system_tray | - | `SystemInfo` | 🟢 可用 |
+| `get_homepage_data` | his_bridge | `patient_id: String` | `Option<HomepageData>` | 🔴 桩（待实现） |
 
 > 🟢 可用　🟡 部分实现　🔴 桩/待开发
 
@@ -386,7 +401,7 @@ const {
 |------|------|------|
 | `isLoggedIn` | `boolean` | HIS连接状态 |
 | `currentPatient` | `Patient \| null` | 当前患者（ID、姓名、性别、年龄、床号、诊断等） |
-| `selectedDoc` | `DocTemplate \| null` | 选中文书模板 |
+| `selectedDoc` | `DocTemplate \| null` | 选中文书模板（含病案首页DOC000） |
 | `isGenerating` | `boolean` | AI是否正在生成 |
 | `generationProgress` | `number` | 生成进度（0-100） |
 | `recommendedDoc` | `DocTemplate \| null` | AI推荐的文书（含紧急度提示） |
@@ -437,6 +452,7 @@ npm run tauri build
 
 | 模块 | 前端 | 后端 | 说明 |
 |------|------|------|------|
+| 病案首页（Homepage） | ✅ | 🔴 | 文书注册表、字段模板、范式配置、UI组件已实现，HIS接口待对接 |
 | 侧边栏布局（AppLayout） | ✅ | - | HIS检测、患者卡片、AI推荐、模板搜索、录音按钮 |
 | 文书编辑器（DocEditor） | ✅ | - | AI生成模拟、思维链、质控、复制/回写 |
 | 查房工作台 | 🚧 | 🟡 | 录音命令已定义，CPAL接入待完成 |
@@ -453,6 +469,7 @@ npm run tauri build
 
 - [x] **M0** — 项目脚手架搭建（Tauri + React + TS + TailwindCSS）
 - [x] **M1** — 核心UI原型（侧边栏布局 + 文书编辑器 + AI生成模拟）
+- [x] **M1.5** — 病案首页功能（文书注册表、字段模板、范式配置、UI组件）
 - [ ] **M2** — 音频录制与ASR转写
 - [ ] **M3** — HIS系统联动（窗口检测 + 患者对齐 + 回写）
 - [ ] **M4** — 质控引擎与智能推荐

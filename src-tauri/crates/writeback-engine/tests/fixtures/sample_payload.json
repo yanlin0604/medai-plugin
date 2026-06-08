@@ -1,0 +1,12 @@
+{
+  "docCode": "DOC001",
+  "docName": "入院记录",
+  "patientId": "ZY20260001",
+  "fields": {
+    "chiefComplaint": "反复胸闷3天，加重1天。",
+    "presentIllness": "患者3天前出现胸闷，休息后可缓解，1天前症状加重。",
+    "diagnoses": "冠状动脉粥样硬化性心脏病",
+    "treatmentPlan": "完善心电图、心肌酶、冠脉评估，给予抗血小板及调脂治疗。"
+  },
+  "content": "入院记录正文示例"
+}

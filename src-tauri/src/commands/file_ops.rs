@@ -1,5 +1,9 @@
 #[tauri::command]
-pub async fn export_document(content: String, format: String, path: String) -> Result<String, String> {
+pub async fn export_document(
+    content: String,
+    format: String,
+    path: String,
+) -> Result<String, String> {
     log::info!("导出文档: format={}, path={}", format, path);
     std::fs::write(&path, &content).map_err(|e| e.to_string())?;
     Ok(path)

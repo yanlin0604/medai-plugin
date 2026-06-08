@@ -17,6 +17,9 @@ export type DocGroupId = 'timed' | 'onDemand' | 'event';
 /** 文书客观数据来源 */
 export type DataSource = 'HIS' | 'LIS' | 'PACS' | 'EMR' | '录音' | '问诊' | '医嘱';
 
+/** 文书专属工作台（仅在通用范式不足以表达该文书时配置） */
+export type DocWorkspaceId = 'discharge';
+
 // ==================== 范式元数据 ====================
 
 export interface ParadigmMeta {
@@ -104,14 +107,23 @@ export interface DocDefinition {
   timeLimit?: string;
   /** 特殊标志（如 ai-boundary / mandatory-review / no-asr） */
   flags?: string[];
+  /** 专属工作台标识；未配置时使用 paradigm 对应的通用容器 */
+  workspace?: DocWorkspaceId;
 }
 
 /**
- * 14 类文书权威注册表
- * 范式分布：summary×4 + record×4 + recording×5 + special×1 = 14
+ * 15 类文书权威注册表
+ * 范式分布：summary×4 + record×4 + recording×5 + special×1 + homepage×1 = 15
  */
 export const DOC_REGISTRY: DocDefinition[] = [
   // ---------- 时限必填文书（红） ----------
+  {
+    code: 'DOC000', id: 'doc-000', name: '病案首页', py: 'basy',
+    paradigm: 'summary', group: 'timed', icon: 'HomeOutlined',
+    prototype: 'doc_000_homepage.html',
+    dataSources: ['HIS', 'EMR', '医嘱'], inputMode: '选项+自动填充',
+    timeLimit: '出院24小时内',
+  },
   {
     code: 'DOC001', id: 'doc-001', name: '入院记录', py: 'ryjl',
     paradigm: 'recording', group: 'timed', icon: 'ImportOutlined',
@@ -184,6 +196,7 @@ export const DOC_REGISTRY: DocDefinition[] = [
     paradigm: 'summary', group: 'event', icon: 'ExportOutlined',
     prototype: 'doc_010_discharge.html',
     dataSources: ['HIS', 'EMR'], inputMode: '选项+模板',
+    workspace: 'discharge',
   },
   {
     code: 'DOC011', id: 'doc-011', name: '死亡记录', py: 'swjl',

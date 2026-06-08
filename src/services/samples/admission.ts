@@ -14,7 +14,7 @@ import type {
 
 /** 样例患者简要信息 */
 export const admissionPatient: PatientBrief = {
-  name: '张三', gender: '男', age: '65岁', bed: '1床', admissionNo: '10082',
+  name: '陈建国', gender: '男', age: '65岁', bed: '1201', admissionNo: 'ZY20260001',
   diagnosis: '冠状动脉粥样硬化性心脏病',
 };
 

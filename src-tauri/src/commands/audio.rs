@@ -7,7 +7,11 @@ pub async fn start_audio_recording(
     state: State<'_, AudioState>,
 ) -> Result<String, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
-    log::info!("开始录音: round_task_id={}, session={}", round_task_id, session_id);
+    log::info!(
+        "开始录音: round_task_id={}, session={}",
+        round_task_id,
+        session_id
+    );
     // TODO: 初始化CPAL录音流
     Ok(session_id)
 }
@@ -30,12 +34,17 @@ pub async fn stop_audio_recording(state: State<'_, AudioState>) -> Result<String
     Ok("".to_string())
 }
 
+use cpal::traits::{DeviceTrait, HostTrait};
+
 #[tauri::command]
 pub async fn get_audio_devices() -> Result<Vec<String>, String> {
     let host = cpal::default_host();
     let devices: Vec<String> = host
         .input_devices()
-        .map(|d| d.filter_map(|d| d.name().ok()).collect())
+        .map(|mut iter| {
+            iter.filter_map(|d: cpal::Device| d.name().ok())
+                .collect::<Vec<String>>()
+        })
         .unwrap_or_default();
     Ok(devices)
 }

@@ -7,6 +7,106 @@
 
 import type { DocTemplate } from '../types';
 
+/** 病案首页（DOC000）字段模板 */
+export const homepageTemplate: DocTemplate = {
+  docCode: 'DOC000',
+  version: 'v1.0',
+  title: '病案首页',
+  fields: [
+    // ====== 患者基本信息 ======
+    {
+      key: 'patientInfo', label: '患者基本信息', section: '患者基本信息',
+      source: 'his', required: true, inputType: 'static',
+      staticText: '姓名：陈建国，性别：男，年龄：65岁，身份证号：110101195801011234，职业：退休，民族：汉族，婚姻状况：已婚。',
+    },
+    {
+      key: 'contactInfo', label: '联系人信息', section: '患者基本信息',
+      source: 'his', required: true, inputType: 'static',
+      staticText: '联系人：刘淑芬（配偶），电话：13800138000，地址：北京市朝阳区XX路XX号。',
+    },
+    // ====== 住院信息 ======
+    {
+      key: 'admissionInfo', label: '住院信息', section: '住院信息',
+      source: 'his', required: true, inputType: 'static',
+      staticText: '住院号：ZY20260001，入院日期：2024-01-15，出院日期：2024-01-25，住院天数：10天。',
+    },
+    {
+      key: 'admissionDept', label: '入院科室', section: '住院信息',
+      source: 'his', required: true, inputType: 'options',
+      options: [
+        { value: 'cardiology', label: '心血管内科', render: '心血管内科' },
+        { value: 'neurology', label: '神经内科', render: '神经内科' },
+        { value: 'general_surgery', label: '普通外科', render: '普通外科' },
+        { value: 'orthopedics', label: '骨科', render: '骨科' },
+      ],
+      default: 'cardiology',
+    },
+    {
+      key: 'dischargeDept', label: '出院科室', section: '住院信息',
+      source: 'his', required: true, inputType: 'options',
+      options: [
+        { value: 'cardiology', label: '心血管内科', render: '心血管内科' },
+        { value: 'neurology', label: '神经内科', render: '神经内科' },
+        { value: 'general_surgery', label: '普通外科', render: '普通外科' },
+        { value: 'orthopedics', label: '骨科', render: '骨科' },
+      ],
+      default: 'cardiology',
+    },
+    // ====== 诊断信息 ======
+    {
+      key: 'primaryDiagnosis', label: '主要诊断', section: '诊断信息',
+      source: 'ai', required: true, inputType: 'icd',
+    },
+    {
+      key: 'otherDiagnoses', label: '其他诊断', section: '诊断信息',
+      source: 'ai', required: false, inputType: 'icd',
+    },
+    {
+      key: 'hospitalInfection', label: '医院感染', section: '诊断信息',
+      source: 'manual', required: false, inputType: 'text',
+      placeholder: '如有医院感染请填写',
+    },
+    // ====== 手术/操作信息 ======
+    {
+      key: 'operations', label: '手术/操作', section: '手术信息',
+      source: 'his', required: false, inputType: 'static',
+      staticText: '手术日期：2024-01-20，手术名称：冠状动脉造影术，术者：何卫东，麻醉方式：局部麻醉。',
+    },
+    // ====== 费用信息 ======
+    {
+      key: 'totalCost', label: '总费用', section: '费用信息',
+      source: 'his', required: true, inputType: 'static',
+      staticText: '总费用：¥45,680.00，药品费：¥12,350.00，检查费：¥8,920.00，治疗费：¥15,680.00，材料费：¥5,230.00，其他：¥3,500.00。',
+    },
+    // ====== 医师签名 ======
+    {
+      key: 'chiefPhysician', label: '主任医师', section: '医师签名',
+      source: 'manual', required: true, inputType: 'text',
+      placeholder: '主任医师签名',
+    },
+    {
+      key: 'attendingPhysician', label: '主治医师', section: '医师签名',
+      source: 'manual', required: true, inputType: 'text',
+      placeholder: '主治医师签名',
+    },
+    {
+      key: 'residentPhysician', label: '住院医师', section: '医师签名',
+      source: 'manual', required: true, inputType: 'text',
+      placeholder: '住院医师签名',
+    },
+    {
+      key: 'coder', label: '编码员', section: '医师签名',
+      source: 'manual', required: false, inputType: 'text',
+      placeholder: '病案编码员签名',
+    },
+    {
+      key: 'qualityControl', label: '质控医师', section: '医师签名',
+      source: 'manual', required: false, inputType: 'text',
+      placeholder: '质控医师签名',
+    },
+  ],
+};
+
 /** 入院记录（DOC001）字段模板 */
 export const admissionTemplate: DocTemplate = {
   docCode: 'DOC001',
@@ -16,7 +116,7 @@ export const admissionTemplate: DocTemplate = {
     {
       key: 'patientInfo', label: '患者基本信息', section: '患者基本信息',
       source: 'his', required: true, inputType: 'static',
-      staticText: '姓名：张三，性别：男，年龄：65岁，床位：1床，住院号：10082，入院诊断：冠状动脉粥样硬化性心脏病。',
+      staticText: '姓名：陈建国，性别：男，年龄：65岁，床位：1201，住院号：ZY20260001，入院诊断：冠状动脉粥样硬化性心脏病。',
     },
     {
       key: 'chiefComplaint', label: '主诉', section: '主诉',
@@ -88,5 +188,6 @@ export const admissionTemplate: DocTemplate = {
 
 /** 按 docCode 索引的模板表（后台下发后由此返回） */
 export const docTemplates: Record<string, DocTemplate> = {
+  DOC000: homepageTemplate,
   DOC001: admissionTemplate,
 };

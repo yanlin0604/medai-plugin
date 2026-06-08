@@ -33,15 +33,15 @@ const v2Fields: Record<string, string> = {
 
 export const admissionVersions: DocVersion[] = [
   {
-    versionNo: 1, docCode: 'DOC001', patientId: '10082',
+    versionNo: 1, docCode: 'DOC001', patientId: 'ZY20260001',
     fields: v1Fields, content: toContent(v1Fields),
-    editor: '李明 主治医师', timestamp: '2026-06-03T09:12:00',
+    editor: '林志远 主治医师', timestamp: '2026-06-03T09:12:00',
     changeSummary: '首次成稿提交（要素待完善）',
   },
   {
-    versionNo: 2, docCode: 'DOC001', patientId: '10082',
+    versionNo: 2, docCode: 'DOC001', patientId: 'ZY20260001',
     fields: v2Fields, content: toContent(v2Fields),
-    editor: '李明 主治医师', timestamp: '2026-06-03T15:40:00',
+    editor: '林志远 主治医师', timestamp: '2026-06-03T15:40:00',
     changeSummary: '补充主诉加重情况、既往用药细节与体格检查，新增心梗诊断',
   },
 ];

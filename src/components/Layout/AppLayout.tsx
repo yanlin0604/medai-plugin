@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import appIcon from '../../../src-tauri/icons/app-icon-64.png';
 import { usePatientStore } from '../../stores/usePatientStore';
+import { useBubbleStore } from '../../stores/useBubbleStore';
 import {
   SearchOutlined,
   ExclamationCircleOutlined,
@@ -28,6 +29,7 @@ import {
   CloseOutlined,
   MinusOutlined,
   BorderOutlined,
+  HomeOutlined,
 } from '@ant-design/icons';
 import { message, Modal } from 'antd';
 import {
@@ -39,9 +41,12 @@ import {
   searchDocs,
 } from '../../config/docRegistry';
 import { getActivePatient, getHostSession, HostSession } from '../../services/emsBridge';
+import { collapseAssistantWindow } from '../../services/windowMode';
+import ClipboardWritebackAssistant from '../clinical/ClipboardWritebackAssistant';
 
 // 文书最近更新状态（TODO: 由宿主病历系统文书完成状态联动）
 const docStatus: Record<string, string> = {
+  DOC000: '最后更新: 出院时',
   DOC001: '最后更新: 3天前',
   DOC002: '最后更新: 10分钟前',
   DOC003: '最后更新: 1小时前',
@@ -54,6 +59,7 @@ const docStatus: Record<string, string> = {
 const renderIcon = (iconName: string) => {
   const props = { className: 'text-lg text-slate-500' };
   switch (iconName) {
+    case 'HomeOutlined': return <HomeOutlined {...props} />;
     case 'ImportOutlined': return <ImportOutlined {...props} />;
     case 'FileTextOutlined': return <FileTextOutlined {...props} />;
     case 'ProfileOutlined': return <ProfileOutlined {...props} />;
@@ -103,6 +109,13 @@ const isTauri = typeof window !== 'undefined' && window.__TAURI_INTERNALS__;
 
 // 无边框窗口自定义标题栏（拖拽 + 最小化/最大化/关闭）
 const WindowTitleBar = () => {
+  const collapse = useBubbleStore((state) => state.collapse);
+
+  const handleCollapseToBubble = () => {
+    collapse();
+    void collapseAssistantWindow();
+  };
+
   const handleMinimize = () => {
     if (isTauri) getCurrentWindow().minimize();
   };
@@ -135,6 +148,16 @@ const WindowTitleBar = () => {
       </div>
 
       <div className="flex items-center gap-1 -mr-2 text-white/80 relative z-10">
+        <button
+          type="button"
+          data-tauri-drag-region="false"
+          onClick={handleCollapseToBubble}
+          className="w-8 h-8 rounded-md hover:bg-white/10 hover:text-white transition-colors flex items-center justify-center"
+          aria-label="收起为气泡"
+          title="收起为气泡"
+        >
+          <SwapOutlined className="text-xs" />
+        </button>
         <button
           type="button"
           data-tauri-drag-region="false"
@@ -236,7 +259,6 @@ export default function AppLayout() {
     }
     selectDoc(doc);
     navigate(`/doc/${doc.code}`);
-    message.success(`已进入「${PARADIGMS[doc.paradigm].name}」工作区：${doc.name}`);
   };
 
   // 检索（中文名 + 拼音首字母）
@@ -247,9 +269,10 @@ export default function AppLayout() {
   const isSubPage = location.pathname !== '/';
   if (isSubPage) {
     return (
-      <div className="h-screen w-screen bg-[#F8FAFC] overflow-hidden flex flex-col font-sans select-none">
+      <div className="h-screen w-screen bg-[#F8FAFC] overflow-hidden flex flex-col font-sans select-none relative">
         <WindowTitleBar />
         <Outlet />
+        <ClipboardWritebackAssistant />
       </div>
     );
   }
@@ -471,6 +494,7 @@ export default function AppLayout() {
       >
         <AudioOutlined />
       </button>
+      <ClipboardWritebackAssistant />
     </div>
   );
 }
