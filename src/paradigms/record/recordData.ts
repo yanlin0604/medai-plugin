@@ -28,6 +28,8 @@ export interface RecordConfig {
   draftLabel: string;
   draft: string;
   writebackLabel: string;
+  /** 口述转写默认并入的段落 key */
+  dictationAppendSectionKey?: string;
 }
 
 // ==================== 手术记录（DOC013）标杆数据 ====================
@@ -64,7 +66,8 @@ const operationConfig: RecordConfig = {
   ],
   draftLabel: '✨ AI 自动生成的术后病历草稿 (主客观数据拼装)',
   draft: '患者于14:00送入手术室，予以2%利多卡因行右腹股沟区局部浸润麻醉。麻醉成功后，于14:15常规行右股动脉穿刺，置管入鞘成功。送入造影导管，术中行冠脉造影示左前降支中段局限性狭窄约70%，术中追加肝素钠3000U抗凝。引入2.5*15mm球囊至前降支狭窄处，加压至10atm进行扩张。复查造影示前降支残余狭窄小于10%，前向血流 TIMI 3级，无内膜夹层。于15:45安全拔出鞘管，右股动脉穿刺处予以压迫止血并加压包扎，患者安返病房。',
-  writebackLabel: '一键回写 EMR 手术记录 (F8)',
+  writebackLabel: '提交手术记录',
+  dictationAppendSectionKey: 'doctorNarrative',
 };
 
 // ==================== 其他范式二文书（首程/抢救/会诊）通用兜底 ====================
@@ -98,8 +101,9 @@ function buildFallback(doc: DocDefinition, p: Patient): RecordConfig {
       { name: '高血压', code: 'I10', confidence: 62 },
     ],
     draftLabel: `✨ AI 自动生成的${doc.name}草稿 (主客观数据拼装)`,
-    draft: `（AI 已基于客观医嘱时间轴与医生口述，交叉拼装生成 ${p.name} 的${doc.name}草稿，医生可在此微调后一键回写。）`,
-    writebackLabel: `一键回写 EMR ${doc.name} (F8)`,
+    draft: `（AI 已基于客观医嘱时间轴与医生口述，交叉拼装生成 ${p.name} 的${doc.name}草稿，医生可在此微调后提交。）`,
+    writebackLabel: `提交${doc.name}`,
+    dictationAppendSectionKey: 'doctorNarrative',
   };
 }
 

@@ -1,10 +1,15 @@
+import { useMemo } from 'react';
 import { ParadigmProps } from './types';
-import ParadigmPlaceholder from './ParadigmPlaceholder';
+import { usePatientStore } from '../stores/usePatientStore';
+import DeathRecordFlow from './special/DeathRecordFlow';
+import { buildDeathRecordConfig } from './special/deathData';
 
 /**
  * 特殊·AI 能力边界（死亡记录）
- * TODO: 依据 doc_011_death.html 实现 AI 边界警告横幅 + 人工锁定撰写 + 强制审核
+ * 死亡记录采用人工主导工作区：AI 仅做格式整理，不生成核心临床结论。
  */
 export default function SpecialParadigm({ doc }: ParadigmProps) {
-  return <ParadigmPlaceholder doc={doc} />;
+  const currentPatient = usePatientStore((state) => state.currentPatient);
+  const config = useMemo(() => buildDeathRecordConfig(doc, currentPatient), [currentPatient, doc]);
+  return <DeathRecordFlow doc={doc} config={config} />;
 }

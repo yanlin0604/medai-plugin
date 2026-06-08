@@ -10,22 +10,23 @@ import {
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
-import SectionEditor from '../../components/clinical/SectionEditor';
+import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
+import type { DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
 import { useHotkey } from '../../hooks/useHotkey';
+import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { usePatientStore } from '../../stores/usePatientStore';
 import { admissionPatient } from '../../services/samples/admission';
 import { getDocTemplate, recommendIcd, renderDocument } from '../../services/clinicalService';
 import { saveDraft, loadDraft } from '../../services/draftService';
-import { appendVersion, getDocVersions } from '../../services/versionService';
-import { submitDocument, watchPatientConsistency } from '../../services/emsBridge';
 import type {
   DocFieldDef,
   DocTemplate,
   FieldValue,
   IcdItem,
+  ClinicalSection,
   PatientBrief,
 } from '../../services/types';
 
@@ -119,15 +120,26 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const [sectionEdits, setSectionEdits] = useState<Record<string, string>>({});
   const [resetKeys, setResetKeys] = useState<Record<string, number>>({});
   const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
-  const [locked, setLocked] = useState(false);
-  const [mismatch, setMismatch] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [versionCount, setVersionCount] = useState(0);
   const [dictating, setDictating] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitText, setSubmitText] = useState('');
-  const [submitProgress, setSubmitProgress] = useState(0);
   const hydratedRef = useRef(false);
+  const {
+    locked,
+    setLocked,
+    mismatch,
+    historyOpen,
+    openHistory,
+    closeHistory,
+    versionCount,
+    submitting,
+    submitText,
+    submitProgress,
+    submit,
+  } = useDocumentSubmit({
+    docCode: doc.code,
+    docName: doc.name,
+    patientId: patient.admissionNo,
+    editor: `${doctor} 医师`,
+  });
 
   useEffect(() => {
     let alive = true;
@@ -174,15 +186,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     };
   }, [diagnosis, doc.code, patient.admissionNo, patient.age, patient.gender, patient.name]);
 
-  useEffect(() => {
-    const stop = watchPatientConsistency(patient.admissionNo, (c) => setMismatch(!c.consistent));
-    return stop;
-  }, [patient.admissionNo]);
-
-  useEffect(() => {
-    setVersionCount(getDocVersions(doc.code, patient.admissionNo).length);
-  }, [doc.code, patient.admissionNo, locked]);
-
   const rendered = useMemo(() => (template ? renderDocument(template, values) : null), [template, values]);
 
   const finalSections = useMemo(
@@ -198,6 +201,39 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const visibleSections = useMemo(
     () => finalSections.filter((section) => !HIDDEN_SECTIONS.has(section.section)),
     [finalSections],
+  );
+
+  const editableSections = useMemo<ClinicalSection[]>(
+    () =>
+      visibleSections.map((section) => ({
+        key: section.section,
+        title: section.section,
+        text: section.text,
+        fieldKey: section.section,
+        editable: true,
+      })),
+    [visibleSections],
+  );
+
+  const metaRows = useMemo<DocumentPaperMetaCell[][]>(
+    () => [
+      [
+        { label: '姓名', value: patient.name },
+        { label: '性别', value: patient.gender },
+        { label: '年龄', value: patient.age },
+      ],
+      [
+        { label: '婚姻', value: '已婚' },
+        { label: '职业', value: '职员' },
+        { label: '出生地', value: '广东' },
+      ],
+      [
+        { label: '入院日期', value: admissionDate },
+        { label: '入院科室', value: deptName },
+        { label: '记录医师', value: doctor },
+      ],
+    ],
+    [admissionDate, deptName, doctor, patient.age, patient.gender, patient.name],
   );
 
   const fieldsForWriteback = useMemo(
@@ -305,62 +341,18 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   };
 
   const doSubmit = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    setSubmitProgress(35);
-    setSubmitText('提交中');
-
-    try {
-      const res = await submitDocument({
-        docCode: doc.code,
-        docName: doc.name,
-        patientId: patient.admissionNo,
-        fields: finalFields,
-        fieldLabels,
-        fieldOrder,
-        content: finalContent,
-      });
-      if (!res.ok) {
-        setSubmitProgress(100);
-        setSubmitText('提交失败');
-        message.error(res.message);
-        return;
-      }
-      setSubmitProgress(90);
-      setSubmitText('生成版本');
-      const now = new Date().toISOString();
-      setLocked(true);
-      saveDraft({
-        docCode: doc.code,
-        patientId: patient.admissionNo,
-        values: {
-          ...values,
-          [SECTION_EDITS_KEY]: JSON.stringify(sectionEdits),
-        },
-        content: finalContent,
-        step: 1,
-        status: 'submitted',
-        updatedAt: now,
-      });
-      const version = appendVersion({
-        docCode: doc.code,
-        patientId: patient.admissionNo,
-        content: finalContent,
-        fields: finalFields,
-        fieldLabels,
-        editor: `${doctor} 医师`,
-        timestamp: now,
-        changeSummary: '医生确认提交入院记录',
-      });
-      setVersionCount((count) => Math.max(count + 1, version.versionNo));
-      setSubmitProgress(100);
-      setSubmitText('已提交');
-      message.success(res.message);
-    } finally {
-      setSubmitting(false);
-      setSubmitProgress(0);
-      setSubmitText('');
-    }
+    await submit({
+      fields: finalFields,
+      fieldLabels,
+      fieldOrder,
+      content: finalContent,
+      changeSummary: '医生确认提交入院记录',
+      draftValues: {
+        ...values,
+        [SECTION_EDITS_KEY]: JSON.stringify(sectionEdits),
+      },
+      draftStep: 1,
+    });
   };
 
   const handleSubmit = () => {
@@ -415,7 +407,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
             message.info('提交后才会生成历史版本。');
             return;
           }
-          setHistoryOpen(true);
+          openHistory();
         },
         '历史版本与修改记录',
       )}
@@ -477,40 +469,36 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
             </div>
           ) : (
             <div className="p-4 space-y-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-bold text-slate-700">编辑</span>
-                <div className="flex items-center gap-2">
-                  {!locked && renderActionButton(
-                    dictating ? <><StopOutlined />结束并填入</> : <><AudioOutlined />口述病史</>,
-                    handleDictation,
-                    dictating ? '结束口述并填入主诉、现病史' : '开始口述病史',
-                  )}
-                  {renderActionButton(
-                    <><ExpandAltOutlined />通读全文</>,
-                    () => setPreviewMode('read'),
-                  )}
-                </div>
-              </div>
               {dictating && (
                 <div className="rounded-md border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-semibold text-[#1E3A8A]">
                   正在聆听口述病史，说完点击“结束并填入”。
                 </div>
               )}
-              <div className="space-y-3">
-                {visibleSections.map((section) => (
-                  <SectionEditor
-                    key={`${section.section}-${resetKeys[section.section] ?? 0}`}
-                    section={section.section}
-                    text={section.text}
-                    edited={section.edited}
-                    locked={locked}
-                    density="comfortable"
-                    onChange={(text) => updateSection(section.section, text)}
-                    onReset={() => resetSection(section.section)}
-                    optimize={optimizeText}
-                  />
-                ))}
-              </div>
+              <EditableDocumentPaper
+                docName="入院记录"
+                patient={patient}
+                sections={editableSections}
+                metaRows={metaRows}
+                actions={(
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {!locked && renderActionButton(
+                      dictating ? <><StopOutlined />结束并填入</> : <><AudioOutlined />口述病史</>,
+                      handleDictation,
+                      dictating ? '结束口述并填入主诉、现病史' : '开始口述病史',
+                    )}
+                    {renderActionButton(
+                      <><ExpandAltOutlined />通读全文</>,
+                      () => setPreviewMode('read'),
+                    )}
+                  </div>
+                )}
+                locked={locked}
+                sectionEdits={sectionEdits}
+                resetKeys={resetKeys}
+                onChange={updateSection}
+                onReset={resetSection}
+                optimize={optimizeText}
+              />
             </div>
           )}
         </div>
@@ -528,7 +516,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           }}
         />
 
-        <VersionHistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} docCode={doc.code} patientId={patient.admissionNo} />
+        <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={patient.admissionNo} />
       </div>
     </ParadigmShell>
   );

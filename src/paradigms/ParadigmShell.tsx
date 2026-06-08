@@ -6,7 +6,7 @@ import { DocDefinition, PARADIGMS } from '../config/docRegistry';
 
 interface ParadigmShellProps {
   doc: DocDefinition;
-  /** 右上角操作区（如一键回写按钮） */
+  /** 右上角操作区（如提交、历史等操作） */
   actions?: ReactNode;
   /** 是否显示范式标签 */
   showParadigmBadge?: boolean;

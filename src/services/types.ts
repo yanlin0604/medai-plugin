@@ -74,7 +74,7 @@ export interface PatientConsistency {
 // ==================== 文书模板配置化（后台下发字段 schema） ====================
 
 /** 字段数据来源（统一来源标签语义，替代散落的"口述提取/待确认/待补充"） */
-export type FieldSource = 'his' | 'asr' | 'lis' | 'pacs' | 'manual' | 'ai' | 'option';
+export type FieldSource = 'his' | 'emr' | 'asr' | 'lis' | 'pacs' | 'manual' | 'ai' | 'option';
 
 /** 字段录入形态 */
 export type FieldInputType = 'static' | 'options' | 'text' | 'icd';
@@ -157,7 +157,7 @@ export interface DocDraft {
   updatedAt: string;
 }
 
-/** 文书版本快照（每次提交至病历系统产生一版） */
+/** 文书版本快照（每次提交后产生一版） */
 export interface DocVersion {
   versionNo: number;
   docCode: string;
@@ -182,4 +182,89 @@ export interface SectionDiff {
   before: string;
   after: string;
   changed: boolean;
+}
+
+// ==================== 通用文书工作流（多文书复用） ====================
+
+/** 纸质预览与段落编辑共用的病历段落 */
+export interface ClinicalSection {
+  /** 前端稳定标识，同一文书内唯一 */
+  key: string;
+  /** 展示段落名，如「主诉」「诊疗经过」 */
+  title: string;
+  /** 当前段落正文 */
+  text: string;
+  /** 提交至宿主病历系统时使用的字段 key */
+  fieldKey: string;
+  /** 是否允许医生编辑 */
+  editable: boolean;
+  source?: FieldSource;
+  required?: boolean;
+}
+
+/** 段落转换为提交载荷前的中间快照 */
+export interface DocumentSubmitSnapshot {
+  fields: Record<string, string>;
+  fieldLabels: Record<string, string>;
+  fieldOrder: string[];
+  content: string;
+  changeSummary: string;
+}
+
+/** 查房工作台患者条目，床号仅用于辅助展示，不作为唯一患者标识 */
+export interface RoundPatient {
+  id: string;
+  name: string;
+  gender: string;
+  age: string;
+  bedNo: string;
+  diagnosis: string;
+  targetDocCodes: Array<'DOC003' | 'DOC004'>;
+  identifiers: {
+    admissionNo: string;
+    displayName: string;
+  };
+}
+
+/** 查房录音片段，必须绑定患者后才能参与草稿生成 */
+export interface RoundVoiceSegment {
+  id: string;
+  patientId: string | null;
+  targetDocCode: 'DOC003' | 'DOC004';
+  startedAt: string;
+  endedAt?: string;
+  originalText: string;
+  revisedText: string;
+  status: 'draft' | 'confirmed';
+  speakerRole?: '上级医师' | '住院医师' | '患者' | '家属';
+}
+
+/** 会议讨论录音/转写片段，按发言人与议题归属 */
+export interface MeetingVoiceSegment {
+  id: string;
+  speakerName: string;
+  speakerRole: string;
+  topicKey: string;
+  originalText: string;
+  revisedText: string;
+  status: 'draft' | 'confirmed';
+}
+
+/** 会议型文书配置 */
+export interface MeetingConfig {
+  docCode: 'DOC005' | 'DOC012';
+  title: string;
+  patientId: string;
+  participants: Array<{ name: string; role: string }>;
+  sections: ClinicalSection[];
+  conclusionRequiresManualConfirm: boolean;
+}
+
+/** 死亡记录人工主导工作态 */
+export interface DeathRecordState {
+  patientId: string;
+  fields: Record<string, string>;
+  sections: ClinicalSection[];
+  missingItems: string[];
+  seniorReviewConfirmed: boolean;
 }

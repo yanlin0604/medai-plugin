@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { message } from 'antd';
 import { ThunderboltOutlined, UndoOutlined } from '@ant-design/icons';
 import { suggestTerms } from '../../services/clinicalService';
+
+export type SectionEditorVariant = 'card' | 'paper';
 
 interface Props {
   /** 段落名（如 主诉/现病史） */
@@ -15,6 +17,7 @@ interface Props {
   readOnlyHint?: string;
   sectionSuffix?: ReactNode;
   density?: 'compact' | 'comfortable';
+  variant?: SectionEditorVariant;
   /** 编辑回调：上提该段最新纯文本 */
   onChange: (text: string) => void;
   /** 重置本段（撤销手动改写，回到要素渲染值；由父级经 key remount 实现） */
@@ -44,7 +47,19 @@ const EMPTY_SUG: SugState = { visible: false, items: [], index: 0, top: 0, left:
  * 术语联想（IME 安全）：中文输入法组字中(composing)不触发，组字完成或英文输入后防抖联想；
  * 插入用 execCommand 替换光标前缀，不重设 innerHTML，保护光标。
  */
-export default function SectionEditor({ section, text, edited, locked, readOnlyHint, sectionSuffix, density = 'compact', onChange, onReset, optimize }: Props) {
+export default function SectionEditor({
+  section,
+  text,
+  edited,
+  locked,
+  readOnlyHint,
+  sectionSuffix,
+  density = 'compact',
+  variant = 'card',
+  onChange,
+  onReset,
+  optimize,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const editedRef = useRef(false);
   const composingRef = useRef(false);
@@ -56,10 +71,38 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
   const [diff, setDiff] = useState({ visible: false, before: '', after: '' });
   const [sug, setSug] = useState<SugState>(EMPTY_SUG);
   const comfortable = density === 'comfortable';
-  const titleClass = comfortable ? 'text-sm' : 'text-[11px]';
+  const paper = variant === 'paper';
+  const titleClass = paper ? 'text-sm' : comfortable ? 'text-sm' : 'text-[11px]';
   const badgeClass = comfortable ? 'text-[11px]' : 'text-[9px]';
   const actionClass = comfortable ? 'text-xs' : 'text-[10px]';
-  const editorClass = comfortable ? 'min-h-[96px] text-sm leading-7 px-3 py-2.5' : 'min-h-[52px] text-[11px] leading-relaxed px-2.5 py-1.5';
+  const editorClass = paper
+    ? comfortable
+      ? 'min-h-[88px] text-sm leading-7 px-3 py-2.5'
+      : 'min-h-[48px] text-[11px] leading-relaxed px-2.5 py-1.5'
+    : comfortable
+      ? 'min-h-[96px] text-sm leading-7 px-3 py-2.5'
+      : 'min-h-[52px] text-[11px] leading-relaxed px-2.5 py-1.5';
+  const rootClass = paper
+    ? 'relative py-4 first:pt-0 last:pb-0'
+    : 'relative bg-white border border-slate-200 rounded-lg p-2.5 space-y-1.5 shadow-sm';
+  const headerClass = paper ? 'mb-1.5 flex flex-wrap items-start justify-between gap-2' : 'flex justify-between items-center gap-2';
+  const titleWrapClass = paper ? 'flex min-w-0 flex-wrap items-center gap-1.5' : 'flex items-center gap-1.5 min-w-0';
+  const titleTextClass = paper
+    ? `${titleClass} font-bold text-slate-900`
+    : `${titleClass} font-bold text-slate-700 truncate`;
+  const actionWrapClass = paper ? 'flex shrink-0 flex-wrap items-center justify-end gap-1.5' : 'flex items-center gap-2 shrink-0';
+  const polishButtonClass = paper
+    ? `inline-flex items-center gap-1 ${actionClass} font-semibold text-[#1E3A8A] hover:text-[#172554] hover:bg-[#EFF6FF] rounded px-1.5 py-0.5 transition-colors`
+    : `inline-flex items-center gap-1 ${actionClass} font-bold text-[#6D28D9] bg-[#F5F3FF] border border-[#DDD6FE] hover:bg-[#EDE9FE] rounded px-2 py-1 transition-colors`;
+  const resetButtonClass = paper
+    ? `inline-flex items-center gap-1 ${actionClass} text-slate-400 hover:text-[#854D0E] hover:bg-amber-50 rounded px-1.5 py-0.5`
+    : `inline-flex items-center gap-1 ${actionClass} text-slate-400 hover:text-[#854D0E]`;
+  const editableClass = paper
+    ? `${editorClass} text-slate-700 outline-none bg-white/70 border-l-2 border-transparent rounded-sm whitespace-pre-wrap transition-colors hover:border-l-slate-200 focus:border-l-[#1E3A8A] focus:bg-[#F8FAFC] focus:ring-1 focus:ring-[#93C5FD]`
+    : `${editorClass} text-slate-700 outline-none bg-white border border-slate-200 rounded-md focus:border-[#1E3A8A] transition-colors`;
+  const diffClass = paper
+    ? 'mt-2 bg-[#F8FAFC] border border-[#BFDBFE] rounded-md p-2.5 text-[11.5px] animate-pop-up'
+    : 'mt-2 bg-[#F0F5FF] border-[1.5px] border-[#93C5FD] rounded-lg p-2.5 text-[11.5px] animate-pop-up';
 
   // 外部 text 变化（要素变更）：仅未本地编辑时同步 DOM，保护正在编辑的内容
   useEffect(() => {
@@ -113,6 +156,17 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
     editedRef.current = true;
     onChange(ref.current?.innerText ?? '');
     if (composingRef.current) return; // 中文输入法组字中不联想，待 compositionend
+    scheduleSuggest();
+  };
+
+  const handlePaste = (e: ReactClipboardEvent<HTMLDivElement>) => {
+    if (locked) return;
+    const plainText = e.clipboardData.getData('text/plain');
+    if (!plainText) return;
+    e.preventDefault();
+    document.execCommand('insertText', false, plainText);
+    editedRef.current = true;
+    onChange(ref.current?.innerText ?? '');
     scheduleSuggest();
   };
 
@@ -208,19 +262,19 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
   };
 
   return (
-    <div className="relative bg-white border border-slate-200 rounded-lg p-2.5 space-y-1.5 shadow-sm">
-      <div className="flex justify-between items-center gap-2">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className={`${titleClass} font-bold text-slate-700 truncate`}>{section}</span>
+    <div className={rootClass}>
+      <div className={headerClass}>
+        <div className={titleWrapClass}>
+          <span className={titleTextClass}>{section}</span>
           {sectionSuffix}
           {readOnlyHint && <span className={`${badgeClass} font-normal px-1 rounded text-[#166534] bg-[#F0FDF4] border border-[#BBF7D0]`}>{readOnlyHint}</span>}
         </div>
         {!locked && (
-          <div className="flex items-center gap-2 shrink-0">
+          <div className={actionWrapClass}>
           <button
             onClick={polishSection}
             title="对整段生成润色建议，采纳后才替换正文"
-            className={`inline-flex items-center gap-1 ${actionClass} font-bold text-[#6D28D9] bg-[#F5F3FF] border border-[#DDD6FE] hover:bg-[#EDE9FE] rounded px-2 py-1 transition-colors`}
+            className={polishButtonClass}
           >
             <ThunderboltOutlined />
             AI润色
@@ -229,7 +283,7 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
               <button
                 onClick={onReset}
                 title="撤销手动修改，按要素重新生成本段"
-                className={`inline-flex items-center gap-1 ${actionClass} text-slate-400 hover:text-[#854D0E]`}
+                className={resetButtonClass}
               >
                 <UndoOutlined />
                 重置本段
@@ -245,6 +299,7 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
         onMouseUp={handleMouseUp}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
         onCompositionStart={() => {
           composingRef.current = true;
         }}
@@ -254,13 +309,13 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
         }}
         onBlur={() => setTimeout(closeSug, 150)}
         dangerouslySetInnerHTML={{ __html: html }}
-        className={`${editorClass} text-slate-700 outline-none bg-white border border-slate-200 rounded-md focus:border-[#1E3A8A] transition-colors`}
+        className={editableClass}
       />
 
       {/* 医疗术语输入联想 */}
       {sug.visible && !locked && (
         <div
-          className="absolute z-50 bg-white border border-slate-200 rounded-md shadow-lg text-[11px] overflow-hidden min-w-[150px]"
+          className="absolute z-50 max-w-[260px] bg-white border border-slate-200 rounded-md shadow-lg text-[11px] overflow-hidden min-w-[150px]"
           style={{ top: sug.top, left: sug.left }}
         >
           {sug.items.map((it, i) => (
@@ -270,7 +325,7 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
                 e.preventDefault();
                 acceptSuggest(it);
               }}
-              className={`px-2.5 py-1.5 cursor-pointer whitespace-nowrap ${
+              className={`px-2.5 py-1.5 cursor-pointer break-words ${
                 i === sug.index ? 'bg-[#F0F5FF] text-[#1E3A8A] font-semibold' : 'text-slate-600 hover:bg-slate-50'
               }`}
             >
@@ -294,7 +349,7 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
 
       {/* 划词优化差异对比 */}
       {diff.visible && (
-        <div className="mt-2 bg-[#F0F5FF] border-[1.5px] border-[#93C5FD] rounded-lg p-2.5 text-[11.5px] animate-pop-up">
+        <div className={diffClass}>
           <div className="font-bold text-[#1E3A8A]">划词优化对比</div>
           <div className="leading-relaxed mt-1 space-y-0.5">
             <div><b>修改前：</b><span className="bg-[#FEE2E2] text-[#991B1B] line-through px-1">{diff.before}</span></div>

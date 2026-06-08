@@ -8,16 +8,15 @@ import {
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
-import SectionEditor from '../../components/clinical/SectionEditor';
+import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
+import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { usePatientStore } from '../../stores/usePatientStore';
 import { saveDraft, loadDraft } from '../../services/draftService';
-import { appendVersion, getDocVersions } from '../../services/versionService';
-import { submitDocument, watchPatientConsistency } from '../../services/emsBridge';
 import { buildDischargeCase, type DischargeSection } from '../../services/samples/discharge';
-import type { FieldValue, IcdItem } from '../../services/types';
+import type { ClinicalSection, FieldValue, IcdItem, PatientBrief } from '../../services/types';
 
 type PreviewMode = 'read' | 'edit';
 
@@ -31,21 +30,43 @@ function optimizeText(text: string, mode: string): string {
 export default function DischargeFlow({ doc }: ParadigmProps) {
   const { currentPatient } = usePatientStore();
   const patient = currentPatient!;
+  const patientBrief = useMemo<PatientBrief>(
+    () => ({
+      name: patient.name,
+      gender: patient.gender,
+      age: patient.age,
+      bed: patient.bedNo,
+      admissionNo: patient.id,
+      diagnosis: patient.diagnosis,
+    }),
+    [patient.age, patient.bedNo, patient.diagnosis, patient.gender, patient.id, patient.name],
+  );
   const dischargeCase = useMemo(() => buildDischargeCase(patient), [patient]);
   const baseSections = dischargeCase.sections;
 
   const [sections, setSections] = useState<DischargeSection[]>(baseSections);
   const [acceptedDiagnoses, setAcceptedDiagnoses] = useState<IcdItem[]>([]);
   const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
-  const [locked, setLocked] = useState(false);
-  const [mismatch, setMismatch] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [versionCount, setVersionCount] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitText, setSubmitText] = useState('');
-  const [submitProgress, setSubmitProgress] = useState(0);
   const hydratedRef = useRef(false);
   const draftRestoredRef = useRef(false);
+  const {
+    locked,
+    setLocked,
+    mismatch,
+    historyOpen,
+    openHistory,
+    closeHistory,
+    versionCount,
+    submitting,
+    submitText,
+    submitProgress,
+    submit,
+  } = useDocumentSubmit({
+    docCode: doc.code,
+    docName: doc.name,
+    patientId: patient.id,
+    editor: '林志远 主治医师',
+  });
 
   useEffect(() => {
     if (draftRestoredRef.current) return;
@@ -63,15 +84,6 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     hydratedRef.current = true;
   }, [baseSections, doc.code, patient.id]);
 
-  useEffect(() => {
-    const stop = watchPatientConsistency(patient.id, (c) => setMismatch(!c.consistent));
-    return stop;
-  }, [patient.id]);
-
-  useEffect(() => {
-    setVersionCount(getDocVersions(doc.code, patient.id).length);
-  }, [doc.code, patient.id, locked]);
-
   // 字段映射：DischargeFlow 中文段落名 -> BS DOC010 字段 key
   const FIELD_MAPPING: Record<string, string> = {
     '患者基本信息': 'patientInfo',
@@ -84,6 +96,28 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     '出院情况': 'dischargeCondition',
     '出院医嘱': 'dischargeOrders',
   };
+
+  const editableSections = useMemo<ClinicalSection[]>(
+    () =>
+      sections.map((s) => ({
+        key: s.section,
+        title: s.section,
+        text: s.text,
+        fieldKey: FIELD_MAPPING[s.section] || s.section,
+        editable: s.section !== '患者基本信息',
+      })),
+    [sections],
+  );
+
+  const editedSectionMap = useMemo<Record<string, string>>(
+    () =>
+      Object.fromEntries(
+        sections
+          .filter((s) => baseSections.find((base) => base.section === s.section)?.text !== s.text)
+          .map((s) => [s.section, s.text]),
+      ),
+    [baseSections, sections],
+  );
 
   const finalFields = useMemo(() => {
     const mapped: Record<string, string> = {};
@@ -131,46 +165,16 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   };
 
   const doSubmit = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    setSubmitProgress(35);
-    setSubmitText('提交中');
-
-    try {
-      const res = await submitDocument({ docCode: doc.code, docName: doc.name, patientId: patient.id, fields: finalFields, content: finalContent });
-      if (!res.ok) {
-        setSubmitProgress(100);
-        setSubmitText('提交失败');
-        message.error(res.message);
-        return;
-      }
-
-      setSubmitProgress(90);
-      setSubmitText('生成版本');
-      const now = new Date().toISOString();
-      const values: Record<string, FieldValue> = Object.fromEntries(sections.map((s) => [s.section, s.text]));
-      values.dischargeDiagnoses = acceptedDiagnoses;
-      saveDraft({ docCode: doc.code, patientId: patient.id, values, content: finalContent, step: 1, status: 'submitted', updatedAt: now });
-      const version = appendVersion({
-        docCode: doc.code,
-        patientId: patient.id,
-        content: finalContent,
-        fields: finalFields,
-        fieldLabels,
-        editor: '林志远 主治医师',
-        timestamp: now,
-        changeSummary: '医生确认提交出院记录',
-      });
-      setVersionCount((count) => Math.max(count + 1, version.versionNo));
-      setLocked(true);
-      setSubmitProgress(100);
-      setSubmitText('已提交');
-      message.success(res.message);
-    } finally {
-      setSubmitting(false);
-      setSubmitProgress(0);
-      setSubmitText('');
-    }
+    const values: Record<string, FieldValue> = Object.fromEntries(sections.map((s) => [s.section, s.text]));
+    values.dischargeDiagnoses = acceptedDiagnoses;
+    await submit({
+      fields: finalFields,
+      fieldLabels,
+      content: finalContent,
+      changeSummary: '医生确认提交出院记录',
+      draftValues: values,
+      draftStep: 1,
+    });
   };
 
   const handleSubmit = () => {
@@ -187,7 +191,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
       content: (
         <div className="text-[12px] leading-relaxed">
           <p>
-            患者 <b>{patient.name}</b> 的<b>{doc.name}</b>将提交至病历系统。
+            患者 <b>{patient.name}</b> 的<b>{doc.name}</b>将提交。
           </p>
           <p className="mt-1.5 text-amber-600">正文已由医生核对，提交后生成历史版本。</p>
         </div>
@@ -220,7 +224,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
             message.info('提交后才会生成历史版本。');
             return;
           }
-          setHistoryOpen(true);
+          openHistory();
         },
         '历史版本与修改记录',
       )}
@@ -290,32 +294,20 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
             </div>
           ) : (
             <div className="p-4 space-y-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-bold text-slate-700">编辑</span>
-                {renderActionButton(
+              <EditableDocumentPaper
+                docName="出院记录"
+                patient={patientBrief}
+                sections={editableSections}
+                actions={renderActionButton(
                   <><ExpandAltOutlined />通读全文</>,
                   () => setPreviewMode('read'),
                 )}
-              </div>
-              <div className="space-y-3">
-                {sections.map((s) => {
-                  const base = baseSections.find((b) => b.section === s.section);
-                  const edited = !!base && base.text !== s.text;
-                  return (
-                    <SectionEditor
-                      key={s.section}
-                      section={s.section}
-                      text={s.text}
-                      edited={edited}
-                      locked={locked || s.section === '患者基本信息'}
-                      density="comfortable"
-                      onChange={(text) => updateSection(s.section, text)}
-                      onReset={() => resetSection(s.section)}
-                      optimize={optimizeText}
-                    />
-                  );
-                })}
-              </div>
+                locked={locked}
+                sectionEdits={editedSectionMap}
+                onChange={updateSection}
+                onReset={resetSection}
+                optimize={optimizeText}
+              />
             </div>
           )}
         </div>
@@ -333,7 +325,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
           }}
         />
 
-        <VersionHistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} docCode={doc.code} patientId={patient.id} />
+        <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={patient.id} />
       </div>
     </ParadigmShell>
   );

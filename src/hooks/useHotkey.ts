@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 /**
  * 全局快捷键 hook。用 ref 持有最新 handler，避免依赖数组导致的重复绑定。
- * 主要用于需求"一键回写按钮(F8快捷键)"——范式页按 F8 触发回写。
+ * 主要用于范式页快捷键提交。
  */
 export function useHotkey(targetKey: string, handler: () => void) {
   const ref = useRef(handler);

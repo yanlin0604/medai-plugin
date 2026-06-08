@@ -43,7 +43,7 @@ const shiftConfig: SummaryConfig = {
   },
   historyTitle: 'EMR 历史前序病历静默集成拉取 (近3天)',
   draftLabel: '✨ AI 自动提炼生成的交接班草稿',
-  writebackLabel: '一键回写 EMR 交接班记录 (F8)',
+  writebackLabel: '提交交接班记录',
   multiPatient: true,
   patients: [
     {
@@ -96,7 +96,7 @@ const homepageConfig: SummaryConfig = {
   },
   historyTitle: 'EMR 患者全量信息静默集成拉取',
   draftLabel: '✨ AI 自动生成的病案首页草稿',
-  writebackLabel: '一键回写 EMR 病案首页 (F8)',
+  writebackLabel: '提交病案首页',
   multiPatient: false,
   patients: [
     {
@@ -127,7 +127,7 @@ function buildFallback(doc: DocDefinition, p: Patient): SummaryConfig {
     },
     historyTitle: 'EMR 全量历史病历静默集成拉取',
     draftLabel: `AI 自动汇总生成的${doc.name}草稿`,
-    writebackLabel: `一键回写 EMR ${doc.name} (F8)`,
+    writebackLabel: `提交${doc.name}`,
     multiPatient: false,
     patients: [
       {
@@ -138,7 +138,7 @@ function buildFallback(doc: DocDefinition, p: Patient): SummaryConfig {
           { tag: 'warning', label: '[方案沿革]', text: '已自动提炼住院期间用药与治疗方案的关键调整。' },
           { tag: 'danger', label: '[关注重点]', text: '已标记需在本文书中重点交代的危急值与异常指标。' },
         ],
-        draft: `（AI 已基于 ${p.name} 的全量 EMR 历史自动汇总生成${doc.name}草稿，医生可在此微调后一键回写。）`,
+        draft: `（AI 已基于 ${p.name} 的全量 EMR 历史自动汇总生成${doc.name}草稿，医生可在此微调后提交。）`,
       },
     ],
   };

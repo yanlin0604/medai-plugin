@@ -55,7 +55,7 @@ export default function WritebackBar({
           className="w-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-600 font-bold py-3 rounded-[10px] text-sm flex items-center justify-center gap-2 transition-all"
         >
           <LockOutlined />
-          <span>已提交至病历系统（点击解锁重新编辑）</span>
+          <span>已提交（点击解锁重新编辑）</span>
         </button>
       ) : (
         <button

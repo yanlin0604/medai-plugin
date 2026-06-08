@@ -4,8 +4,8 @@ import { ToolOutlined, CheckCircleOutlined } from '@ant-design/icons';
 
 /** 各范式将实现的关键 UI 组件清单（来自需求"全局交互组件汇总"） */
 const PARADIGM_FEATURES: Record<ParadigmId, string[]> = {
-  summary: ['EMR 历史病历自动拉取标签组', '三维要点提炼（危急/方案调整/待办）', '多患者交接切换选项卡', 'AI 汇总草稿预览', '一键回写 EMR (F8)'],
-  record: ['客观医嘱用药时间轴', '医生口述补录面板（语音转写）', '术后诊断 ICD-10 推荐', 'AI 主客观交叉拼装草稿', '一键回写 EMR (F8)'],
+  summary: ['EMR 历史病历自动拉取标签组', '三维要点提炼（危急/方案调整/待办）', '多患者交接切换选项卡', 'AI 汇总草稿预览', '提交文书'],
+  record: ['客观医嘱用药时间轴', '医生口述补录面板（语音转写）', '术后诊断 ICD-10 推荐', 'AI 主客观交叉拼装草稿', '提交文书'],
   recording: ['连续录音控制台 + 动态波形', '声纹发言人识别卡片', 'PII 隐私脱敏高亮', '关键要素核对', '三级质控气泡', '防串户双向锁熔断'],
   special: ['AI 能力边界警告横幅', '住院经过摘要（AI 仅排版填充）', '死亡原因分析（人工锁定撰写）', '强制上级医师审核'],
 };
@@ -28,7 +28,7 @@ export default function ParadigmPlaceholder({ doc }: { doc: DocDefinition }) {
           </div>
           <h3 className="text-sm font-extrabold text-slate-700 mt-4">HIS「{doc.name}」表单编辑区</h3>
           <p className="text-xs text-slate-400 mt-1.5 max-w-[280px] leading-relaxed">
-            左侧为 HIS 模拟外壳的文书表单，AI 侧边栏生成的内容将通过一键回写注入此处对应字段。
+            左侧为 HIS 模拟外壳的文书表单，AI 侧边栏生成的内容将通过提交操作注入此处对应字段。
           </p>
         </div>
 
