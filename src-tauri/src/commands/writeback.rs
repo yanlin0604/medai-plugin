@@ -1,107 +1,19 @@
 use serde_json::{json, Map, Value};
 use std::{fs, path::PathBuf};
-use writeback_engine::{
-    ClipboardDriver, DocumentPayload, DriverConfig, FieldMapper, PlaywrightDriver, PywinautoDriver,
-    TargetInfo, WritebackDriver, WritebackResult, WritebackScheduler, WritebackStats,
-};
+use writeback_engine::{DocumentPayload, FieldMapper, WritebackStats};
 
 #[tauri::command]
-pub async fn writeback_to_bs(
+pub async fn writeback_to_bs_inbox(
     payload: DocumentPayload,
     url: String,
 ) -> Result<WritebackStats, String> {
-    let mut scheduler = WritebackScheduler::new(
-        Box::new(PlaywrightDriver::default()),
-        Box::new(ClipboardDriver::default()),
-        FieldMapper::identity(),
-        DriverConfig::default(),
-    );
-    let stats = result_to_stats(
-        scheduler
-            .execute(&payload, &TargetInfo::Web { url: url.clone() })
-            .await,
-    )?;
-
-    if stats.failed == 0 {
-        persist_bs_writeback_inbox(&payload, &url)?;
-    }
-
-    Ok(stats)
-}
-
-#[tauri::command]
-pub async fn writeback_to_cs(
-    payload: DocumentPayload,
-    window_title: String,
-) -> Result<WritebackStats, String> {
-    let mut scheduler = WritebackScheduler::new(
-        Box::new(PywinautoDriver::default()),
-        Box::new(ClipboardDriver::default()),
-        FieldMapper::identity(),
-        DriverConfig::default(),
-    );
-    result_to_stats(
-        scheduler
-            .execute(&payload, &TargetInfo::Desktop { window_title })
-            .await,
-    )
-}
-
-#[tauri::command]
-pub async fn writeback_clipboard(payload: DocumentPayload) -> Result<WritebackStats, String> {
-    let mapper = FieldMapper::identity();
-    let fields = mapper.map(&payload);
-    let mut driver = ClipboardDriver::default();
-    driver
-        .init(&DriverConfig::default())
-        .await
-        .map_err(|error| error.to_string())?;
-    driver
-        .locate_target(&TargetInfo::Clipboard)
-        .await
-        .map_err(|error| error.to_string())?;
-    driver
-        .write_fields(&fields)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn writeback_mock(payload: DocumentPayload) -> Result<WritebackStats, String> {
+    persist_bs_writeback_inbox(&payload, &url)?;
     let fields = FieldMapper::identity().map(&payload);
     let mut stats = WritebackStats::new(fields.len());
-
-    for (field_key, value) in fields {
-        log::info!(
-            "模拟回写字段：doc_code={} patient_id={} field_key={} value_len={}",
-            payload.doc_code,
-            payload.patient_id,
-            field_key,
-            value.chars().count()
-        );
+    for _ in fields {
         stats.add_success();
     }
-
     Ok(stats)
-}
-
-fn result_to_stats(result: WritebackResult) -> Result<WritebackStats, String> {
-    match result {
-        WritebackResult::Success(stats) => Ok(stats),
-        WritebackResult::Fallback {
-            primary_error,
-            stats,
-        } => {
-            log::warn!("主回写驱动失败，已降级到剪贴板模式：{primary_error}");
-            Ok(stats)
-        }
-        WritebackResult::Failed {
-            primary_error,
-            fallback_error,
-        } => Err(format!(
-            "主回写驱动失败：{primary_error}；降级驱动失败：{fallback_error}"
-        )),
-    }
 }
 
 fn persist_bs_writeback_inbox(payload: &DocumentPayload, url: &str) -> Result<(), String> {

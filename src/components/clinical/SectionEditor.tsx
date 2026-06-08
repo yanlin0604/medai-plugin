@@ -14,6 +14,7 @@ interface Props {
   locked?: boolean;
   readOnlyHint?: string;
   sectionSuffix?: ReactNode;
+  density?: 'compact' | 'comfortable';
   /** 编辑回调：上提该段最新纯文本 */
   onChange: (text: string) => void;
   /** 重置本段（撤销手动改写，回到要素渲染值；由父级经 key remount 实现） */
@@ -43,7 +44,7 @@ const EMPTY_SUG: SugState = { visible: false, items: [], index: 0, top: 0, left:
  * 术语联想（IME 安全）：中文输入法组字中(composing)不触发，组字完成或英文输入后防抖联想；
  * 插入用 execCommand 替换光标前缀，不重设 innerHTML，保护光标。
  */
-export default function SectionEditor({ section, text, edited, locked, readOnlyHint, sectionSuffix, onChange, onReset, optimize }: Props) {
+export default function SectionEditor({ section, text, edited, locked, readOnlyHint, sectionSuffix, density = 'compact', onChange, onReset, optimize }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const editedRef = useRef(false);
   const composingRef = useRef(false);
@@ -54,6 +55,11 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
   const [menu, setMenu] = useState({ visible: false, top: 0, left: 0 });
   const [diff, setDiff] = useState({ visible: false, before: '', after: '' });
   const [sug, setSug] = useState<SugState>(EMPTY_SUG);
+  const comfortable = density === 'comfortable';
+  const titleClass = comfortable ? 'text-sm' : 'text-[11px]';
+  const badgeClass = comfortable ? 'text-[11px]' : 'text-[9px]';
+  const actionClass = comfortable ? 'text-xs' : 'text-[10px]';
+  const editorClass = comfortable ? 'min-h-[96px] text-sm leading-7 px-3 py-2.5' : 'min-h-[52px] text-[11px] leading-relaxed px-2.5 py-1.5';
 
   // 外部 text 变化（要素变更）：仅未本地编辑时同步 DOM，保护正在编辑的内容
   useEffect(() => {
@@ -205,17 +211,16 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
     <div className="relative bg-white border border-slate-200 rounded-lg p-2.5 space-y-1.5 shadow-sm">
       <div className="flex justify-between items-center gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[11px] font-bold text-slate-700 truncate">{section}</span>
+          <span className={`${titleClass} font-bold text-slate-700 truncate`}>{section}</span>
           {sectionSuffix}
-          {readOnlyHint && <span className="text-[9px] font-normal px-1 rounded text-[#166534] bg-[#F0FDF4] border border-[#BBF7D0]">{readOnlyHint}</span>}
-          {edited && <span className="text-[9px] font-normal px-1 rounded text-[#854D0E] bg-[#FFFBEB] border border-[#FEF3C7]">已修改</span>}
+          {readOnlyHint && <span className={`${badgeClass} font-normal px-1 rounded text-[#166534] bg-[#F0FDF4] border border-[#BBF7D0]`}>{readOnlyHint}</span>}
         </div>
         {!locked && (
           <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={polishSection}
             title="对整段生成润色建议，采纳后才替换正文"
-            className="inline-flex items-center gap-1 text-[10px] font-bold text-[#6D28D9] bg-[#F5F3FF] border border-[#DDD6FE] hover:bg-[#EDE9FE] rounded px-1.5 py-0.5 transition-colors"
+            className={`inline-flex items-center gap-1 ${actionClass} font-bold text-[#6D28D9] bg-[#F5F3FF] border border-[#DDD6FE] hover:bg-[#EDE9FE] rounded px-2 py-1 transition-colors`}
           >
             <ThunderboltOutlined />
             AI润色
@@ -224,7 +229,7 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
               <button
                 onClick={onReset}
                 title="撤销手动修改，按要素重新生成本段"
-                className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-[#854D0E]"
+                className={`inline-flex items-center gap-1 ${actionClass} text-slate-400 hover:text-[#854D0E]`}
               >
                 <UndoOutlined />
                 重置本段
@@ -249,7 +254,7 @@ export default function SectionEditor({ section, text, edited, locked, readOnlyH
         }}
         onBlur={() => setTimeout(closeSug, 150)}
         dangerouslySetInnerHTML={{ __html: html }}
-        className="min-h-[52px] text-[11px] leading-relaxed text-slate-700 outline-none bg-white border border-slate-200 rounded-md px-2.5 py-1.5 focus:border-[#1E3A8A] transition-colors"
+        className={`${editorClass} text-slate-700 outline-none bg-white border border-slate-200 rounded-md focus:border-[#1E3A8A] transition-colors`}
       />
 
       {/* 医疗术语输入联想 */}

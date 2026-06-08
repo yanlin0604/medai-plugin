@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Drawer } from 'antd';
+import {
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  FileTextOutlined,
+  HistoryOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import type { DocVersion, SectionDiff } from '../../services/types';
 import { getDocVersions, getVersionDiff } from '../../services/versionService';
 import DiffView from './DiffView';
@@ -16,6 +23,37 @@ const fmt = (iso: string) => {
   const m = iso.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : iso;
 };
+
+const fmtFull = (iso: string) => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString('zh-CN', { hour12: false });
+};
+
+function parseContentSections(content: string) {
+  const parts = content.split(/\n(?=【)/).map((part) => part.trim()).filter(Boolean);
+  return parts.map((part) => {
+    const match = part.match(/^【(.+?)】([\s\S]*)$/);
+    return match ? { title: match[1], text: match[2] } : { title: '', text: part };
+  });
+}
+
+function VersionContentPaper({ content }: { content: string }) {
+  const sections = parseContentSections(content);
+  return (
+    <article className="max-h-[520px] overflow-auto rounded-xl border border-[#E9E3D5] bg-[#FFFCF5] px-5 py-4 text-[12px] leading-[1.9] text-slate-700">
+      {sections.map((section, index) => (
+        <section
+          key={`${section.title}-${index}`}
+          className="border-b border-dashed border-[#E9E3D5] py-3 last:border-b-0 first:pt-0 last:pb-0"
+        >
+          {section.title && <div className="mb-1.5 font-bold text-slate-900">{section.title}：</div>}
+          <p className="m-0 whitespace-pre-wrap pl-4">{section.text || '（空）'}</p>
+        </section>
+      ))}
+    </article>
+  );
+}
 
 /**
  * 文书版本历史抽屉：时间线列出历次提交版本，选中版本即与上一版本逐段对比。
@@ -44,58 +82,137 @@ export default function VersionHistoryDrawer({ open, onClose, docCode, patientId
 
   const selected = versions.find((v) => v.versionNo === selectedNo) ?? null;
   const isFirst = !!selected && versions[versions.length - 1]?.versionNo === selected.versionNo;
+  const changedCount = diffs.filter((diff) => diff.changed).length;
 
   return (
     <Drawer
-      title="历史版本与修改记录"
+      title={(
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1E3A8A] text-white">
+            <HistoryOutlined />
+          </span>
+          <div>
+            <div className="text-[15px] font-bold text-slate-900">历史版本与修改记录</div>
+            <div className="text-[11px] font-medium text-slate-400">提交留痕 · 版本对比 · 审计追踪</div>
+          </div>
+        </div>
+      )}
       placement="right"
-      width={330}
+      width={520}
       open={open}
       onClose={onClose}
-      styles={{ body: { padding: 12 } }}
+      styles={{
+        header: { padding: '14px 18px', borderBottom: '1px solid #E5E7EB' },
+        body: { padding: 0, background: '#F8FAFC' },
+      }}
     >
       {versions.length === 0 ? (
-        <div className="text-[11px] text-slate-400 text-center py-8">暂无历史版本，提交后将生成首个版本。</div>
+        <div className="m-4 rounded-xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center">
+          <FileTextOutlined className="text-2xl text-slate-300" />
+          <div className="mt-3 text-sm font-bold text-slate-600">暂无历史版本</div>
+          <div className="mt-1 text-xs text-slate-400">提交后将自动生成首个版本快照。</div>
+        </div>
       ) : (
-        <div className="space-y-3">
-          {/* 版本时间线 */}
-          <div className="space-y-1.5">
-            {versions.map((v) => {
-              const active = v.versionNo === selectedNo;
-              return (
-                <button
-                  key={v.versionNo}
-                  onClick={() => setSelectedNo(v.versionNo)}
-                  className={`w-full text-left rounded-lg border p-2.5 transition-all ${
-                    active ? 'border-[#1E3A8A] bg-[#F0F5FF]' : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[12px] font-bold text-slate-800">版本 V{v.versionNo}</span>
-                    <span className="text-[10px] text-slate-400">{fmt(v.timestamp)}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{v.editor}</div>
-                  <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">{v.changeSummary}</div>
-                </button>
-              );
-            })}
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="border-b border-slate-200 bg-white px-4 py-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[10px] font-bold text-slate-400">版本总数</div>
+                <div className="mt-0.5 text-lg font-bold text-slate-900">{versions.length}</div>
+              </div>
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                <div className="text-[10px] font-bold text-blue-500">当前版本</div>
+                <div className="mt-0.5 text-lg font-bold text-[#1E3A8A]">V{selected?.versionNo ?? '-'}</div>
+              </div>
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                <div className="text-[10px] font-bold text-emerald-600">修改段落</div>
+                <div className="mt-0.5 text-lg font-bold text-emerald-700">{isFirst ? '首版' : changedCount}</div>
+              </div>
+            </div>
           </div>
 
-          {/* 与上一版本差异 / 首版全文 */}
-          {selected && (
-            <div className="border-t border-dashed border-slate-200 pt-2.5">
-              <div className="text-[11px] font-bold text-slate-600 mb-2">
-                {isFirst ? `V${selected.versionNo} 为首个版本（全文）` : `V${selected.versionNo} 相对上一版本的修改`}
+          <div className="grid min-h-0 flex-1 grid-cols-[178px_minmax(0,1fr)]">
+            <div className="border-r border-slate-200 bg-white p-3">
+              <div className="mb-2 text-[11px] font-bold text-slate-500">版本时间线</div>
+              <div className="space-y-2">
+                {versions.map((v) => {
+                  const active = v.versionNo === selectedNo;
+                  return (
+                    <button
+                      key={v.versionNo}
+                      onClick={() => setSelectedNo(v.versionNo)}
+                      className={`group relative w-full rounded-xl border p-3 text-left transition-all ${
+                        active
+                          ? 'border-[#1E3A8A] bg-[#F0F5FF] shadow-[0_8px_20px_rgba(30,58,138,0.12)]'
+                          : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`text-[13px] font-bold ${active ? 'text-[#1E3A8A]' : 'text-slate-800'}`}>
+                          V{v.versionNo}
+                        </span>
+                        {active ? (
+                          <CheckCircleOutlined className="text-[13px] text-[#1E3A8A]" />
+                        ) : (
+                          <span className="h-2 w-2 rounded-full bg-slate-200 group-hover:bg-blue-300" />
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center gap-1 text-[10px] font-medium text-slate-400">
+                        <ClockCircleOutlined />
+                        {fmt(v.timestamp)}
+                      </div>
+                      <div className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-slate-600">
+                        {v.changeSummary}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-              {isFirst ? (
-                <div className="text-[11px] text-slate-500 leading-relaxed whitespace-pre-wrap bg-[#FAF8F5] border border-[#E9E3D5] rounded-lg p-2.5">
-                  {selected.content}
-                </div>
-              ) : (
-                <DiffView diffs={diffs} />
-              )}
             </div>
-          )}
+
+            {selected && (
+              <div className="min-h-0 overflow-y-auto p-4">
+                <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[15px] font-bold text-slate-900">版本 V{selected.versionNo}</div>
+                      <div className="mt-1 text-[12px] leading-relaxed text-slate-500">{selected.changeSummary}</div>
+                    </div>
+                    <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-[#1E3A8A]">
+                      {isFirst ? '首版快照' : '修订记录'}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-500">
+                      <UserOutlined className="mr-1 text-slate-400" />
+                      {selected.editor}
+                    </div>
+                    <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-500">
+                      <ClockCircleOutlined className="mr-1 text-slate-400" />
+                      {fmtFull(selected.timestamp)}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="mt-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-[13px] font-bold text-slate-800">
+                      <FileTextOutlined className="text-[#1E3A8A]" />
+                      {isFirst ? '首版全文' : '与上一版本对比'}
+                    </div>
+                    {!isFirst && (
+                      <span className="text-[10px] font-bold text-slate-400">{changedCount} 处修改</span>
+                    )}
+                  </div>
+                  {isFirst ? (
+                    <VersionContentPaper content={selected.content} />
+                  ) : (
+                    <DiffView diffs={diffs} />
+                  )}
+                </section>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </Drawer>

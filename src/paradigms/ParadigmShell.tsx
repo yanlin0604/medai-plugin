@@ -8,6 +8,10 @@ interface ParadigmShellProps {
   doc: DocDefinition;
   /** 右上角操作区（如一键回写按钮） */
   actions?: ReactNode;
+  /** 是否显示范式标签 */
+  showParadigmBadge?: boolean;
+  /** 是否显示页头患者住院号 */
+  showPatientId?: boolean;
   children: ReactNode;
 }
 
@@ -16,7 +20,7 @@ interface ParadigmShellProps {
  * 范式特定内容通过 children 注入，右上角操作通过 actions 注入。
  * 对应需求"范式透明化展示"——侧边栏始终显示当前范式标签。
  */
-export default function ParadigmShell({ doc, actions, children }: ParadigmShellProps) {
+export default function ParadigmShell({ doc, actions, showParadigmBadge = true, showPatientId = true, children }: ParadigmShellProps) {
   const navigate = useNavigate();
   const { currentPatient, selectDoc } = usePatientStore();
   const paradigm = PARADIGMS[doc.paradigm];
@@ -42,20 +46,22 @@ export default function ParadigmShell({ doc, actions, children }: ParadigmShellP
             <h2 className="text-sm font-extrabold text-slate-800 leading-tight flex items-center">
               {doc.name}
               {/* 范式透明化标签 */}
-              <span
-                className="text-[10px] px-1.5 py-0.5 rounded ml-2 font-bold border leading-none"
-                style={{
-                  color: paradigm.accent,
-                  borderColor: `${paradigm.accent}55`,
-                  background: `${paradigm.accent}12`,
-                }}
-                title={paradigm.desc}
-              >
-                {paradigm.badge}
-              </span>
+              {showParadigmBadge && (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded ml-2 font-bold border leading-none"
+                  style={{
+                    color: paradigm.accent,
+                    borderColor: `${paradigm.accent}55`,
+                    background: `${paradigm.accent}12`,
+                  }}
+                  title={paradigm.desc}
+                >
+                  {paradigm.badge}
+                </span>
+              )}
             </h2>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              {currentPatient ? `患者: ${currentPatient.name} | 住院号: ${currentPatient.id}` : '未关联患者'}
+              {currentPatient ? `患者: ${currentPatient.name}${showPatientId ? ` | 住院号: ${currentPatient.id}` : ''}` : '未关联患者'}
             </p>
           </div>
         </div>

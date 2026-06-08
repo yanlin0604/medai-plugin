@@ -41,7 +41,6 @@ const admissionDiagnosisCodes: Record<string, string> = {
 export function buildDischargeCase(patient: Patient): DischargeCase {
   const dischargeDate = addDays(patient.admissionDate, patient.admissionDays);
   const admissionDiagnosisCode = admissionDiagnosisCodes[patient.diagnosis];
-  const patientLine = `姓名：${patient.name}，性别：${patient.gender}，年龄：${patient.age}，床位：${patient.bedNo}，住院号：${patient.id}，科室：${patient.deptName}。`;
 
   return {
     pulledDocs: ['入院记录', '首次病程记录', '全程病程记录', '检验汇总', '影像报告', '长期/临时医嘱单'],
@@ -54,12 +53,6 @@ export function buildDischargeCase(patient: Patient): DischargeCase {
     icdCandidates: dischargeIcdCandidates,
     sections: [
       {
-        section: '患者基本信息',
-        source: 'HIS',
-        hint: 'HIS同步',
-        text: patientLine,
-      },
-      {
         section: '入院日期',
         source: 'HIS',
         hint: 'HIS同步',
@@ -70,6 +63,12 @@ export function buildDischargeCase(patient: Patient): DischargeCase {
         source: 'HIS',
         hint: 'HIS同步',
         text: dischargeDate,
+      },
+      {
+        section: '住院天数',
+        source: 'HIS',
+        hint: '自动计算',
+        text: `${patient.admissionDays}天`,
       },
       {
         section: '入院情况',
@@ -106,12 +105,6 @@ export function buildDischargeCase(patient: Patient): DischargeCase {
         source: 'AI',
         hint: 'AI建议，需医生审核',
         text: '出院后建议遵医嘱规律服药，门诊随诊，若再发胸痛、胸闷、气促等不适及时就诊。',
-      },
-      {
-        section: '医师签名',
-        source: 'HIS',
-        hint: '医生账号同步',
-        text: patient.doctor,
       },
     ],
     adviceSuggestion: '出院后继续遵医嘱口服抗血小板、调脂稳定斑块及降压等药物；低盐低脂饮食，避免劳累及情绪激动；1-2周心内科门诊复诊，复查心电图、血脂、肝肾功能及心肌酶谱；若出现持续胸痛、胸闷、大汗、气促等症状，应立即急诊就诊。',

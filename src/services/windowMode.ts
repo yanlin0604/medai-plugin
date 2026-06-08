@@ -13,7 +13,7 @@ export interface AssistantWindowSize {
 }
 
 export const ASSISTANT_WINDOW_SIZES = {
-  bubble: { width: 200, height: 60 },
+  bubble: { width: 236, height: 68 },
   panel: { width: 480, height: 820 },
 } satisfies Record<'bubble' | 'panel', AssistantWindowSize>;
 

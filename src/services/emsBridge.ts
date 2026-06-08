@@ -10,8 +10,7 @@
 
 import type { Patient, DocumentPayload, SubmitResult, PatientConsistency } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { WRITEBACK_MODE_LABELS, getWritebackConfig, resolveBsUrl } from './writebackConfig';
-import { useClipboardWritebackStore } from '../stores/useClipboardWritebackStore';
+import { WRITEBACK_MODE_LABEL, resolveBsUrl } from './writebackConfig';
 
 interface WritebackStats {
   total: number;
@@ -64,88 +63,36 @@ export async function submitDocument(payload: DocumentPayload): Promise<SubmitRe
   const nextMap: Record<string, string> = {
     DOC001: 'DOC002', // 入院记录 → 首次病程记录
   };
-  const config = getWritebackConfig();
 
   try {
-    const stats = await executeWriteback(payload, config);
+    const stats = await executeWriteback(payload);
 
     const ok = stats.failed === 0;
-    const modeLabel = WRITEBACK_MODE_LABELS[config.mode];
     return {
       ok,
       message: ok
-        ? `「${payload.docName}」${modeLabel}完成：${stats.success}/${stats.total} 个字段已写入`
-        : `「${payload.docName}」${modeLabel}部分失败：${stats.success}/${stats.total} 个字段成功`,
+        ? `「${payload.docName}」${WRITEBACK_MODE_LABEL}完成：${stats.success}/${stats.total} 个字段已写入`
+        : `「${payload.docName}」${WRITEBACK_MODE_LABEL}部分失败：${stats.success}/${stats.total} 个字段成功`,
       nextDocCode: ok ? nextMap[payload.docCode] : undefined,
     };
   } catch (error) {
     return {
       ok: false,
-      message: `「${payload.docName}」${WRITEBACK_MODE_LABELS[config.mode]}失败：${error instanceof Error ? error.message : String(error)}`,
+      message: `「${payload.docName}」${WRITEBACK_MODE_LABEL}失败：${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
 
-async function executeWriteback(payload: DocumentPayload, config = getWritebackConfig()): Promise<WritebackStats> {
+async function executeWriteback(payload: DocumentPayload): Promise<WritebackStats> {
   if (!isTauriRuntime()) {
-    if (config.mode !== 'mock') {
-      throw new Error('真实回写需要在 Tauri 桌面应用中运行');
-    }
+    // 浏览器开发环境没有 Tauri 文件写入能力，保留内存结果用于前端验证。
     return mockWriteback(payload);
   }
 
-  if (config.mode === 'bs-auto') {
-    const url = resolveBsUrl(config.bsUrlTemplate, {
-      patientId: payload.patientId,
-      docCode: payload.docCode,
-    });
-    return invoke<WritebackStats>('writeback_to_bs', { payload, url });
-  }
-
-  if (config.mode === 'bs-attached') {
-    const url = resolveBsUrl(config.bsUrlTemplate, {
-      patientId: payload.patientId,
-      docCode: payload.docCode,
-    });
-    return invoke<WritebackStats>('writeback_to_bs_attached', {
-      payload,
-      url,
-      webdriverUrl: config.bsWebDriverUrl,
-      debuggerAddress: config.bsDebuggerAddress,
-    });
-  }
-
-  if (config.mode === 'cs-auto') {
-    return invoke<WritebackStats>('writeback_to_cs', {
-      payload,
-      windowTitle: config.csWindowTitle,
-    });
-  }
-
-  if (config.mode === 'clipboard') {
-    return new Promise<WritebackStats>((resolve) => {
-      const fieldEntries = Object.entries(payload.fields);
-      const fields = fieldEntries.map(([key, content]) => ({
-        key,
-        label: payload.fieldLabels?.[key] || key,
-        content: content as string,
-      }));
-
-      const store = useClipboardWritebackStore.getState();
-      store.setOnComplete((successCount) => {
-        resolve({
-          total: fields.length,
-          success: successCount,
-          failed: fields.length - successCount,
-          errors: [],
-        });
-      });
-      
-      store.startWriteback(payload.docName, fields);
-    });
-  }
-
-  return invoke<WritebackStats>('writeback_mock', { payload });
+  return invoke<WritebackStats>('writeback_to_bs_inbox', {
+    payload,
+    url: resolveBsUrl({ patientId: payload.patientId, docCode: payload.docCode }),
+  });
 }
 
 function mockWriteback(payload: DocumentPayload): WritebackStats {

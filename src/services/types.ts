@@ -166,6 +166,8 @@ export interface DocVersion {
   content: string;
   /** 该版本结构化字段 */
   fields: Record<string, string>;
+  /** 结构化字段中文名称 */
+  fieldLabels?: Record<string, string>;
   /** 修改人 */
   editor: string;
   /** 提交时间（ISO 字符串） */

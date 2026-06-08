@@ -13,39 +13,41 @@ interface Props {
 export default function DiffView({ diffs, changedOnly }: Props) {
   const rows = changedOnly ? diffs.filter((d) => d.changed) : diffs;
   if (!rows.length) {
-    return <div className="text-[11px] text-slate-400 text-center py-4">两个版本内容一致，无差异。</div>;
+    return (
+      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-[12px] text-slate-400">
+        两个版本内容一致，无差异。
+      </div>
+    );
   }
   return (
-    <div className="space-y-2">
+    <article className="rounded-xl border border-[#E9E3D5] bg-[#FFFCF5] px-5 py-4 text-[12px] leading-[1.9] text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
       {rows.map((d) => (
-        <div
+        <section
           key={d.section}
-          className={`rounded-lg p-2.5 text-[11.5px] border ${
-            d.changed ? 'border-[#93C5FD] bg-[#F0F5FF]' : 'border-slate-200 bg-white'
-          }`}
+          className="border-b border-dashed border-[#E9E3D5] py-3 last:border-b-0 first:pt-0 last:pb-0"
         >
-          <div className="font-bold text-slate-600 mb-1 flex items-center gap-1.5">
-            【{d.section}】
-            {d.changed ? (
-              <span className="text-[9px] font-normal text-[#1E3A8A] bg-white px-1 rounded border border-[#93C5FD]">已修改</span>
-            ) : (
-              <span className="text-[9px] font-normal text-slate-400">无变化</span>
+          <div className="mb-1.5 flex items-center gap-2">
+            <span className="font-bold text-slate-900">{d.section}：</span>
+            {d.changed && (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                有修改
+              </span>
             )}
           </div>
           {d.changed ? (
-            <div className="space-y-1 leading-relaxed">
-              <div>
-                <span className="bg-[#FEE2E2] text-[#991B1B] line-through px-1 rounded">{d.before || '（空）'}</span>
-              </div>
-              <div>
-                <span className="bg-[#D1FAE5] text-[#065F46] px-1 rounded">{d.after || '（空）'}</span>
-              </div>
+            <div className="space-y-1.5 pl-4">
+              <p className="m-0 whitespace-pre-wrap rounded-md bg-red-50 px-2 py-1 text-red-800 line-through decoration-red-500 decoration-2">
+                {d.before || '（空）'}
+              </p>
+              <p className="m-0 whitespace-pre-wrap rounded-md bg-emerald-50 px-2 py-1 text-emerald-900 ring-1 ring-inset ring-emerald-100">
+                {d.after || '（空）'}
+              </p>
             </div>
           ) : (
-            <div className="text-slate-500 leading-relaxed">{d.after}</div>
+            <p className="m-0 whitespace-pre-wrap pl-4 text-slate-700">{d.after || '（空）'}</p>
           )}
-        </div>
+        </section>
       ))}
-    </div>
+    </article>
   );
 }

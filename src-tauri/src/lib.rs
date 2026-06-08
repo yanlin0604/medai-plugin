@@ -46,10 +46,7 @@ pub fn run() {
             commands::his_bridge::set_clipboard_text,
             commands::his_bridge::get_latest_emr_context,
             commands::his_bridge::clear_latest_emr_context,
-            commands::writeback::writeback_to_bs,
-            commands::writeback::writeback_to_cs,
-            commands::writeback::writeback_clipboard,
-            commands::writeback::writeback_mock,
+            commands::writeback::writeback_to_bs_inbox,
             // 系统命令
             commands::system_tray::get_system_info,
         ])
