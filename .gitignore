@@ -34,3 +34,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 /src-tauri/crates/writeback-engine/target
+
+# spec-workflow (local only)
+.spec-workflow/
