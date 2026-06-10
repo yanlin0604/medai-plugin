@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { message } from 'antd';
 import { saveDraft } from '../services/draftService';
 import { submitDocument, watchPatientConsistency } from '../services/emsBridge';
-import { appendVersion, getDocVersions } from '../services/versionService';
+import { localVersionAdapter, type DocumentVersionAdapter } from '../services/versionService';
 import type { DocumentPayload, FieldValue } from '../services/types';
 
 interface UseDocumentSubmitOptions {
@@ -10,6 +10,7 @@ interface UseDocumentSubmitOptions {
   docName: string;
   patientId: string;
   editor: string;
+  versionAdapter?: DocumentVersionAdapter;
 }
 
 interface SubmitInput {
@@ -25,7 +26,13 @@ interface SubmitInput {
 /**
  * 统一文书提交闭环：防串户、提交进度、草稿锁定、版本快照和历史抽屉状态。
  */
-export function useDocumentSubmit({ docCode, docName, patientId, editor }: UseDocumentSubmitOptions) {
+export function useDocumentSubmit({
+  docCode,
+  docName,
+  patientId,
+  editor,
+  versionAdapter = localVersionAdapter,
+}: UseDocumentSubmitOptions) {
   const [locked, setLocked] = useState(false);
   const [mismatch, setMismatch] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -40,8 +47,21 @@ export function useDocumentSubmit({ docCode, docName, patientId, editor }: UseDo
   }, [patientId]);
 
   useEffect(() => {
-    setVersionCount(getDocVersions(docCode, patientId).length);
-  }, [docCode, patientId, locked]);
+    let cancelled = false;
+    versionAdapter
+      .listVersions(docCode, patientId)
+      .then((versions) => {
+        if (!cancelled) setVersionCount(versions.length);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setVersionCount(0);
+        message.error(error instanceof Error ? error.message : '历史版本加载失败');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [docCode, patientId, locked, versionAdapter]);
 
   const submit = useCallback(
     async ({
@@ -95,17 +115,30 @@ export function useDocumentSubmit({ docCode, docName, patientId, editor }: UseDo
             updatedAt: now,
           });
         }
-        const version = appendVersion({
-          docCode,
-          patientId,
-          content,
-          fields,
-          fieldLabels,
-          editor,
-          timestamp: now,
-          changeSummary,
-        });
-        setVersionCount((count) => Math.max(count + 1, version.versionNo));
+        let versionNo = 0;
+        try {
+          const version = await versionAdapter.createVersion({
+            docCode,
+            patientId,
+            content,
+            fields,
+            fieldLabels,
+            fieldOrder,
+            editor,
+            timestamp: now,
+            changeSummary,
+          });
+          versionNo = version.versionNo;
+        } catch (error) {
+          setLocked(true);
+          setSubmitProgress(100);
+          setSubmitText('版本失败');
+          const detail = error instanceof Error ? error.message : '历史版本生成失败';
+          message.error(`文书已回写，但历史版本生成失败：${detail}`);
+          return false;
+        }
+
+        setVersionCount((count) => Math.max(count + 1, versionNo));
         setLocked(true);
         setSubmitProgress(100);
         setSubmitText('已提交');
@@ -117,7 +150,7 @@ export function useDocumentSubmit({ docCode, docName, patientId, editor }: UseDo
         setSubmitText('');
       }
     },
-    [docCode, docName, editor, locked, mismatch, patientId, submitting],
+    [docCode, docName, editor, locked, mismatch, patientId, submitting, versionAdapter],
   );
 
   return {

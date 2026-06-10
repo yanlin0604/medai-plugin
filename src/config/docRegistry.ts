@@ -15,7 +15,7 @@ export type ParadigmId = 'summary' | 'record' | 'recording' | 'special';
 export type DocGroupId = 'timed' | 'onDemand' | 'event';
 
 /** 文书客观数据来源 */
-export type DataSource = 'HIS' | 'LIS' | 'PACS' | 'EMR' | '录音' | '问诊' | '医嘱';
+export type DataSource = 'HIS' | 'LIS' | 'PACS' | 'EMR' | 'ICD' | 'AI' | '录音' | '问诊' | '医嘱';
 
 /** 文书专属工作台（仅在通用范式不足以表达该文书时配置） */
 export type DocWorkspaceId = 'discharge';
@@ -94,7 +94,8 @@ export interface DocDefinition {
   /** 拼音首字母（支持检索） */
   py: string;
   paradigm: ParadigmId;
-  group: DocGroupId;
+  /** 文书选择中心分组；后台运行时文书可由本地注册表按 docCode 补齐 */
+  group?: DocGroupId;
   /** 图标名（@ant-design/icons） */
   icon: string;
   /** 对应高保真原型文件（ui_redesign/） */
@@ -231,9 +232,16 @@ export const getDocsByGroup = (group: DocGroupId): DocDefinition[] =>
 export const getDocsByParadigm = (paradigm: ParadigmId): DocDefinition[] =>
   DOC_REGISTRY.filter((d) => d.paradigm === paradigm);
 
+export const findDocInRegistry = (registry: DocDefinition[], code: string): DocDefinition | undefined =>
+  registry.find((d) => d.code === code);
+
+export const searchDocRegistry = (registry: DocDefinition[], query: string): DocDefinition[] => {
+  const q = query.toLowerCase().trim();
+  if (!q) return registry;
+  return registry.filter((d) => d.name.includes(query) || d.py.includes(q));
+};
+
 /** 文书检索：支持中文名与拼音首字母 */
 export const searchDocs = (query: string): DocDefinition[] => {
-  const q = query.toLowerCase().trim();
-  if (!q) return DOC_REGISTRY;
-  return DOC_REGISTRY.filter((d) => d.name.includes(query) || d.py.includes(q));
+  return searchDocRegistry(DOC_REGISTRY, query);
 };

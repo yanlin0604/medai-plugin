@@ -168,6 +168,8 @@ export interface DocVersion {
   fields: Record<string, string>;
   /** 结构化字段中文名称 */
   fieldLabels?: Record<string, string>;
+  /** 字段写入顺序（由后台版本快照保存） */
+  fieldOrder?: string[];
   /** 修改人 */
   editor: string;
   /** 提交时间（ISO 字符串） */

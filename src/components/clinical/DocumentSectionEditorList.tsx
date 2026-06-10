@@ -1,6 +1,16 @@
 import type { ReactNode } from 'react';
 import type { ClinicalSection } from '../../services/types';
-import SectionEditor, { type SectionEditorVariant } from './SectionEditor';
+import SectionEditor, {
+  type SectionEditorVariant,
+  type SectionOptimize,
+  type SectionRewriteStatusHandler,
+} from './SectionEditor';
+
+export type SectionListOptimize = (
+  section: ClinicalSection,
+  text: string,
+  mode: string,
+) => ReturnType<SectionOptimize>;
 
 interface Props {
   sections: ClinicalSection[];
@@ -9,11 +19,12 @@ interface Props {
   variant?: SectionEditorVariant;
   sectionEdits?: Record<string, string>;
   resetKeys?: Record<string, number>;
-  readOnlyHints?: Record<string, string>;
   sectionSuffixes?: Record<string, ReactNode>;
   onChange: (sectionKey: string, text: string) => void;
   onReset: (sectionKey: string) => void;
-  optimize: (text: string, mode: string) => string;
+  optimize: SectionOptimize;
+  optimizeSection?: SectionListOptimize;
+  onRewriteStatusChange?: SectionRewriteStatusHandler;
 }
 
 /**
@@ -26,11 +37,12 @@ export default function DocumentSectionEditorList({
   variant = 'card',
   sectionEdits,
   resetKeys,
-  readOnlyHints,
   sectionSuffixes,
   onChange,
   onReset,
   optimize,
+  optimizeSection,
+  onRewriteStatusChange,
 }: Props) {
   const listClass = variant === 'paper' ? 'divide-y divide-slate-200/80' : 'space-y-3';
 
@@ -39,7 +51,6 @@ export default function DocumentSectionEditorList({
       {sections.map((section) => {
         const edited = sectionEdits?.[section.key] != null || sectionEdits?.[section.title] != null;
         const text = sectionEdits?.[section.key] ?? sectionEdits?.[section.title] ?? section.text;
-        const readOnlyHint = readOnlyHints?.[section.key] ?? readOnlyHints?.[section.title];
         const sectionSuffix = sectionSuffixes?.[section.key] ?? sectionSuffixes?.[section.title];
 
         return (
@@ -49,13 +60,13 @@ export default function DocumentSectionEditorList({
             text={text}
             edited={edited}
             locked={locked || !section.editable}
-            readOnlyHint={readOnlyHint}
             sectionSuffix={sectionSuffix}
             density={density}
             variant={variant}
             onChange={(next) => onChange(section.key, next)}
             onReset={() => onReset(section.key)}
-            optimize={optimize}
+            optimize={optimizeSection ? (selectedText, mode) => optimizeSection(section, selectedText, mode) : optimize}
+            onRewriteStatusChange={onRewriteStatusChange}
           />
         );
       })}

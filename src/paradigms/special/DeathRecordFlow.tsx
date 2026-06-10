@@ -311,7 +311,6 @@ export default function DeathRecordFlow({ doc, config }: Props) {
                   actions={renderActionButton(<><FileTextOutlined />预览</>, () => setPreviewMode('read'))}
                   locked={locked}
                   resetKeys={resetKeys}
-                  readOnlyHints={{ patientIdentity: 'HIS' }}
                   onChange={updateSection}
                   onReset={resetSection}
                   optimize={optimizeText}
@@ -357,9 +356,6 @@ export default function DeathRecordFlow({ doc, config }: Props) {
                     <span className="text-[11px] font-bold text-slate-600">
                       {field.label}
                       {field.required && <span className="ml-0.5 text-rose-500">*</span>}
-                    </span>
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-400">
-                      {field.source}
                     </span>
                   </div>
                   <textarea

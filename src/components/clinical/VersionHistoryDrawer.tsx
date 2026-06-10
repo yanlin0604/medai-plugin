@@ -5,10 +5,15 @@ import {
   ClockCircleOutlined,
   FileTextOutlined,
   HistoryOutlined,
+  ReloadOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import type { DocVersion, SectionDiff } from '../../services/types';
-import { getDocVersions, getVersionDiff } from '../../services/versionService';
+import {
+  getVersionDiff,
+  localVersionAdapter,
+  type DocumentVersionAdapter,
+} from '../../services/versionService';
 import DiffView from './DiffView';
 
 interface Props {
@@ -16,6 +21,7 @@ interface Props {
   onClose: () => void;
   docCode: string;
   patientId: string;
+  versionAdapter?: DocumentVersionAdapter;
 }
 
 // 'YYYY-MM-DDTHH:mm:ss' → 'MM-DD HH:mm'
@@ -59,16 +65,43 @@ function VersionContentPaper({ content }: { content: string }) {
  * 文书版本历史抽屉：时间线列出历次提交版本，选中版本即与上一版本逐段对比。
  * 复用 DiffView 呈现修改记录（红删绿增）。
  */
-export default function VersionHistoryDrawer({ open, onClose, docCode, patientId }: Props) {
+export default function VersionHistoryDrawer({
+  open,
+  onClose,
+  docCode,
+  patientId,
+  versionAdapter = localVersionAdapter,
+}: Props) {
   const [versions, setVersions] = useState<DocVersion[]>([]);
   const [selectedNo, setSelectedNo] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    const list = getDocVersions(docCode, patientId);
-    setVersions(list);
-    setSelectedNo(list.length ? list[0].versionNo : null);
-  }, [open, docCode, patientId]);
+    let cancelled = false;
+    setLoading(true);
+    setLoadError('');
+    versionAdapter
+      .listVersions(docCode, patientId)
+      .then((list) => {
+        if (cancelled) return;
+        setVersions(list);
+        setSelectedNo(list.length ? list[0].versionNo : null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setVersions([]);
+        setSelectedNo(null);
+        setLoadError(error instanceof Error ? error.message : '历史版本加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, docCode, patientId, versionAdapter]);
 
   // 选中版本与其上一版本的差异（列表按版本号倒序，下一项是更早版本）
   const diffs: SectionDiff[] = useMemo(() => {
@@ -106,7 +139,19 @@ export default function VersionHistoryDrawer({ open, onClose, docCode, patientId
         body: { padding: 0, background: '#F8FAFC' },
       }}
     >
-      {versions.length === 0 ? (
+      {loading ? (
+        <div className="m-4 rounded-xl border border-slate-200 bg-white px-5 py-10 text-center">
+          <ReloadOutlined className="animate-spin text-2xl text-[#1E3A8A]" />
+          <div className="mt-3 text-sm font-bold text-slate-600">正在加载历史版本</div>
+          <div className="mt-1 text-xs text-slate-400">正在从后台审计服务读取版本快照。</div>
+        </div>
+      ) : loadError ? (
+        <div className="m-4 rounded-xl border border-red-100 bg-white px-5 py-10 text-center">
+          <FileTextOutlined className="text-2xl text-red-300" />
+          <div className="mt-3 text-sm font-bold text-red-700">历史版本加载失败</div>
+          <div className="mt-1 break-words text-xs text-red-400">{loadError}</div>
+        </div>
+      ) : versions.length === 0 ? (
         <div className="m-4 rounded-xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center">
           <FileTextOutlined className="text-2xl text-slate-300" />
           <div className="mt-3 text-sm font-bold text-slate-600">暂无历史版本</div>
