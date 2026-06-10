@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { message, Modal } from 'antd';
-import { ExpandAltOutlined, HistoryOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ExpandAltOutlined,
+  HistoryOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  ReloadOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
 import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
@@ -99,6 +106,7 @@ function buildMetaRows(config: RecordConfig): DocumentPaperMetaCell[][] {
 
 export default function RecordDocumentFlow({ doc, config }: Props) {
   const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
+  const [voicePanelOpen, setVoicePanelOpen] = useState(true);
   const [diagnoses, setDiagnoses] = useState<IcdItem[]>([]);
   const [dictation, setDictation] = useState(config.dictationInit);
   const diagnosisText = useMemo(() => diagnoses.map((item) => `${item.name} ${item.code}`).join('；'), [diagnoses]);
@@ -316,29 +324,53 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
           />
         </main>
 
-        <aside className="w-[360px] shrink-0 border-l border-slate-200 bg-white shadow-[-10px_0_30px_rgba(15,23,42,0.03)]">
-          <div className="border-b border-[#1E3A8A]/10 bg-[#F0F5FF] px-5 py-3 text-[13px] font-bold text-[#1E3A8A]">
-            {config.topCardText}
-          </div>
-          <div className="h-[calc(100%-44px)] overflow-y-auto p-4 space-y-4">
-            {config.showTimelinePanel !== false && (
-              <ObjectiveTimeline title={config.timelineTitle} nodes={config.timeline} />
-            )}
-            <DictationConsole
-              title={config.dictationTitle}
-              value={dictation}
-              onChange={setDictation}
-              mockTranscript={config.dictationMock}
-            />
+        <aside
+          className={`${voicePanelOpen ? 'w-[360px]' : 'w-[52px]'} shrink-0 border-l border-slate-200 bg-white shadow-[-10px_0_30px_rgba(15,23,42,0.03)] transition-[width] duration-200 ease-out`}
+        >
+          {voicePanelOpen ? (
+            <>
+              <div className="flex items-center gap-2 border-b border-[#1E3A8A]/10 bg-[#F0F5FF] px-4 py-3 text-[13px] font-bold text-[#1E3A8A]">
+                <span className="min-w-0 flex-1 truncate">{config.topCardText}</span>
+                <button
+                  type="button"
+                  onClick={() => setVoicePanelOpen(false)}
+                  title="收起语音面板"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#BFDBFE] bg-white/70 text-[#1E3A8A] hover:bg-white"
+                >
+                  <MenuFoldOutlined />
+                </button>
+              </div>
+              <div className="h-[calc(100%-52px)] overflow-y-auto p-4 space-y-4">
+                {config.showTimelinePanel !== false && (
+                  <ObjectiveTimeline title={config.timelineTitle} nodes={config.timeline} />
+                )}
+                <DictationConsole
+                  title={config.dictationTitle}
+                  value={dictation}
+                  onChange={setDictation}
+                  mockTranscript={config.dictationMock}
+                />
+                <button
+                  onClick={appendDictationToDraft}
+                  disabled={locked}
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-bold text-[#1E3A8A] hover:bg-[#DBEAFE] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PlusOutlined />
+                  并入口述段落
+                </button>
+              </div>
+            </>
+          ) : (
             <button
-              onClick={appendDictationToDraft}
-              disabled={locked}
-              className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-bold text-[#1E3A8A] hover:bg-[#DBEAFE] disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
+              onClick={() => setVoicePanelOpen(true)}
+              title="展开语音面板"
+              className="flex h-full w-full flex-col items-center gap-2 bg-[#F8FAFC] px-2 py-4 text-[#1E3A8A] hover:bg-[#F0F5FF]"
             >
-              <PlusOutlined />
-              并入口述段落
+              <MenuUnfoldOutlined />
+              <span className="text-[12px] font-bold [writing-mode:vertical-rl]">语音</span>
             </button>
-          </div>
+          )}
         </aside>
 
         <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={config.patient.admissionNo} />

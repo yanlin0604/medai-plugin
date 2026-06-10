@@ -22,6 +22,9 @@ import {
   HeartOutlined,
   GroupOutlined,
   AudioOutlined,
+  UserOutlined,
+  LogoutOutlined,
+  CheckCircleOutlined,
   MinusOutlined,
   BorderOutlined,
   HomeOutlined,
@@ -215,6 +218,16 @@ export default function AppLayout() {
     message.success({ content: '病历系统连接已就绪', key: 'reconnect', duration: 2 });
   };
 
+  const handleLogout = () => {
+    setLoggedIn(false);
+    setSession(null);
+    selectPatient(null);
+    message.info('已退出病历系统连接');
+  };
+
+  const loginDoctorName = session?.doctorName ?? currentPatient?.doctor ?? '未识别医生';
+  const loginDeptName = session?.deptName ?? currentPatient?.deptName ?? '病历系统';
+
   // 点击文书：未关联患者先引导读取，已关联则进入对应范式工作区
   const handleSelectDoc = (doc: DocDefinition) => {
     if (!currentPatient) {
@@ -252,80 +265,106 @@ export default function AppLayout() {
       <WindowTitleBar />
 
       {/* 主内容区域 - 无滚动 */}
-      <div className="flex-1 flex flex-col px-4 py-3 gap-3">
-        {/* 1. 病历系统连接状态 */}
-        {isLoggedIn ? (
-          <div className="px-3 py-2 bg-[#DCFCE7] border border-[#BBF7D0] rounded-lg flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2 text-[#166534] font-bold">
-              <div className="w-2 h-2 rounded-full bg-[#10B981]"></div>
-              <span>{session ? `${session.deptName}：${session.doctorName}` : '病历系统已连接'}</span>
+      <div className="flex-1 flex flex-col px-4 py-3 gap-3 bg-[#F6F8FB]">
+        {/* 1. 登录医生与连接状态 */}
+        <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F0F5FF] text-[#1E3A8A]">
+                <UserOutlined className="text-lg" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[13px] font-bold text-slate-900">{loginDeptName}</span>
+                  <span
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      isLoggedIn ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                    }`}
+                  >
+                    {isLoggedIn ? <CheckCircleOutlined /> : <DisconnectOutlined />}
+                    {isLoggedIn ? '已连接' : '未连接'}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-[11px] font-medium text-slate-500">当前登录</span>
+                  <span className="text-sm font-bold text-[#1E3A8A]">{loginDoctorName}</span>
+                  <span className="text-[11px] text-slate-400">主治医师</span>
+                </div>
+              </div>
             </div>
-            <button
-              onClick={() => {
-                setLoggedIn(false);
-                selectPatient(null);
-                message.info('已退出病历系统连接');
-              }}
-              className="text-[10px] text-[#166534]/70 font-bold hover:text-rose-600 transition-colors"
-            >
-              注销
-            </button>
+
+            {isLoggedIn ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rose-100 bg-rose-50 px-3 py-1.5 text-[11px] font-bold text-rose-600 hover:border-rose-200 hover:bg-rose-100"
+              >
+                <LogoutOutlined />
+                注销
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleReconnect}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-[#1E3A8A] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#172554]"
+              >
+                <DisconnectOutlined />
+                重新连接
+              </button>
+            )}
           </div>
-        ) : (
-          <div className="px-3 py-2 bg-[#FFF5F5] border border-[#FEE2E2] rounded-lg flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2 text-[#991B1B]">
-              <DisconnectOutlined className="text-sm" />
-              <span className="font-bold">未连接病历系统</span>
-            </div>
-            <button onClick={handleReconnect} className="text-[10px] text-[#1E3A8A] font-bold hover:underline">
-              重新连接
-            </button>
-          </div>
-        )}
+        </section>
 
         {/* 2. 活动患者卡片 */}
-        <div className="rounded-lg overflow-hidden">
+        <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
           {currentPatient ? (
-            <div className="px-3 py-2 bg-white border border-slate-200 rounded-lg relative">
-              <div className="absolute top-0 left-0 w-1 h-full bg-[#10B981]"></div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-800 flex items-baseline gap-2">
-                    <span>{currentPatient.name}</span>
-                    <span className="text-[10px] font-medium text-slate-500">
-                      {currentPatient.gender} / {currentPatient.age}
-                    </span>
-                  </h4>
-                  <p className="text-[9px] text-slate-400 font-medium mt-0.5">
-                    床位: {currentPatient.bedNo} | 住院号: {currentPatient.id}
-                  </p>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="text-[11px] font-bold text-slate-500">当前活动患者</span>
                 </div>
-                <button
-                  onClick={handleDisconnect}
-                  className="text-[9px] font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 px-2 py-1 rounded transition-colors"
-                >
-                  切换患者
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-[#F0F5FF]/40 border border-dashed border-[#DBEAFE] rounded-lg px-3 py-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <SearchOutlined className="text-slate-400" />
-                <span className="text-[11px] font-bold text-slate-600">暂无当前活动患者</span>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="text-base font-bold text-slate-900">{currentPatient.name}</span>
+                  <span className="text-[12px] font-medium text-slate-500">{currentPatient.gender} / {currentPatient.age}</span>
+                  <span className="text-[12px] font-medium text-slate-500">床位 {currentPatient.bedNo}</span>
+                </div>
+                <div className="mt-1 truncate text-[11px] text-slate-500">
+                  住院号 {currentPatient.id} · {currentPatient.diagnosis}
+                </div>
               </div>
               <button
+                type="button"
+                onClick={handleDisconnect}
+                className="shrink-0 rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+              >
+                切换患者
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
+                  <SearchOutlined />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[12px] font-bold text-slate-700">暂无当前活动患者</div>
+                  <div className="mt-0.5 text-[10px] text-slate-400">从宿主病历系统读取当前打开的患者</div>
+                </div>
+              </div>
+              <button
+                type="button"
                 onClick={handleReadActivePatient}
-                className="bg-[#1E3A8A] hover:bg-[#172554] text-white text-[9px] px-2 py-1 rounded font-bold transition-all"
+                className="shrink-0 rounded-md bg-[#1E3A8A] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#172554]"
               >
                 读取患者
               </button>
             </div>
           )}
-        </div>
+        </section>
 
         {/* 3. 文书列表 - 紧凑网格 */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
           {docsLoading ? (
             <div className="h-full bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center text-center px-6">
               <FileTextOutlined className="text-[#1E3A8A] text-2xl" />
@@ -344,23 +383,35 @@ export default function AppLayout() {
               </button>
             </div>
           ) : (
-            <div className="h-full grid grid-cols-2 gap-2.5 content-start">
+            <div>
+              <div className="mb-2 flex items-center justify-between px-0.5">
+                <div>
+                  <div className="text-[12px] font-bold text-slate-800">病历文书</div>
+                  <div className="text-[10px] text-slate-400">选择文书进入书写工作区</div>
+                </div>
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">
+                  {runtimeDocs.length} 项
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 content-start pb-14">
               {runtimeDocs.map((doc) => (
               <button
                 key={doc.code}
                 onClick={() => handleSelectDoc(doc)}
-                className="flex items-center gap-2.5 px-3 py-3 bg-white border border-slate-200 hover:border-[#1E3A8A] hover:shadow-md rounded-lg transition-all text-left group"
+                className="group flex items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#1E3A8A] hover:shadow-md"
               >
-                <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-[#F0F5FF] group-hover:bg-[#DBEAFE] transition-colors shrink-0">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F0F5FF] transition-colors group-hover:bg-[#DBEAFE]">
                   {renderIcon(doc.icon)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-bold text-slate-800 group-hover:text-[#1E3A8A] truncate transition-colors">
                     {doc.name}
                   </div>
+                  <div className="mt-0.5 text-[10px] font-medium text-slate-400">点击开始书写</div>
                 </div>
               </button>
               ))}
+              </div>
             </div>
           )}
         </div>
