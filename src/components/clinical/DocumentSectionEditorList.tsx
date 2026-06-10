@@ -22,6 +22,7 @@ interface Props {
   sectionSuffixes?: Record<string, ReactNode>;
   onChange: (sectionKey: string, text: string) => void;
   onReset: (sectionKey: string) => void;
+  onFocusSection?: (sectionKey: string) => void;
   optimize: SectionOptimize;
   optimizeSection?: SectionListOptimize;
   onRewriteStatusChange?: SectionRewriteStatusHandler;
@@ -40,6 +41,7 @@ export default function DocumentSectionEditorList({
   sectionSuffixes,
   onChange,
   onReset,
+  onFocusSection,
   optimize,
   optimizeSection,
   onRewriteStatusChange,
@@ -65,6 +67,7 @@ export default function DocumentSectionEditorList({
             variant={variant}
             onChange={(next) => onChange(section.key, next)}
             onReset={() => onReset(section.key)}
+            onFocus={() => onFocusSection?.(section.key)}
             optimize={optimizeSection ? (selectedText, mode) => optimizeSection(section, selectedText, mode) : optimize}
             onRewriteStatusChange={onRewriteStatusChange}
           />

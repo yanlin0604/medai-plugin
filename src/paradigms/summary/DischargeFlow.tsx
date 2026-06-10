@@ -10,6 +10,7 @@ import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
 import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
 import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
+import EvidencePanel from '../../components/clinical/EvidencePanel';
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
@@ -27,13 +28,98 @@ import {
 import { buildSubmitSnapshot } from '../../services/documentFlow';
 import { backendRuntimeVersionAdapter } from '../../services/versionService';
 import type { ClinicalSection, FieldValue, IcdItem, PatientBrief } from '../../services/types';
-import type { RuntimeRewriteType } from '../../services/pluginRuntimeTypes';
+import type {
+  RuntimeEvidenceBundleDto,
+  RuntimeEvidenceItemDto,
+  RuntimeEvidenceSourceStatusDto,
+  RuntimeRewriteType,
+} from '../../services/pluginRuntimeTypes';
 
 type PreviewMode = 'read' | 'edit';
 
 function toRuntimeRewriteType(mode: string): RuntimeRewriteType {
   if (mode === 'polish' || mode === 'academic' || mode === 'expand' || mode === 'shorten') return mode;
   return 'custom';
+}
+
+function appendSectionMaterial(currentText: string, insertText: string): string {
+  const current = currentText.trimEnd();
+  const addition = insertText.trim();
+  if (!addition) return currentText;
+  if (!current) return addition;
+  return `${current}\n${addition}`;
+}
+
+function evidenceDedupeKey(item: RuntimeEvidenceItemDto): string {
+  return item.evidenceId?.trim()
+    || [item.sourceSystem, item.evidenceType, item.occurredAt, item.title, item.summary].join('|');
+}
+
+function mergeSourceStatuses(
+  bundles: RuntimeEvidenceBundleDto[],
+  evidenceItems: RuntimeEvidenceItemDto[],
+): RuntimeEvidenceSourceStatusDto[] {
+  const evidenceCountBySource = new Map<string, number>();
+  evidenceItems.forEach((item) => {
+    evidenceCountBySource.set(item.sourceSystem, (evidenceCountBySource.get(item.sourceSystem) ?? 0) + 1);
+  });
+
+  const statusBySource = new Map<string, RuntimeEvidenceSourceStatusDto>();
+  bundles.flatMap((bundle) => bundle.sourceStatuses ?? []).forEach((status) => {
+    const previous = statusBySource.get(status.sourceSystem);
+    if (!previous || (status.status === 'success' && previous.status !== 'success')) {
+      statusBySource.set(status.sourceSystem, status);
+    }
+  });
+
+  evidenceCountBySource.forEach((count, sourceSystem) => {
+    const previous = statusBySource.get(sourceSystem);
+    statusBySource.set(sourceSystem, {
+      sourceSystem,
+      status: previous?.status ?? 'success',
+      hit: count > 0,
+      evidenceCount: count,
+      simulated: previous?.simulated,
+      pulledAt: previous?.pulledAt,
+      responseTimeMs: previous?.responseTimeMs,
+      message: previous?.message,
+    });
+  });
+
+  return [...statusBySource.values()];
+}
+
+function mergeEvidenceBundles(
+  bundles: RuntimeEvidenceBundleDto[],
+  fallback: Pick<RuntimeEvidenceBundleDto, 'patientId' | 'visitId' | 'documentType' | 'docCode'>,
+): RuntimeEvidenceBundleDto {
+  const evidenceByKey = new Map<string, RuntimeEvidenceItemDto>();
+  bundles.flatMap((bundle) => bundle.evidenceItems ?? []).forEach((item) => {
+    const key = evidenceDedupeKey(item);
+    if (key && !evidenceByKey.has(key)) {
+      evidenceByKey.set(key, item);
+    }
+  });
+
+  const evidenceItems = [...evidenceByKey.values()].sort((left, right) => {
+    const leftTime = left.occurredAt ? new Date(left.occurredAt).getTime() : 0;
+    const rightTime = right.occurredAt ? new Date(right.occurredAt).getTime() : 0;
+    return rightTime - leftTime;
+  });
+  const warnings = [...new Set(bundles.flatMap((bundle) => bundle.warnings ?? []))];
+  const first = bundles[0];
+
+  return {
+    patientId: first?.patientId ?? fallback.patientId,
+    visitId: first?.visitId ?? fallback.visitId,
+    documentType: first?.documentType ?? fallback.documentType,
+    docCode: first?.docCode ?? fallback.docCode,
+    fieldKey: 'all',
+    evidenceItems,
+    sourceStatuses: mergeSourceStatuses(bundles, evidenceItems),
+    warnings,
+    resolvedAt: first?.resolvedAt,
+  };
 }
 
 const MAX_META_CELLS_PER_ROW = 3;
@@ -115,6 +201,11 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   const [runtimeError, setRuntimeError] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
   const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
+  const [sectionResetKeys, setSectionResetKeys] = useState<Record<string, number>>({});
+  const [activeSectionKey, setActiveSectionKey] = useState<string | null>(null);
+  const [evidenceBundle, setEvidenceBundle] = useState<RuntimeEvidenceBundleDto | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const hydratedRef = useRef(false);
   const {
     locked,
@@ -136,13 +227,22 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     versionAdapter: backendRuntimeVersionAdapter,
   });
 
+  const resetEvidenceWorkspace = useCallback(() => {
+    setActiveSectionKey(null);
+    setEvidenceBundle(null);
+    setEvidenceError(null);
+    setEvidenceLoading(false);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     hydratedRef.current = false;
+    resetEvidenceWorkspace();
     setRuntimeLoading(true);
     setRuntimeError('');
     setRuntimeState(null);
     setSections([]);
+    setSectionResetKeys({});
     setAcceptedDiagnoses([]);
 
     loadDischargeRuntime(doc.code, patient.id, patientBrief)
@@ -179,12 +279,19 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     return () => {
       cancelled = true;
     };
-  }, [doc.code, patient.id, patientBrief, reloadToken, setLocked]);
+  }, [doc.code, patient.id, patientBrief, reloadToken, resetEvidenceWorkspace, setLocked]);
 
   const updateSection = useCallback((sectionKey: string, text: string) => {
     setSections((prev) => applyDischargeFieldAutomation(
       prev.map((section) => (section.key === sectionKey ? { ...section, text } : section)),
     ));
+  }, []);
+
+  const bumpSectionResetKey = useCallback((sectionKey: string) => {
+    setSectionResetKeys((prev) => ({
+      ...prev,
+      [sectionKey]: (prev[sectionKey] ?? 0) + 1,
+    }));
   }, []);
 
   const metaRows = useMemo(
@@ -201,6 +308,11 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   const bodySections = useMemo<ClinicalSection[]>(
     () => sections.filter((section) => !isDischargeMetaSection(section, runtimeState?.metaFieldKeys ?? [])),
     [runtimeState?.metaFieldKeys, sections],
+  );
+
+  const materialSections = useMemo<ClinicalSection[]>(
+    () => bodySections.filter((section) => section.evidenceEnabled),
+    [bodySections],
   );
 
   const templateTitle = runtimeState?.template.title || doc.name;
@@ -249,6 +361,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     const base = runtimeState?.sections.find((section) => section.key === sectionKey);
     if (!base) return;
     updateSection(sectionKey, base.text);
+    bumpSectionResetKey(sectionKey);
     if (sectionKey === 'dischargeDiagnosis') setAcceptedDiagnoses(runtimeState?.icdCandidates ?? []);
   };
 
@@ -273,6 +386,94 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   ) => {
     await pluginRuntimeApi.updateRewriteStatus(requestId, status);
   };
+
+  const loadEvidenceForFields = useCallback(async (fieldKeys: string[]) => {
+    if (!fieldKeys.length) {
+      setEvidenceBundle(mergeEvidenceBundles([], {
+        patientId: patient.id,
+        visitId: patient.id,
+        documentType: templateTitle,
+        docCode: doc.code,
+      }));
+      setEvidenceError(null);
+      setEvidenceLoading(false);
+      return;
+    }
+
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    setEvidenceBundle(null);
+
+    const results = await Promise.allSettled(fieldKeys.map((fieldKey) => pluginRuntimeApi.getEvidence({
+        patientId: patient.id,
+        visitId: patient.id,
+        documentType: templateTitle,
+        docCode: doc.code,
+        fieldKey,
+      })));
+    const bundles = results
+      .filter((result): result is PromiseFulfilledResult<RuntimeEvidenceBundleDto> => result.status === 'fulfilled')
+      .map((result) => result.value);
+    const failedCount = results.length - bundles.length;
+
+    setEvidenceBundle(mergeEvidenceBundles(bundles, {
+      patientId: patient.id,
+      visitId: patient.id,
+      documentType: templateTitle,
+      docCode: doc.code,
+    }));
+    setEvidenceError(failedCount > 0 ? `部分资料加载失败：${failedCount} 个字段未返回。` : null);
+    setEvidenceLoading(false);
+  }, [doc.code, patient.id, templateTitle]);
+
+  const materialFieldKeys = useMemo(
+    () => materialSections.map((section) => section.key).join('|'),
+    [materialSections],
+  );
+
+  useEffect(() => {
+    if (previewMode !== 'edit' || runtimeLoading || runtimeError) return;
+    void loadEvidenceForFields(materialFieldKeys ? materialFieldKeys.split('|') : []);
+  }, [loadEvidenceForFields, materialFieldKeys, previewMode, runtimeError, runtimeLoading]);
+
+  const resolveInsertTargetSectionKey = useCallback((): string | null => {
+    if (activeSectionKey && bodySections.some((section) => section.key === activeSectionKey && section.editable)) {
+      return activeSectionKey;
+    }
+    return bodySections.find((section) => section.editable)?.key ?? null;
+  }, [activeSectionKey, bodySections]);
+
+  const insertEvidenceIntoTarget = useCallback((insertText: string) => {
+    if (mismatch) {
+      message.error('防串户锁定中，禁止插入资料。请先在病历系统中切回当前患者。');
+      return;
+    }
+    if (locked) {
+      message.warning('当前文书已锁定，不能插入资料。');
+      return;
+    }
+    if (!insertText.trim()) {
+      message.warning('资料内容为空，未插入。');
+      return;
+    }
+    const targetSectionKey = resolveInsertTargetSectionKey();
+    if (!targetSectionKey) {
+      message.warning('请先点一下要插入的正文段落。');
+      return;
+    }
+    const currentText = sections.find((section) => section.key === targetSectionKey)?.text ?? '';
+    updateSection(targetSectionKey, appendSectionMaterial(currentText, insertText));
+    bumpSectionResetKey(targetSectionKey);
+    setActiveSectionKey(targetSectionKey);
+    message.success('已插入资料，可继续编辑。');
+  }, [
+    bumpSectionResetKey,
+    locked,
+    mismatch,
+    resolveInsertTargetSectionKey,
+    sections,
+    updateSection,
+  ]);
 
   const doSubmit = async () => {
     const missingRequired = sections.filter((section) => section.required && !section.text.trim());
@@ -379,26 +580,45 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
               )}
             />
           ) : (
-            <div className="p-4 space-y-3">
-              <EditableDocumentPaper
-                docName={templateTitle}
-                patient={patientBrief}
-                sections={bodySections}
-                metaRows={metaRows}
-                actions={renderActionButton(
-                  <><ExpandAltOutlined />通读全文</>,
-                  () => setPreviewMode('read'),
-                )}
-                locked={locked}
-                sectionEdits={editedSectionMap}
-                onChange={updateSection}
-                onReset={resetSection}
-                optimize={() => {
-                  throw new Error('后台 AI 重写未配置');
-                }}
-                optimizeSection={rewriteSectionText}
-                onRewriteStatusChange={updateRewriteStatus}
-              />
+            <div className="min-h-full">
+              <div className="p-4 pb-36">
+                <div className="mx-auto max-w-[980px]">
+                  <EditableDocumentPaper
+                    docName={templateTitle}
+                    patient={patientBrief}
+                    sections={bodySections}
+                    metaRows={metaRows}
+                    actions={renderActionButton(
+                      <><ExpandAltOutlined />通读全文</>,
+                      () => {
+                        resetEvidenceWorkspace();
+                        setPreviewMode('read');
+                      },
+                    )}
+                    locked={locked}
+                    sectionEdits={editedSectionMap}
+                    resetKeys={sectionResetKeys}
+                    onChange={updateSection}
+                    onReset={resetSection}
+                    onFocusSection={setActiveSectionKey}
+                    optimize={() => {
+                      throw new Error('后台 AI 重写未配置');
+                    }}
+                    optimizeSection={rewriteSectionText}
+                    onRewriteStatusChange={updateRewriteStatus}
+                  />
+                </div>
+              </div>
+              <div className="sticky bottom-0 z-30">
+                <EvidencePanel
+                  bundle={evidenceBundle}
+                  loading={evidenceLoading}
+                  error={evidenceError}
+                  title="临床资料"
+                  variant="tray"
+                  onInsertEvidence={(_item, insertText) => insertEvidenceIntoTarget(insertText)}
+                />
+              </div>
             </div>
           )}
         </div>

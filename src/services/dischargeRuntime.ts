@@ -81,6 +81,7 @@ function toClinicalSection(field: RuntimeDocFieldDto, value?: RuntimeFieldValueD
     calculation: field.renderRule?.calculation ?? defaultDischargeCalculation(field.fieldKey),
     source: normalizeFieldSource(field.sourceType),
     required: Boolean(field.required),
+    evidenceEnabled: Boolean(field.renderRule?.evidence?.enabled),
   };
 }
 

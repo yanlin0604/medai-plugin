@@ -75,6 +75,7 @@ export interface RuntimeFieldRenderRuleDto {
   defaultValueMode?: string;
   calculation?: RuntimeFieldCalculationDto;
   todayDocMerge?: RuntimeTodayDocMergeRuleDto;
+  evidence?: RuntimeFieldEvidenceRuleDto;
 }
 
 export interface RuntimeFieldCalculationDto {
@@ -90,6 +91,149 @@ export interface RuntimeTodayDocMergeRuleDto {
   fieldKeys?: string[];
   excludeDocCodes?: string[];
   maxChars?: number;
+}
+
+export type RuntimeEvidenceWritebackMode = 'fill' | 'append' | 'overwrite';
+export type RuntimeFieldCompletionMode = 'generate' | 'append' | 'rewrite_selection';
+
+export interface RuntimeEvidenceQueryRequest {
+  patientId: string;
+  visitId: string;
+  documentType: string;
+  docCode: string;
+  fieldKey: string;
+}
+
+export interface RuntimeFieldEvidenceRuleDto {
+  enabled?: boolean;
+  sourceSystems?: string[];
+  evidenceTypes?: string[];
+  requireTimeline?: boolean;
+  generationMode?: string;
+  defaultWritebackMode?: RuntimeEvidenceWritebackMode;
+  minEvidenceCount?: number;
+  focusHints?: string[];
+}
+
+export interface RuntimeEvidenceItemDto {
+  evidenceId: string;
+  patientId?: string;
+  visitId?: string;
+  sourceSystem: string;
+  evidenceType: string;
+  occurredAt?: string;
+  title?: string;
+  summary?: string;
+  originalText?: string;
+  structuredData?: Record<string, unknown>;
+  abnormalFlag?: 'normal' | 'abnormal' | 'critical' | 'unknown' | string;
+  confidence?: 'high' | 'medium' | 'low' | string;
+  simulated?: boolean;
+}
+
+export interface RuntimeEvidenceSourceStatusDto {
+  sourceSystem: string;
+  status: 'success' | 'empty' | 'failed' | 'disabled' | string;
+  hit?: boolean;
+  evidenceCount?: number;
+  simulated?: boolean;
+  pulledAt?: string;
+  responseTimeMs?: number;
+  message?: string;
+}
+
+export interface RuntimeEvidenceBundleDto {
+  patientId: string;
+  visitId: string;
+  documentType: string;
+  docCode: string;
+  fieldKey: string;
+  rule?: RuntimeFieldEvidenceRuleDto;
+  evidenceItems: RuntimeEvidenceItemDto[];
+  sourceStatuses: RuntimeEvidenceSourceStatusDto[];
+  warnings: string[];
+  resolvedAt?: string;
+}
+
+export interface RuntimeEvidenceSummaryDto {
+  evidenceId: string;
+  sourceSystem: string;
+  evidenceType: string;
+  occurredAt?: string;
+  title?: string;
+  summary?: string;
+  abnormalFlag?: string;
+  confidence?: string;
+}
+
+export interface RuntimeFieldCompletionRequest {
+  patientId: string;
+  visitId: string;
+  documentType: string;
+  docCode: string;
+  fieldKey: string;
+  fieldName?: string;
+  currentText?: string;
+  selectedEvidenceIds?: string[];
+  selectedText?: string;
+  mode?: RuntimeFieldCompletionMode;
+}
+
+export interface RuntimeFieldCompletionResponse {
+  generationId: string;
+  patientId: string;
+  visitId: string;
+  documentType: string;
+  docCode: string;
+  fieldKey: string;
+  generatedText: string;
+  usedEvidenceIds: string[];
+  evidenceSummary: RuntimeEvidenceSummaryDto[];
+  warnings: string[];
+  recommendedWritebackMode?: RuntimeEvidenceWritebackMode;
+  responseTimeMs?: number;
+  generatedAt?: string;
+}
+
+export interface RuntimeFieldCompletionAuditDto {
+  generationId: string;
+  patientId?: string;
+  visitId?: string;
+  documentType?: string;
+  docCode?: string;
+  fieldKey?: string;
+  completionStatus?: string;
+  usedEvidenceIds?: string[];
+  writebackMode?: RuntimeEvidenceWritebackMode;
+  doctorId?: string;
+  doctorName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface RuntimeWritebackAuditRequest {
+  patientId: string;
+  visitId: string;
+  documentType: string;
+  docCode: string;
+  fieldKey: string;
+  writebackMode: RuntimeEvidenceWritebackMode;
+  finalText?: string;
+  doctorId?: string;
+  doctorName?: string;
+}
+
+export interface RuntimeWritebackAuditResponse {
+  generationId: string;
+  patientId: string;
+  visitId: string;
+  documentType: string;
+  docCode: string;
+  fieldKey: string;
+  audited?: boolean;
+  completionStatus?: string;
+  message?: string;
+  auditedAt?: string;
 }
 
 export interface RuntimeFieldValueRefDto {
@@ -201,3 +345,7 @@ export type RuntimeFieldSource = FieldSource;
 export type RuntimeFieldInputType = FieldInputType;
 export type RuntimeDocFieldDef = DocFieldDef;
 export type RuntimeDocFieldOption = DocFieldOption;
+export type RuntimeEvidenceQuery = RuntimeEvidenceQueryRequest;
+export type RuntimeEvidenceBundle = RuntimeEvidenceBundleDto;
+export type RuntimeEvidenceItem = RuntimeEvidenceItemDto;
+export type RuntimeFieldCompletion = RuntimeFieldCompletionResponse;

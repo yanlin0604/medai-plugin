@@ -1,5 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import type { ClipboardEvent as ReactClipboardEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  DragEvent as ReactDragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+} from 'react';
 import { message } from 'antd';
 import { ThunderboltOutlined, UndoOutlined } from '@ant-design/icons';
 import { suggestTerms } from '../../services/clinicalService';
@@ -22,6 +27,12 @@ export type SectionRewriteStatusHandler = (
   requestId: string | number,
   status: SectionRewriteStatus,
 ) => void | Promise<void>;
+
+interface MaterialDropDetail {
+  text: string;
+  clientX?: number;
+  clientY?: number;
+}
 
 export function normalizeSectionRewriteResult(
   result: string | SectionRewriteResult,
@@ -63,6 +74,7 @@ interface Props {
   optimize: SectionOptimize;
   /** 后台重写审计状态同步；同步失败不得回滚正文 */
   onRewriteStatusChange?: SectionRewriteStatusHandler;
+  onFocus?: () => void;
 }
 
 const toHtml = (t: string) => t.replace(/\n/g, '<br>');
@@ -98,6 +110,7 @@ export default function SectionEditor({
   onReset,
   optimize,
   onRewriteStatusChange,
+  onFocus,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const editedRef = useRef(false);
@@ -213,6 +226,109 @@ export default function SectionEditor({
     onChange(ref.current?.innerText ?? '');
     scheduleSuggest();
   };
+
+  const moveCaretToEnd = () => {
+    if (!ref.current) return;
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(ref.current);
+    range.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  };
+
+  const ensureDropRangeInEditor = () => {
+    if (!ref.current) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      moveCaretToEnd();
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    if (!ref.current.contains(range.commonAncestorContainer)) {
+      moveCaretToEnd();
+    }
+  };
+
+  const setDropRangeFromPoint = (x: number, y: number): boolean => {
+    if (!ref.current) return false;
+    const doc = document as Document & {
+      caretPositionFromPoint?: (left: number, top: number) => { offsetNode: Node; offset: number } | null;
+      caretRangeFromPoint?: (left: number, top: number) => Range | null;
+    };
+    const range = document.createRange();
+    const position = doc.caretPositionFromPoint?.(x, y);
+    if (position) {
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+    } else {
+      const legacyRange = doc.caretRangeFromPoint?.(x, y);
+      if (!legacyRange) return false;
+      range.setStart(legacyRange.startContainer, legacyRange.startOffset);
+      range.collapse(true);
+    }
+    if (!ref.current.contains(range.commonAncestorContainer)) return false;
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    return true;
+  };
+
+  const handleDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
+    if (locked) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const insertPlainTextAtPoint = (plainText: string, clientX?: number, clientY?: number) => {
+    if (locked) return;
+    if (!plainText) return;
+    ref.current?.focus();
+    if (
+      typeof clientX !== 'number'
+      || typeof clientY !== 'number'
+      || !setDropRangeFromPoint(clientX, clientY)
+    ) {
+      ensureDropRangeInEditor();
+    }
+    if (!document.execCommand('insertText', false, plainText)) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const textNode = document.createTextNode(plainText);
+        range.insertNode(textNode);
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+    editedRef.current = true;
+    onChange(ref.current?.innerText ?? '');
+    scheduleSuggest();
+  };
+
+  const handleDrop = (e: ReactDragEvent<HTMLDivElement>) => {
+    if (locked) return;
+    const plainText = e.dataTransfer.getData('text/plain');
+    if (!plainText) return;
+    e.preventDefault();
+    insertPlainTextAtPoint(plainText, e.clientX, e.clientY);
+  };
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+    const handleMaterialDrop = (event: Event) => {
+      const detail = (event as CustomEvent<MaterialDropDetail>).detail;
+      if (!detail?.text) return;
+      event.preventDefault();
+      insertPlainTextAtPoint(detail.text, detail.clientX, detail.clientY);
+    };
+    element.addEventListener('medai-material-drop', handleMaterialDrop);
+    return () => element.removeEventListener('medai-material-drop', handleMaterialDrop);
+  });
 
   // 采纳联想：替换光标前已输入的前缀为完整术语
   const acceptSuggest = (term: string) => {
@@ -342,15 +458,15 @@ export default function SectionEditor({
         </div>
         {!locked && (
           <div className={actionWrapClass}>
-          <button
-            onClick={polishSection}
-            disabled={optimizing}
-            title="对整段生成润色建议，采纳后才替换正文"
-            className={polishButtonClass}
-          >
-            <ThunderboltOutlined />
-            {optimizing ? '处理中' : '补全'}
-          </button>
+            <button
+              onClick={polishSection}
+              disabled={optimizing}
+              title="对整段生成润色建议，采纳后才替换正文"
+              className={polishButtonClass}
+            >
+              <ThunderboltOutlined />
+              {optimizing ? '处理中' : '补全'}
+            </button>
             {edited && (
               <button
                 onClick={onReset}
@@ -366,12 +482,16 @@ export default function SectionEditor({
       </div>
       <div
         ref={ref}
+        data-section-editor-drop-target="true"
         contentEditable={!locked}
         suppressContentEditableWarning
+        onFocus={onFocus}
         onMouseUp={handleMouseUp}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         onCompositionStart={() => {
           composingRef.current = true;
         }}
@@ -412,7 +532,7 @@ export default function SectionEditor({
 
       {/* 划词优化菜单 */}
       {menu.visible && !locked && (
-        <div className="absolute bg-[#1E293B] text-white p-1 rounded-md shadow-lg flex gap-1 z-50" style={{ top: menu.top, left: menu.left }}>
+        <div className="absolute bg-[#1E293B] text-white p-1 rounded-md shadow-lg flex flex-wrap gap-1 z-50 max-w-[320px]" style={{ top: menu.top, left: menu.left }}>
           <button onClick={() => applyOptimize('academic')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">学术化</button>
           <button disabled={optimizing} onClick={() => applyOptimize('expand')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">扩写</button>
           <button disabled={optimizing} onClick={() => applyOptimize('shorten')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">精简</button>

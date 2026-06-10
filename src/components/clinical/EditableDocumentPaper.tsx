@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import type { ClinicalSection, PatientBrief } from '../../services/types';
-import DocumentSectionEditorList, { type SectionListOptimize } from './DocumentSectionEditorList';
+import DocumentSectionEditorList, {
+  type SectionListOptimize,
+} from './DocumentSectionEditorList';
 import { DocumentPaperFrame, type DocumentPaperMetaCell } from './DocumentPaper';
 import type { SectionOptimize, SectionRewriteStatusHandler } from './SectionEditor';
 
@@ -17,6 +19,7 @@ interface Props {
   sectionSuffixes?: Record<string, ReactNode>;
   onChange: (sectionKey: string, text: string) => void;
   onReset: (sectionKey: string) => void;
+  onFocusSection?: (sectionKey: string) => void;
   optimize: SectionOptimize;
   optimizeSection?: SectionListOptimize;
   onRewriteStatusChange?: SectionRewriteStatusHandler;
@@ -38,6 +41,7 @@ export default function EditableDocumentPaper({
   sectionSuffixes,
   onChange,
   onReset,
+  onFocusSection,
   optimize,
   optimizeSection,
   onRewriteStatusChange,
@@ -60,6 +64,7 @@ export default function EditableDocumentPaper({
         sectionSuffixes={sectionSuffixes}
         onChange={onChange}
         onReset={onReset}
+        onFocusSection={onFocusSection}
         optimize={optimize}
         optimizeSection={optimizeSection}
         onRewriteStatusChange={onRewriteStatusChange}

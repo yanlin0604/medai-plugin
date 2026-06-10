@@ -1,12 +1,34 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  pluginRuntimeApi,
   toDocDefinition,
   toDocFieldDef,
   toDocTemplate,
   toDocVersion,
   toIcdItem,
 } from './pluginRuntime';
-import type { RuntimeDocFieldDto } from './pluginRuntimeTypes';
+import type {
+  RuntimeApiResponse,
+  RuntimeDocFieldDto,
+  RuntimeEvidenceBundleDto,
+  RuntimeFieldCompletionResponse,
+  RuntimeWritebackAuditResponse,
+} from './pluginRuntimeTypes';
+
+const { mockHttp } = vi.hoisted(() => ({
+  mockHttp: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+  },
+}));
+
+vi.mock('axios', () => ({
+  default: {
+    create: vi.fn(() => mockHttp),
+    isAxiosError: vi.fn(() => false),
+  },
+}));
 
 const field = (overrides: Partial<RuntimeDocFieldDto>): RuntimeDocFieldDto => ({
   fieldKey: 'treatmentCourse',
@@ -21,7 +43,21 @@ const field = (overrides: Partial<RuntimeDocFieldDto>): RuntimeDocFieldDto => ({
   ...overrides,
 });
 
+const ok = <T,>(data: T): Promise<{ data: RuntimeApiResponse<T> }> => Promise.resolve({
+  data: {
+    code: 200,
+    msg: 'ok',
+    data,
+  },
+});
+
 describe('pluginRuntime adapters', () => {
+  beforeEach(() => {
+    mockHttp.get.mockReset();
+    mockHttp.post.mockReset();
+    mockHttp.put.mockReset();
+  });
+
   it('maps runtime document definitions with local registry metadata', () => {
     const doc = toDocDefinition({
       docCode: 'DOC010',
@@ -106,5 +142,88 @@ describe('pluginRuntime adapters', () => {
     })).toThrow('未知交互范式');
 
     expect(() => toDocFieldDef(field({ inputType: 'unknown' }))).toThrow('未知字段录入形态');
+  });
+
+  it('calls evidence query endpoint with patient, visit, document and field context', async () => {
+    const bundle: RuntimeEvidenceBundleDto = {
+      patientId: 'ZY001',
+      visitId: 'ZY001',
+      documentType: '出院记录',
+      docCode: 'DOC010',
+      fieldKey: 'treatmentCourse',
+      evidenceItems: [],
+      sourceStatuses: [],
+      warnings: [],
+    };
+    const request = {
+      patientId: 'ZY001',
+      visitId: 'ZY001',
+      documentType: '出院记录',
+      docCode: 'DOC010',
+      fieldKey: 'treatmentCourse',
+    };
+    mockHttp.get.mockReturnValueOnce(ok(bundle));
+
+    await expect(pluginRuntimeApi.getEvidence(request)).resolves.toEqual(bundle);
+
+    expect(mockHttp.get).toHaveBeenCalledWith('/medical/pluginRuntime/evidence', { params: request });
+  });
+
+  it('posts field completion and writeback audit payloads through runtime API', async () => {
+    const completion: RuntimeFieldCompletionResponse = {
+      generationId: 'FCR-1',
+      patientId: 'ZY001',
+      visitId: 'ZY001',
+      documentType: '出院记录',
+      docCode: 'DOC010',
+      fieldKey: 'treatmentCourse',
+      generatedText: '住院期间完善检查。',
+      usedEvidenceIds: ['lis-1'],
+      evidenceSummary: [],
+      warnings: [],
+      recommendedWritebackMode: 'append',
+    };
+    const audit: RuntimeWritebackAuditResponse = {
+      generationId: 'FCR-1',
+      patientId: 'ZY001',
+      visitId: 'ZY001',
+      documentType: '出院记录',
+      docCode: 'DOC010',
+      fieldKey: 'treatmentCourse',
+      audited: true,
+      completionStatus: 'written_back',
+    };
+    const completionRequest = {
+      patientId: 'ZY001',
+      visitId: 'ZY001',
+      documentType: '出院记录',
+      docCode: 'DOC010',
+      fieldKey: 'treatmentCourse',
+      currentText: '原诊疗经过',
+      selectedEvidenceIds: ['lis-1'],
+      mode: 'append' as const,
+    };
+    const auditRequest = {
+      patientId: 'ZY001',
+      visitId: 'ZY001',
+      documentType: '出院记录',
+      docCode: 'DOC010',
+      fieldKey: 'treatmentCourse',
+      writebackMode: 'append' as const,
+      finalText: '原诊疗经过\n住院期间完善检查。',
+    };
+    mockHttp.post
+      .mockReturnValueOnce(ok(completion))
+      .mockReturnValueOnce(ok(audit));
+
+    await expect(pluginRuntimeApi.completeField(completionRequest)).resolves.toEqual(completion);
+    await expect(pluginRuntimeApi.auditFieldWriteback('FCR-1', auditRequest)).resolves.toEqual(audit);
+
+    expect(mockHttp.post).toHaveBeenNthCalledWith(1, '/medical/pluginRuntime/field-completions', completionRequest);
+    expect(mockHttp.post).toHaveBeenNthCalledWith(
+      2,
+      '/medical/pluginRuntime/field-completions/FCR-1/writeback-audit',
+      auditRequest,
+    );
   });
 });

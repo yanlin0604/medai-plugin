@@ -27,11 +27,17 @@ import type {
   RuntimeDocValueBundleDto,
   RuntimeDocValues,
   RuntimeDocVersionDto,
+  RuntimeEvidenceBundleDto,
+  RuntimeEvidenceQueryRequest,
+  RuntimeFieldCompletionRequest,
+  RuntimeFieldCompletionResponse,
   RuntimeIcdCandidateDto,
   RuntimeRewriteRequest,
   RuntimeRewriteResponse,
   RuntimeRewriteStatus,
   RuntimeRewriteStatusRequest,
+  RuntimeWritebackAuditRequest,
+  RuntimeWritebackAuditResponse,
 } from './pluginRuntimeTypes';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
@@ -282,6 +288,29 @@ export async function resolveRuntimeValues(
   );
 }
 
+export async function getEvidence(request: RuntimeEvidenceQueryRequest): Promise<RuntimeEvidenceBundleDto> {
+  return requestRuntime<RuntimeEvidenceBundleDto>(
+    http.get(`${RUNTIME_BASE_PATH}/evidence`, { params: request }),
+  );
+}
+
+export async function completeField(
+  request: RuntimeFieldCompletionRequest,
+): Promise<RuntimeFieldCompletionResponse> {
+  return requestRuntime<RuntimeFieldCompletionResponse>(
+    http.post(`${RUNTIME_BASE_PATH}/field-completions`, request),
+  );
+}
+
+export async function auditFieldWriteback(
+  generationId: string,
+  request: RuntimeWritebackAuditRequest,
+): Promise<RuntimeWritebackAuditResponse> {
+  return requestRuntime<RuntimeWritebackAuditResponse>(
+    http.post(`${RUNTIME_BASE_PATH}/field-completions/${encodePath(generationId)}/writeback-audit`, request),
+  );
+}
+
 export async function listDocVersions(docCode: string, patientIdHis: string): Promise<DocVersion[]> {
   const versions = await requestRuntime<RuntimeDocVersionDto[]>(
     http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/versions`, {
@@ -334,6 +363,9 @@ export const pluginRuntimeApi = {
   getRuntimeTemplate,
   getRuntimeDocTemplate,
   resolveRuntimeValues,
+  getEvidence,
+  completeField,
+  auditFieldWriteback,
   listDocVersions,
   createDocVersion,
   rewriteText,

@@ -204,6 +204,8 @@ export interface ClinicalSection {
   calculation?: ClinicalFieldCalculation;
   source?: FieldSource;
   required?: boolean;
+  /** 当前字段是否由后台配置启用证据补全 */
+  evidenceEnabled?: boolean;
 }
 
 export interface ClinicalFieldCalculation {
