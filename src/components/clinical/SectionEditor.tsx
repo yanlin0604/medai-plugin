@@ -349,7 +349,7 @@ export default function SectionEditor({
             className={polishButtonClass}
           >
             <ThunderboltOutlined />
-            {optimizing ? '处理中' : 'AI润色'}
+            {optimizing ? '处理中' : '补全'}
           </button>
             {edited && (
               <button

@@ -1,6 +1,6 @@
 import type { DocumentPaperMetaCell } from '../components/clinical/DocumentPaper';
 import type { PatientBrief } from '../components/clinical/EmrContextCard';
-import type { ClinicalSection, FieldSource, IcdItem } from './types';
+import type { ClinicalFieldCalculation, ClinicalSection, FieldSource, IcdItem } from './types';
 import { pluginRuntimeApi, toIcdItem } from './pluginRuntime';
 import type {
   RuntimeDocFieldDto,
@@ -42,7 +42,9 @@ export function buildDischargeRuntime(
   validateRuntimeConfig(template, values);
   const sortedFields = [...template.fields].sort(byFieldOrder);
   const fieldValues = values.values ?? {};
-  const sections = sortedFields.map((field) => toClinicalSection(field, fieldValues[field.fieldKey]));
+  const sections = applyDischargeFieldAutomation(
+    sortedFields.map((field) => toClinicalSection(field, fieldValues[field.fieldKey])),
+  );
   const metaFields = sortedFields.filter(isMetaField);
   const metaFieldKeys = metaFields.map((field) => field.fieldKey);
   const readOnlyHints = Object.fromEntries(
@@ -67,12 +69,16 @@ export function isDischargeMetaSection(section: ClinicalSection, metaFieldKeys: 
 }
 
 function toClinicalSection(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): ClinicalSection {
+  const dateField = isStandardDischargeDateField(field.fieldKey);
+  const daysField = field.fieldKey === 'hospitalDays';
   return {
     key: field.fieldKey,
     title: field.sectionName || field.fieldLabel,
     text: resolveFieldText(field, value),
     fieldKey: field.writebackFieldKey || field.fieldKey,
-    editable: field.renderRule?.editable ?? true,
+    editable: daysField ? false : dateField ? true : field.renderRule?.editable ?? true,
+    inputType: dateField ? 'date' : field.inputType,
+    calculation: field.renderRule?.calculation ?? defaultDischargeCalculation(field.fieldKey),
     source: normalizeFieldSource(field.sourceType),
     required: Boolean(field.required),
   };
@@ -120,7 +126,71 @@ function isMetaField(field: RuntimeDocFieldDto): boolean {
 function resolveFieldText(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): string {
   const resolved = runtimeValueToText(value?.value);
   if (resolved) return resolved;
+  if (field.renderRule?.defaultValueMode === 'today') return todayDate();
   return field.staticText || field.defaultValue || '';
+}
+
+function isStandardDischargeDateField(fieldKey: string): boolean {
+  return fieldKey === 'admissionDate' || fieldKey === 'dischargeDate';
+}
+
+function defaultDischargeCalculation(fieldKey: string): ClinicalFieldCalculation | undefined {
+  if (fieldKey !== 'hospitalDays') return undefined;
+  return {
+    type: 'daysBetween',
+    startField: 'admissionDate',
+    endField: 'dischargeDate',
+    minDays: 1,
+    suffix: '天',
+  };
+}
+
+export function applyDischargeFieldAutomation(sections: ClinicalSection[]): ClinicalSection[] {
+  const values = Object.fromEntries(sections.map((section) => [section.key, section.text]));
+  return sections.map((section) => {
+    const calculated = calculateSectionText(section.calculation ?? defaultDischargeCalculation(section.key), values);
+    return calculated == null ? section : { ...section, text: calculated };
+  });
+}
+
+function calculateSectionText(
+  calculation: ClinicalFieldCalculation | undefined,
+  values: Record<string, string>,
+): string | null {
+  if (calculation?.type !== 'daysBetween' || !calculation.startField || !calculation.endField) return null;
+  const days = calculateHospitalDays(values[calculation.startField], values[calculation.endField], calculation.minDays);
+  if (days == null) return '';
+  return `${days}${calculation.suffix ?? '天'}`;
+}
+
+export function calculateHospitalDays(startDate: string, endDate: string, minDays = 1): number | null {
+  const start = parseDateOnly(startDate);
+  const end = parseDateOnly(endDate);
+  if (!start || !end) return null;
+  const diffDays = Math.floor((end.getTime() - start.getTime()) / 86_400_000);
+  if (diffDays < 0) return null;
+  return Math.max(minDays, diffDays);
+}
+
+function parseDateOnly(value: string): Date | null {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? date
+    : null;
+}
+
+function todayDate(): string {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function buildDischargeMetaRows(

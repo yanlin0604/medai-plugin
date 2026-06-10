@@ -77,7 +77,7 @@ export interface PatientConsistency {
 export type FieldSource = 'his' | 'emr' | 'asr' | 'lis' | 'pacs' | 'manual' | 'ai' | 'option';
 
 /** 字段录入形态 */
-export type FieldInputType = 'static' | 'options' | 'text' | 'icd';
+export type FieldInputType = 'static' | 'options' | 'text' | 'icd' | 'date';
 
 /** 选项型字段的单个选项（value 为存储值，render 为写入病历正文的规范表述） */
 export interface DocFieldOption {
@@ -200,8 +200,18 @@ export interface ClinicalSection {
   fieldKey: string;
   /** 是否允许医生编辑 */
   editable: boolean;
+  inputType?: string;
+  calculation?: ClinicalFieldCalculation;
   source?: FieldSource;
   required?: boolean;
+}
+
+export interface ClinicalFieldCalculation {
+  type?: string;
+  startField?: string;
+  endField?: string;
+  minDays?: number;
+  suffix?: string;
 }
 
 /** 段落转换为提交载荷前的中间快照 */

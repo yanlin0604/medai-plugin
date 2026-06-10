@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { message, Modal } from 'antd';
 import {
@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
-import DocumentPaper from '../../components/clinical/DocumentPaper';
+import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
 import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
@@ -19,6 +19,7 @@ import { usePatientStore } from '../../stores/usePatientStore';
 import { saveDraft, loadDraft } from '../../services/draftService';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import {
+  applyDischargeFieldAutomation,
   isDischargeMetaSection,
   loadDischargeRuntime,
   type DischargeRuntimeState,
@@ -33,6 +34,64 @@ type PreviewMode = 'read' | 'edit';
 function toRuntimeRewriteType(mode: string): RuntimeRewriteType {
   if (mode === 'polish' || mode === 'academic' || mode === 'expand' || mode === 'shorten') return mode;
   return 'custom';
+}
+
+const MAX_META_CELLS_PER_ROW = 3;
+
+function normalizeDateInputValue(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+}
+
+function buildCurrentMetaRows(
+  patient: PatientBrief,
+  sections: ClinicalSection[],
+  metaFieldKeys: string[],
+  editable: boolean,
+  onChange: (sectionKey: string, text: string) => void,
+): DocumentPaperMetaCell[][] {
+  const rows: DocumentPaperMetaCell[][] = [
+    [
+      { label: '姓名', value: patient.name },
+      { label: '性别', value: patient.gender },
+      { label: '年龄', value: patient.age },
+    ],
+    [
+      { label: '床位号', value: patient.bed },
+      { label: '住院号', value: patient.admissionNo },
+      { label: '入院诊断', value: patient.diagnosis ?? '待完善' },
+    ],
+  ];
+  const sectionByKey = new Map(sections.map((section) => [section.key, section]));
+  const configuredCells = metaFieldKeys
+    .map((key) => sectionByKey.get(key))
+    .filter((section): section is ClinicalSection => Boolean(section))
+    .map((section) => ({
+      label: section.title,
+      value: renderMetaCell(section, editable, onChange),
+    }));
+
+  for (let index = 0; index < configuredCells.length; index += MAX_META_CELLS_PER_ROW) {
+    rows.push(configuredCells.slice(index, index + MAX_META_CELLS_PER_ROW));
+  }
+  return rows;
+}
+
+function renderMetaCell(
+  section: ClinicalSection,
+  editable: boolean,
+  onChange: (sectionKey: string, text: string) => void,
+): ReactNode {
+  if (!editable || section.inputType !== 'date' || !section.editable) {
+    return section.text || '待完善';
+  }
+  return (
+    <input
+      type="date"
+      value={normalizeDateInputValue(section.text)}
+      onChange={(event) => onChange(section.key, event.target.value)}
+      className="w-full min-w-[8.5rem] rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800 outline-none transition-colors focus:border-[#1E3A8A] focus:ring-1 focus:ring-[#93C5FD]"
+    />
+  );
 }
 
 export default function DischargeFlow({ doc }: ParadigmProps) {
@@ -100,7 +159,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
           : runtime.sections;
 
         setRuntimeState(runtime);
-        setSections(restoredSections);
+        setSections(applyDischargeFieldAutomation(restoredSections));
         setAcceptedDiagnoses(
           saved ? (saved.values.dischargeDiagnoses as IcdItem[] | undefined) ?? runtime.icdCandidates : runtime.icdCandidates,
         );
@@ -121,6 +180,23 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
       cancelled = true;
     };
   }, [doc.code, patient.id, patientBrief, reloadToken, setLocked]);
+
+  const updateSection = useCallback((sectionKey: string, text: string) => {
+    setSections((prev) => applyDischargeFieldAutomation(
+      prev.map((section) => (section.key === sectionKey ? { ...section, text } : section)),
+    ));
+  }, []);
+
+  const metaRows = useMemo(
+    () => buildCurrentMetaRows(
+      patientBrief,
+      sections,
+      runtimeState?.metaFieldKeys ?? [],
+      previewMode === 'edit' && !locked,
+      updateSection,
+    ),
+    [locked, patientBrief, previewMode, runtimeState?.metaFieldKeys, sections, updateSection],
+  );
 
   const bodySections = useMemo<ClinicalSection[]>(
     () => sections.filter((section) => !isDischargeMetaSection(section, runtimeState?.metaFieldKeys ?? [])),
@@ -168,10 +244,6 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     }, 800);
     return () => window.clearTimeout(t);
   }, [acceptedDiagnoses, doc.code, finalContent, locked, patient.id, sections]);
-
-  const updateSection = (sectionKey: string, text: string) => {
-    setSections((prev) => prev.map((section) => (section.key === sectionKey ? { ...section, text } : section)));
-  };
 
   const resetSection = (sectionKey: string) => {
     const base = runtimeState?.sections.find((section) => section.key === sectionKey);
@@ -299,7 +371,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
               docName={templateTitle}
               patient={patientBrief}
               sections={bodySections}
-              metaRows={runtimeState?.metaRows}
+              metaRows={metaRows}
               actions={renderActionButton(
                 <><ReloadOutlined />编辑</>,
                 () => setPreviewMode('edit'),
@@ -312,7 +384,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
                 docName={templateTitle}
                 patient={patientBrief}
                 sections={bodySections}
-                metaRows={runtimeState?.metaRows}
+                metaRows={metaRows}
                 actions={renderActionButton(
                   <><ExpandAltOutlined />通读全文</>,
                   () => setPreviewMode('read'),

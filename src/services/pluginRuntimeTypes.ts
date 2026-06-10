@@ -72,6 +72,24 @@ export interface RuntimeFieldRenderRuleDto {
   editable?: boolean;
   metaSlot?: string;
   readOnlyHint?: string;
+  defaultValueMode?: string;
+  calculation?: RuntimeFieldCalculationDto;
+  todayDocMerge?: RuntimeTodayDocMergeRuleDto;
+}
+
+export interface RuntimeFieldCalculationDto {
+  type?: string;
+  startField?: string;
+  endField?: string;
+  minDays?: number;
+  suffix?: string;
+}
+
+export interface RuntimeTodayDocMergeRuleDto {
+  enabled?: boolean;
+  fieldKeys?: string[];
+  excludeDocCodes?: string[];
+  maxChars?: number;
 }
 
 export interface RuntimeFieldValueRefDto {

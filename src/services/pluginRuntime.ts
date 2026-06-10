@@ -135,6 +135,7 @@ function normalizeInputType(inputType: string): FieldInputType {
     case 'options':
     case 'text':
     case 'icd':
+    case 'date':
       return inputType;
     default:
       throw new Error(`未知字段录入形态: ${inputType}`);

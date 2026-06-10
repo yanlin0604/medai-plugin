@@ -64,6 +64,7 @@ function renderWritebackValue(
       return field.options?.find((o) => o.value === v)?.render ?? '';
     }
     case 'text':
+    case 'date':
       return ((value as string | undefined) ?? field.default ?? '').trim();
     case 'icd': {
       const list = (value as IcdItem[] | undefined) ?? [];
@@ -158,7 +159,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           initialValues[field.key] = `姓名：${patient.name}，性别：${patient.gender}，年龄：${patient.age}，入院诊断：${diagnosis}。`;
         } else if (field.key === 'treatmentPlan') {
           initialValues[field.key] = field.default ?? buildTreatmentPlan(diagnosis);
-        } else if (field.inputType === 'options' || field.inputType === 'text') {
+        } else if (field.inputType === 'options' || field.inputType === 'text' || field.inputType === 'date') {
           initialValues[field.key] = field.default ?? '';
         } else if (field.inputType === 'icd') {
           initialValues[field.key] = icdItems;

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildDischargeRuntime, isDischargeMetaSection } from './dischargeRuntime';
+import {
+  applyDischargeFieldAutomation,
+  buildDischargeRuntime,
+  calculateHospitalDays,
+  isDischargeMetaSection,
+} from './dischargeRuntime';
 import type {
   RuntimeDocFieldDto,
   RuntimeDocTemplateDto,
@@ -81,6 +86,7 @@ describe('dischargeRuntime', () => {
     });
     expect(runtime.metaFieldKeys).toEqual(['admissionDate']);
     expect(isDischargeMetaSection(runtime.sections[0], runtime.metaFieldKeys)).toBe(true);
+    expect(runtime.sections[0]).toMatchObject({ inputType: 'date', editable: true });
     expect(runtime.metaRows[2][0]).toEqual({ label: '入院日期', value: '2026-06-01' });
     expect(runtime.readOnlyHints.admissionDate).toBe('HIS同步');
     expect(runtime.icdCandidates[0]).toMatchObject({ code: 'I25.101', confidence: 96 });
@@ -98,5 +104,41 @@ describe('dischargeRuntime', () => {
       field({ fieldKey: 'a', writebackFieldKey: 'same' }),
       field({ fieldKey: 'b', fieldOrder: 20, writebackFieldKey: 'same' }),
     ]), values(), patient)).toThrow('回写字段键重复');
+  });
+
+  it('calculates hospital days from configurable date fields', () => {
+    expect(calculateHospitalDays('2026-06-01', '2026-06-10')).toBe(9);
+    expect(calculateHospitalDays('2026-06-01', '2026-06-01')).toBe(1);
+    expect(calculateHospitalDays('2026-06-10', '2026-06-01')).toBeNull();
+
+    const sections = applyDischargeFieldAutomation([
+      {
+        key: 'admissionDate',
+        title: '入院日期',
+        text: '2026-06-01',
+        fieldKey: 'admissionDate',
+        editable: true,
+        inputType: 'date',
+      },
+      {
+        key: 'dischargeDate',
+        title: '出院日期',
+        text: '2026-06-10',
+        fieldKey: 'dischargeDate',
+        editable: true,
+        inputType: 'date',
+      },
+      {
+        key: 'hospitalDays',
+        title: '住院天数',
+        text: '',
+        fieldKey: 'hospitalDays',
+        editable: false,
+        inputType: 'static',
+        calculation: undefined,
+      },
+    ]);
+
+    expect(sections.find((section) => section.key === 'hospitalDays')?.text).toBe('9天');
   });
 });
