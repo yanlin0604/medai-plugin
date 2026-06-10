@@ -1,13 +1,16 @@
-// 文书版本历史服务。
-//
-// 每次提交后产生一个版本快照；支持查看历史版本与版本间差异对比。
-// 当前用 样例历史 + localStorage 追加（前端独立可验证）；
-// 真实环境改为后端版本/审计接口，替换本文件实现即可，UI 不动。
-// TODO: 接后端版本接口（getDocVersions / appendVersion）。
-
 import type { DocVersion, SectionDiff } from './types';
+import { pluginRuntimeApi } from './pluginRuntime';
+import type { RuntimeCreateVersionRequest } from './pluginRuntimeTypes';
+
 const KEY_PREFIX = 'medai:versions:';
 const keyOf = (docCode: string, patientId: string) => `${KEY_PREFIX}${docCode}:${patientId}`;
+
+export type VersionSnapshotInput = Omit<DocVersion, 'versionNo'>;
+
+export interface DocumentVersionAdapter {
+  listVersions: (docCode: string, patientId: string) => Promise<DocVersion[]>;
+  createVersion: (snapshot: VersionSnapshotInput) => Promise<DocVersion>;
+}
 
 const VERSION_FIELD_LABELS: Record<string, Record<string, string>> = {
   DOC001: {
@@ -79,9 +82,43 @@ export function appendVersion(
   return version;
 }
 
+export async function listRuntimeDocVersions(docCode: string, patientId: string): Promise<DocVersion[]> {
+  return pluginRuntimeApi.listDocVersions(docCode, patientId);
+}
+
+export async function createRuntimeDocVersion(snapshot: VersionSnapshotInput): Promise<DocVersion> {
+  const request: RuntimeCreateVersionRequest = {
+    patientIdHis: snapshot.patientId,
+    content: snapshot.content,
+    fields: snapshot.fields,
+    fieldLabels: snapshot.fieldLabels,
+    fieldOrder: snapshot.fieldOrder,
+    editor: snapshot.editor,
+    changeSummary: snapshot.changeSummary,
+  };
+  return pluginRuntimeApi.createDocVersion(snapshot.docCode, request);
+}
+
+export const localVersionAdapter: DocumentVersionAdapter = {
+  listVersions: async (docCode, patientId) => getDocVersions(docCode, patientId),
+  createVersion: async (snapshot) => appendVersion(snapshot),
+};
+
+export const backendRuntimeVersionAdapter: DocumentVersionAdapter = {
+  listVersions: listRuntimeDocVersions,
+  createVersion: createRuntimeDocVersion,
+};
+
 /** 计算两版本按段落的差异（older → newer） */
 export function getVersionDiff(older: DocVersion, newer: DocVersion): SectionDiff[] {
-  const sections = Array.from(new Set([...Object.keys(older.fields), ...Object.keys(newer.fields)]));
+  const sections = Array.from(
+    new Set([
+      ...(newer.fieldOrder ?? []),
+      ...(older.fieldOrder ?? []),
+      ...Object.keys(older.fields),
+      ...Object.keys(newer.fields),
+    ]),
+  );
   return sections.map((section) => {
     const before = older.fields[section] ?? '';
     const after = newer.fields[section] ?? '';

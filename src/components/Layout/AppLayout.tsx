@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { usePatientStore } from '../../stores/usePatientStore';
@@ -28,9 +28,10 @@ import {
   CloseOutlined,
 } from '@ant-design/icons';
 import { message, Modal } from 'antd';
-import { DocDefinition, DOC_REGISTRY } from '../../config/docRegistry';
+import type { DocDefinition } from '../../config/docRegistry';
 import { getActivePatient, getHostSession, HostSession } from '../../services/emsBridge';
 import { collapseAssistantWindow } from '../../services/windowMode';
+import { pluginRuntimeApi } from '../../services/pluginRuntime';
 
 // 文书图标映射
 const renderIcon = (iconName: string) => {
@@ -154,6 +155,27 @@ export default function AppLayout() {
   } = usePatientStore();
 
   const [session, setSession] = useState<HostSession | null>(null);
+  const [runtimeDocs, setRuntimeDocs] = useState<DocDefinition[]>([]);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [docsError, setDocsError] = useState('');
+
+  const loadRuntimeDocs = useCallback(async () => {
+    setDocsLoading(true);
+    setDocsError('');
+    try {
+      const docs = await pluginRuntimeApi.listRuntimeDocuments();
+      setRuntimeDocs(docs.filter((doc) => doc.code !== 'DOC000'));
+      if (!docs.length) {
+        setDocsError('后台未返回启用的运行时文书配置');
+      }
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : '运行时文书目录加载失败';
+      setRuntimeDocs([]);
+      setDocsError(messageText);
+    } finally {
+      setDocsLoading(false);
+    }
+  }, []);
 
   // 启动时检测宿主病历系统连接
   useEffect(() => {
@@ -162,6 +184,10 @@ export default function AppLayout() {
       if (s.online) setLoggedIn(true);
     });
   }, [setLoggedIn]);
+
+  useEffect(() => {
+    void loadRuntimeDocs();
+  }, [loadRuntimeDocs]);
 
   // 从宿主病历系统读取当前活动患者
   const handleReadActivePatient = async () => {
@@ -220,9 +246,6 @@ export default function AppLayout() {
       </div>
     );
   }
-
-  // 获取所有文书（排除 DOC000 病案首页）
-  const allDocs = DOC_REGISTRY.filter((d) => d.code !== 'DOC000');
 
   return (
     <div className="h-screen w-screen bg-[#F8FAFC] overflow-hidden flex flex-col font-sans select-none relative">
@@ -303,8 +326,26 @@ export default function AppLayout() {
 
         {/* 3. 文书列表 - 紧凑网格 */}
         <div className="flex-1 overflow-hidden">
-          <div className="h-full grid grid-cols-2 gap-2.5 content-start">
-            {allDocs.map((doc) => (
+          {docsLoading ? (
+            <div className="h-full bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center text-center px-6">
+              <FileTextOutlined className="text-[#1E3A8A] text-2xl" />
+              <p className="text-xs font-bold text-slate-700 mt-3">正在加载后台文书目录</p>
+            </div>
+          ) : docsError || runtimeDocs.length === 0 ? (
+            <div className="h-full bg-white border border-rose-100 rounded-lg flex flex-col items-center justify-center text-center px-6">
+              <ExclamationCircleOutlined className="text-rose-500 text-2xl" />
+              <p className="text-xs font-bold text-slate-800 mt-3">文书目录不可用</p>
+              <p className="text-[10px] text-slate-400 mt-1 leading-5">{docsError || '后台未返回启用的运行时文书配置'}</p>
+              <button
+                onClick={() => void loadRuntimeDocs()}
+                className="mt-4 text-xs font-bold text-blue-600 border border-blue-200 px-4 py-2 rounded-lg bg-white hover:bg-blue-50 transition-colors"
+              >
+                重新加载
+              </button>
+            </div>
+          ) : (
+            <div className="h-full grid grid-cols-2 gap-2.5 content-start">
+              {runtimeDocs.map((doc) => (
               <button
                 key={doc.code}
                 onClick={() => handleSelectDoc(doc)}
@@ -319,8 +360,9 @@ export default function AppLayout() {
                   </div>
                 </div>
               </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

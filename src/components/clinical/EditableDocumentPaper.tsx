@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import type { ClinicalSection, PatientBrief } from '../../services/types';
-import DocumentSectionEditorList from './DocumentSectionEditorList';
+import DocumentSectionEditorList, { type SectionListOptimize } from './DocumentSectionEditorList';
 import { DocumentPaperFrame, type DocumentPaperMetaCell } from './DocumentPaper';
+import type { SectionOptimize, SectionRewriteStatusHandler } from './SectionEditor';
 
 interface Props {
   docName: string;
@@ -13,11 +14,12 @@ interface Props {
   density?: 'compact' | 'comfortable';
   sectionEdits?: Record<string, string>;
   resetKeys?: Record<string, number>;
-  readOnlyHints?: Record<string, string>;
   sectionSuffixes?: Record<string, ReactNode>;
   onChange: (sectionKey: string, text: string) => void;
   onReset: (sectionKey: string) => void;
-  optimize: (text: string, mode: string) => string;
+  optimize: SectionOptimize;
+  optimizeSection?: SectionListOptimize;
+  onRewriteStatusChange?: SectionRewriteStatusHandler;
 }
 
 /**
@@ -33,11 +35,12 @@ export default function EditableDocumentPaper({
   density = 'comfortable',
   sectionEdits,
   resetKeys,
-  readOnlyHints,
   sectionSuffixes,
   onChange,
   onReset,
   optimize,
+  optimizeSection,
+  onRewriteStatusChange,
 }: Props) {
   return (
     <DocumentPaperFrame
@@ -54,11 +57,12 @@ export default function EditableDocumentPaper({
         variant="paper"
         sectionEdits={sectionEdits}
         resetKeys={resetKeys}
-        readOnlyHints={readOnlyHints}
         sectionSuffixes={sectionSuffixes}
         onChange={onChange}
         onReset={onReset}
         optimize={optimize}
+        optimizeSection={optimizeSection}
+        onRewriteStatusChange={onRewriteStatusChange}
       />
     </DocumentPaperFrame>
   );

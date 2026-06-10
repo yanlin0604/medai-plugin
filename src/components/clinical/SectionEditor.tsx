@@ -5,6 +5,44 @@ import { ThunderboltOutlined, UndoOutlined } from '@ant-design/icons';
 import { suggestTerms } from '../../services/clinicalService';
 
 export type SectionEditorVariant = 'card' | 'paper';
+export type SectionRewriteStatus = 'adopted' | 'rejected';
+
+export interface SectionRewriteResult {
+  before?: string;
+  after: string;
+  requestId?: string | number;
+}
+
+export type SectionOptimize = (
+  text: string,
+  mode: string,
+) => string | SectionRewriteResult | Promise<string | SectionRewriteResult>;
+
+export type SectionRewriteStatusHandler = (
+  requestId: string | number,
+  status: SectionRewriteStatus,
+) => void | Promise<void>;
+
+export function normalizeSectionRewriteResult(
+  result: string | SectionRewriteResult,
+  before: string,
+): { before: string; after: string; requestId?: string | number } {
+  if (typeof result === 'string') return { before, after: result };
+  return { before: result.before ?? before, after: result.after, requestId: result.requestId };
+}
+
+export function formatSectionRewriteError(error: unknown): string {
+  return error instanceof Error ? error.message : 'AI 优化失败，请稍后重试。';
+}
+
+export function formatRewriteStatusSyncWarning(
+  status: SectionRewriteStatus,
+  error: unknown,
+): string {
+  const action = status === 'adopted' ? '采纳' : '拒绝';
+  const detail = error instanceof Error ? error.message : '审计状态同步失败';
+  return `优化已${action}，但${detail}`;
+}
 
 interface Props {
   /** 段落名（如 主诉/现病史） */
@@ -14,7 +52,6 @@ interface Props {
   /** 是否已手动改写（显示「重置本段」） */
   edited: boolean;
   locked?: boolean;
-  readOnlyHint?: string;
   sectionSuffix?: ReactNode;
   density?: 'compact' | 'comfortable';
   variant?: SectionEditorVariant;
@@ -23,7 +60,9 @@ interface Props {
   /** 重置本段（撤销手动改写，回到要素渲染值；由父级经 key remount 实现） */
   onReset: () => void;
   /** 划词优化实现（样例/真实 AI 由父注入） */
-  optimize: (text: string, mode: string) => string;
+  optimize: SectionOptimize;
+  /** 后台重写审计状态同步；同步失败不得回滚正文 */
+  onRewriteStatusChange?: SectionRewriteStatusHandler;
 }
 
 const toHtml = (t: string) => t.replace(/\n/g, '<br>');
@@ -52,13 +91,13 @@ export default function SectionEditor({
   text,
   edited,
   locked,
-  readOnlyHint,
   sectionSuffix,
   density = 'compact',
   variant = 'card',
   onChange,
   onReset,
   optimize,
+  onRewriteStatusChange,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const editedRef = useRef(false);
@@ -68,12 +107,17 @@ export default function SectionEditor({
   const savedRange = useRef<Range | null>(null);
   const savedText = useRef('');
   const [menu, setMenu] = useState({ visible: false, top: 0, left: 0 });
-  const [diff, setDiff] = useState({ visible: false, before: '', after: '' });
+  const [diff, setDiff] = useState<{
+    visible: boolean;
+    before: string;
+    after: string;
+    requestId?: string | number;
+  }>({ visible: false, before: '', after: '' });
+  const [optimizing, setOptimizing] = useState(false);
   const [sug, setSug] = useState<SugState>(EMPTY_SUG);
   const comfortable = density === 'comfortable';
   const paper = variant === 'paper';
   const titleClass = paper ? 'text-sm' : comfortable ? 'text-sm' : 'text-[11px]';
-  const badgeClass = comfortable ? 'text-[11px]' : 'text-[9px]';
   const actionClass = comfortable ? 'text-xs' : 'text-[10px]';
   const editorClass = paper
     ? comfortable
@@ -226,12 +270,23 @@ export default function SectionEditor({
     }
   };
 
-  const applyOptimize = (mode: string) => {
+  const applyOptimize = async (mode: string) => {
     setMenu((m) => ({ ...m, visible: false }));
-    setDiff({ visible: true, before: savedText.current, after: optimize(savedText.current, mode) });
+    const before = savedText.current;
+    if (!before.trim()) return;
+    setOptimizing(true);
+    try {
+      const result = await optimize(before, mode);
+      const normalized = normalizeSectionRewriteResult(result, before);
+      setDiff({ visible: true, ...normalized });
+    } catch (error) {
+      message.error(formatSectionRewriteError(error));
+    } finally {
+      setOptimizing(false);
+    }
   };
 
-  const polishSection = () => {
+  const polishSection = async () => {
     const current = ref.current?.innerText.trim() ?? '';
     if (!current) {
       message.warning('当前段落为空，无法润色。');
@@ -239,10 +294,20 @@ export default function SectionEditor({
     }
     savedRange.current = null;
     savedText.current = current;
-    setDiff({ visible: true, before: current, after: optimize(current, 'polish') });
+    await applyOptimize('polish');
+  };
+
+  const syncRewriteStatus = async (requestId: string | number, status: SectionRewriteStatus) => {
+    if (!onRewriteStatusChange) return;
+    try {
+      await onRewriteStatusChange(requestId, status);
+    } catch (error) {
+      message.warning(formatRewriteStatusSyncWarning(status, error));
+    }
   };
 
   const acceptDiff = () => {
+    const requestId = diff.requestId;
     if (ref.current && savedRange.current) {
       ref.current.focus();
       const sel = window.getSelection();
@@ -259,6 +324,13 @@ export default function SectionEditor({
     }
     setDiff({ visible: false, before: '', after: '' });
     message.success('已采纳优化表达。');
+    if (requestId != null) void syncRewriteStatus(requestId, 'adopted');
+  };
+
+  const rejectDiff = () => {
+    const requestId = diff.requestId;
+    setDiff({ visible: false, before: '', after: '' });
+    if (requestId != null) void syncRewriteStatus(requestId, 'rejected');
   };
 
   return (
@@ -267,17 +339,17 @@ export default function SectionEditor({
         <div className={titleWrapClass}>
           <span className={titleTextClass}>{section}</span>
           {sectionSuffix}
-          {readOnlyHint && <span className={`${badgeClass} font-normal px-1 rounded text-[#166534] bg-[#F0FDF4] border border-[#BBF7D0]`}>{readOnlyHint}</span>}
         </div>
         {!locked && (
           <div className={actionWrapClass}>
           <button
             onClick={polishSection}
+            disabled={optimizing}
             title="对整段生成润色建议，采纳后才替换正文"
             className={polishButtonClass}
           >
             <ThunderboltOutlined />
-            AI润色
+            {optimizing ? '处理中' : 'AI润色'}
           </button>
             {edited && (
               <button
@@ -342,8 +414,8 @@ export default function SectionEditor({
       {menu.visible && !locked && (
         <div className="absolute bg-[#1E293B] text-white p-1 rounded-md shadow-lg flex gap-1 z-50" style={{ top: menu.top, left: menu.left }}>
           <button onClick={() => applyOptimize('academic')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">学术化</button>
-          <button onClick={() => applyOptimize('expand')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">扩写</button>
-          <button onClick={() => applyOptimize('shorten')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">精简</button>
+          <button disabled={optimizing} onClick={() => applyOptimize('expand')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">扩写</button>
+          <button disabled={optimizing} onClick={() => applyOptimize('shorten')} className="px-2 py-1 rounded text-[11px] font-bold hover:bg-white/15">精简</button>
         </div>
       )}
 
@@ -356,7 +428,7 @@ export default function SectionEditor({
             <div><b>修改后：</b><span className="bg-[#D1FAE5] text-[#065F46] font-bold px-1">{diff.after}</span></div>
           </div>
           <div className="flex justify-end gap-2 mt-2">
-            <button onClick={() => setDiff({ visible: false, before: '', after: '' })} className="px-2 py-0.5 rounded text-[10px] bg-slate-300 text-slate-700">拒绝</button>
+            <button onClick={rejectDiff} className="px-2 py-0.5 rounded text-[10px] bg-slate-300 text-slate-700">拒绝</button>
             <button onClick={acceptDiff} className="px-2 py-0.5 rounded text-[10px] bg-[#1E3A8A] text-white">采纳</button>
           </div>
         </div>
