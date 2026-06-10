@@ -11,7 +11,6 @@ import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
 import ObjectiveTimeline from '../../components/clinical/ObjectiveTimeline';
 import DictationConsole from '../../components/clinical/DictationConsole';
-import IcdRecommend from '../../components/clinical/IcdRecommend';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { useHotkey } from '../../hooks/useHotkey';
 import { saveDraft, loadDraft } from '../../services/draftService';
@@ -322,7 +321,9 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
             {config.topCardText}
           </div>
           <div className="h-[calc(100%-44px)] overflow-y-auto p-4 space-y-4">
-            <ObjectiveTimeline title={config.timelineTitle} nodes={config.timeline} />
+            {config.showTimelinePanel !== false && (
+              <ObjectiveTimeline title={config.timelineTitle} nodes={config.timeline} />
+            )}
             <DictationConsole
               title={config.dictationTitle}
               value={dictation}
@@ -337,7 +338,6 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
               <PlusOutlined />
               并入口述段落
             </button>
-            <IcdRecommend title={config.icdTitle} items={config.icdItems} onChange={setDiagnoses} />
           </div>
         </aside>
 

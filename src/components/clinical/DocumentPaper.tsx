@@ -30,6 +30,10 @@ export function defaultMetaRows(patient: PatientBrief): DocumentPaperMetaCell[][
   ];
 }
 
+function isWideMetaCell(cell: DocumentPaperMetaCell) {
+  return cell.label.includes('诊断') || cell.label.includes('地址') || cell.label.includes('病情');
+}
+
 interface DocumentPaperFrameProps {
   docName: string;
   patient: PatientBrief;
@@ -51,46 +55,43 @@ export function DocumentPaperFrame({
   bodyClassName,
 }: DocumentPaperFrameProps) {
   const rows = metaRows?.length ? metaRows : defaultMetaRows(patient);
+  const cells = rows.flat();
 
   return (
-    <article className="max-w-5xl mx-auto px-8 py-6">
-      <div className="relative mb-6 flex items-center justify-center">
-        <h1 className="text-2xl font-bold text-slate-900">{docName}</h1>
-        {actions && <div className="absolute right-0 top-1/2 -translate-y-1/2">{actions}</div>}
+    <article className="mx-auto w-full max-w-5xl px-3 py-4 sm:px-6 lg:px-8">
+      <div className="min-h-full rounded-sm border border-slate-200 bg-[#FFFEFB] px-4 py-5 shadow-[0_12px_36px_rgba(15,23,42,0.06)] sm:px-8 sm:py-7 lg:px-10">
+      <div className="mb-5 flex flex-col gap-3 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-start">
+        <div className="hidden sm:block" />
+        <div className="min-w-0 text-center">
+          <h1 className="text-2xl font-bold text-slate-950">{docName}</h1>
+        </div>
+        {actions && <div className="flex justify-center sm:justify-end">{actions}</div>}
       </div>
 
-      <div className="mb-6 text-sm border-2 border-slate-300">
-        {rows.map((row, rowIndex) => (
-          <div
-            key={`row-${rowIndex}`}
-            className={`grid grid-cols-12 ${rowIndex < rows.length - 1 ? 'border-b border-slate-300' : ''}`}
-          >
-            {row.map((cell, cellIndex) => {
-              const last = cellIndex === row.length - 1;
-              return (
-                <div key={`${cell.label}-${cellIndex}`} className="contents">
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">
-                    {cell.label}
-                  </div>
-                  <div
-                    className={`col-span-2 px-3 py-2 min-w-0 break-words ${last ? '' : 'border-r border-slate-300'}`}
-                  >
-                    {cell.value}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+      <div className="mb-6 border-y-2 border-slate-700 py-2 text-sm">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(168px,1fr))] gap-x-5 gap-y-2">
+          {cells.map((cell, cellIndex) => (
+            <div
+              key={`${cell.label}-${cellIndex}`}
+              className={`flex min-w-0 items-baseline gap-2 ${isWideMetaCell(cell) ? 'md:col-span-2 xl:col-span-3' : ''}`}
+            >
+              <span className="shrink-0 text-[13px] font-semibold text-slate-700">{cell.label}</span>
+              <span className="min-w-0 flex-1 border-b border-slate-400 px-1 pb-0.5 text-[13px] font-medium leading-6 text-slate-950 break-words">
+                {cell.value}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className={bodyClassName}>{children}</div>
+      </div>
     </article>
   );
 }
 
 /**
- * 纸质病历预览：标题、患者信息表格和正文段落共用结构。
+ * 纸质病历预览：标题、患者信息和正文段落共用结构。
  */
 export default function DocumentPaper({
   docName,
@@ -106,17 +107,17 @@ export default function DocumentPaper({
       patient={patient}
       metaRows={metaRows}
       actions={actions}
-      bodyClassName="space-y-4 text-sm leading-7"
+      bodyClassName="space-y-5 text-[14px] leading-7"
     >
       {sections.map((section) => (
-        <section key={section.key}>
-          <div className="flex items-baseline gap-2 mb-1">
-            <span className="font-bold text-slate-900">{section.title}：</span>
+        <section key={section.key} className="break-words">
+          <div className="mb-1 flex items-baseline gap-2 border-b border-slate-200 pb-1">
+            <span className="font-bold text-slate-950">{section.title}</span>
             {section.required && !section.text.trim() && (
               <span className="text-[11px] font-semibold text-amber-600">必填</span>
             )}
           </div>
-          <div className="text-slate-700 whitespace-pre-wrap pl-4 leading-relaxed break-words">
+          <div className="whitespace-pre-wrap text-slate-800 leading-8 sm:pl-6">
             {section.text || emptyText}
           </div>
         </section>

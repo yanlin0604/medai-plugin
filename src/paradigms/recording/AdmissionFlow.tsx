@@ -10,8 +10,8 @@ import {
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
+import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
 import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
-import type { DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
@@ -418,56 +418,17 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           <MeltdownAlert visible={mismatch} text={`宿主病历系统活动患者已切换，与当前入院记录患者「${patient.name}」不一致！防串户锁已锁定，禁止提交。`} />
 
           {previewMode === 'read' ? (
-            <div className="max-w-5xl mx-auto px-8 py-6">
-              <div className="relative mb-6 flex items-center justify-center">
-                <h1 className="text-2xl font-bold text-slate-900">入院记录</h1>
-                <div className="absolute right-0 top-1/2 -translate-y-1/2">
-                  {renderActionButton(
-                    <><ReloadOutlined />编辑</>,
-                    () => setPreviewMode('edit'),
-                    '编辑入院记录',
-                  )}
-                </div>
-              </div>
-
-              <div className="mb-6 text-sm border-2 border-slate-300">
-                <div className="grid grid-cols-12 border-b border-slate-300">
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">姓名</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2">{patient.name}</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">性别</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2">{patient.gender}</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">年龄</div>
-                  <div className="col-span-2 px-3 py-2">{patient.age}</div>
-                </div>
-                <div className="grid grid-cols-12 border-b border-slate-300">
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">婚姻</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2">已婚</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">职业</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2">职员</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">出生地</div>
-                  <div className="col-span-2 px-3 py-2">广东</div>
-                </div>
-                <div className="grid grid-cols-12">
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">入院日期</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2">{admissionDate}</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">入院科室</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2">{deptName}</div>
-                  <div className="col-span-2 border-r border-slate-300 px-3 py-2 bg-slate-50 font-bold">记录医师</div>
-                  <div className="col-span-2 px-3 py-2">{doctor}</div>
-                </div>
-              </div>
-
-              <div className="space-y-4 text-sm leading-7">
-                {visibleSections.map((section) => (
-                  <div key={section.section}>
-                    <div className="flex items-baseline gap-2 mb-1">
-                      <span className="font-bold text-slate-900">{section.section}：</span>
-                    </div>
-                    <div className="text-slate-700 whitespace-pre-wrap pl-4 leading-relaxed">{section.text || '（待填写）'}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <DocumentPaper
+              docName="入院记录"
+              patient={patient}
+              sections={editableSections}
+              metaRows={metaRows}
+              actions={renderActionButton(
+                <><ReloadOutlined />编辑</>,
+                () => setPreviewMode('edit'),
+                '编辑入院记录',
+              )}
+            />
           ) : (
             <div className="p-4 space-y-3">
               {dictating && (

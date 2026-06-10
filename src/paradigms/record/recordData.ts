@@ -19,6 +19,7 @@ export interface RecordConfig {
   form: RecordForm;
   topCardText: string;
   timelineTitle: string;
+  showTimelinePanel?: boolean;
   timeline: TimelineNode[];
   dictationTitle: string;
   dictationInit: string;
@@ -49,6 +50,7 @@ const operationConfig: RecordConfig = {
   },
   topCardText: '陈建国 (男 / 65岁) · 术中事件提取与口述交叉拼装',
   timelineTitle: '手麻系统/手术医嘱客观时间轴静默集成',
+  showTimelinePanel: false,
   timeline: [
     { time: '14:00', text: '麻醉开始 (2%利多卡因局部浸润麻醉)', highlight: true },
     { time: '14:15', text: '右股动脉穿刺置管入鞘 (穿刺成功)', highlight: true },
@@ -87,6 +89,7 @@ function buildFallback(doc: DocDefinition, p: Patient): RecordConfig {
     },
     topCardText: `${p.name} (${p.gender} / ${p.age}) · 客观事件提取与口述交叉拼装`,
     timelineTitle: '医嘱/用药客观时间轴静默集成',
+    showTimelinePanel: false,
     timeline: [
       { time: '08:00', text: '系统自动拉取事件时间窗内首条医嘱', highlight: true },
       { time: '08:30', text: '关键用药与处置记录自动归集' },
