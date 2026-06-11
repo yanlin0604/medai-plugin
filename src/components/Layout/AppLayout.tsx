@@ -29,6 +29,8 @@ import {
   BorderOutlined,
   HomeOutlined,
   CloseOutlined,
+  PushpinFilled,
+  PushpinOutlined,
 } from '@ant-design/icons';
 import { message, Modal } from 'antd';
 import type { DocDefinition } from '../../config/docRegistry';
@@ -65,6 +67,13 @@ const isTauri = typeof window !== 'undefined' && window.__TAURI_INTERNALS__;
 // 无边框窗口自定义标题栏（拖拽 + 最小化/最大化/关闭）
 const WindowTitleBar = () => {
   const collapse = useBubbleStore((state) => state.collapse);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
+
+  useEffect(() => {
+    if (isTauri) {
+      void getCurrentWindow().setAlwaysOnTop(true);
+    }
+  }, []);
 
   const handleCollapseToBubble = () => {
     collapse();
@@ -77,6 +86,14 @@ const WindowTitleBar = () => {
 
   const handleToggleMaximize = () => {
     if (isTauri) getCurrentWindow().toggleMaximize();
+  };
+
+  const handleToggleAlwaysOnTop = () => {
+    const nextAlwaysOnTop = !alwaysOnTop;
+    setAlwaysOnTop(nextAlwaysOnTop);
+    if (isTauri) {
+      void getCurrentWindow().setAlwaysOnTop(nextAlwaysOnTop);
+    }
   };
 
   const handleClose = () => {
@@ -103,6 +120,21 @@ const WindowTitleBar = () => {
       </div>
 
       <div className="flex items-center gap-1 -mr-2 text-white/80 relative z-10">
+        <button
+          type="button"
+          data-tauri-drag-region="false"
+          onClick={handleToggleAlwaysOnTop}
+          className={[
+            'w-8 h-8 rounded-md transition-colors flex items-center justify-center',
+            alwaysOnTop
+              ? 'bg-white/15 text-white hover:bg-white/20'
+              : 'hover:bg-white/10 hover:text-white',
+          ].join(' ')}
+          aria-label={alwaysOnTop ? '取消置顶' : '置顶'}
+          title={alwaysOnTop ? '取消置顶' : '置顶'}
+        >
+          {alwaysOnTop ? <PushpinFilled className="text-xs" /> : <PushpinOutlined className="text-xs" />}
+        </button>
         <button
           type="button"
           data-tauri-drag-region="false"
