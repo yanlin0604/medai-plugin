@@ -2264,6 +2264,7 @@ name = "medai-plugin"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "chrono",
  "cpal",
  "env_logger",

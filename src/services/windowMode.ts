@@ -14,8 +14,9 @@ export interface AssistantWindowSize {
 
 export const ASSISTANT_WINDOW_SIZES = {
   bubble: { width: 236, height: 68 },
+  assist: { width: 360, height: 310 },
   panel: { width: 480, height: 820 },
-} satisfies Record<'bubble' | 'panel', AssistantWindowSize>;
+} satisfies Record<'bubble' | 'assist' | 'panel', AssistantWindowSize>;
 
 const WINDOW_MARGIN = 16;
 
@@ -75,4 +76,8 @@ export function expandAssistantWindow() {
 
 export function collapseAssistantWindow() {
   return applyAssistantWindowSize(ASSISTANT_WINDOW_SIZES.bubble, false, true);
+}
+
+export function showAssistBubbleWindow() {
+  return applyAssistantWindowSize(ASSISTANT_WINDOW_SIZES.assist, false, true);
 }

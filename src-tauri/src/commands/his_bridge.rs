@@ -1,4 +1,7 @@
-use crate::his::window_detect::{EmrContext, EmrContextState};
+use crate::his::window_detect::{
+    BsEditAssistContext, BsEditAssistState, EmrContext, EmrContextState,
+};
+use arboard::Clipboard;
 use serde::Serialize;
 use tauri::State;
 
@@ -19,15 +22,18 @@ pub async fn detect_his_window() -> Result<Option<HisWindowInfo>, String> {
 
 #[tauri::command]
 pub async fn get_clipboard_text() -> Result<String, String> {
-    // TODO: 实现剪贴板读取
-    Ok(String::new())
+    let mut clipboard = Clipboard::new().map_err(|error| format!("读取剪贴板失败：{error}"))?;
+    clipboard
+        .get_text()
+        .map_err(|error| format!("读取剪贴板文本失败：{error}"))
 }
 
 #[tauri::command]
 pub async fn set_clipboard_text(text: String) -> Result<(), String> {
-    // TODO: 实现剪贴板写入
-    log::info!("设置剪贴板内容");
-    Ok(())
+    let mut clipboard = Clipboard::new().map_err(|error| format!("打开剪贴板失败：{error}"))?;
+    clipboard
+        .set_text(text)
+        .map_err(|error| format!("写入剪贴板失败：{error}"))
 }
 
 #[tauri::command]
@@ -38,8 +44,21 @@ pub async fn get_latest_emr_context(
 }
 
 #[tauri::command]
-pub async fn clear_latest_emr_context(
-    state: State<'_, EmrContextState>,
+pub async fn clear_latest_emr_context(state: State<'_, EmrContextState>) -> Result<(), String> {
+    state.clear_latest().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_latest_bs_edit_assist_context(
+    state: State<'_, BsEditAssistState>,
+) -> Result<Option<BsEditAssistContext>, String> {
+    Ok(state.get_latest().await)
+}
+
+#[tauri::command]
+pub async fn clear_latest_bs_edit_assist_context(
+    state: State<'_, BsEditAssistState>,
 ) -> Result<(), String> {
     state.clear_latest().await;
     Ok(())

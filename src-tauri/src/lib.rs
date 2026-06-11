@@ -23,8 +23,11 @@ pub fn run() {
 
             let emr_context_state = his::window_detect::EmrContextState::default();
             app.manage(emr_context_state.clone());
+            let edit_assist_state = his::window_detect::BsEditAssistState::default();
+            app.manage(edit_assist_state.clone());
             tauri::async_runtime::spawn(his::window_detect::start_context_bridge(
                 emr_context_state,
+                edit_assist_state,
             ));
 
             Ok(())
@@ -46,6 +49,8 @@ pub fn run() {
             commands::his_bridge::set_clipboard_text,
             commands::his_bridge::get_latest_emr_context,
             commands::his_bridge::clear_latest_emr_context,
+            commands::his_bridge::get_latest_bs_edit_assist_context,
+            commands::his_bridge::clear_latest_bs_edit_assist_context,
             commands::writeback::writeback_to_bs_inbox,
             // 系统命令
             commands::system_tray::get_system_info,

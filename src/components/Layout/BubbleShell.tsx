@@ -4,25 +4,37 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowRightOutlined,
   CheckCircleOutlined,
+  CopyOutlined,
   FileTextOutlined,
   Loading3QuartersOutlined,
+  ReloadOutlined,
   SearchOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import appIcon from '../../../src-tauri/icons/app-icon-64.png';
-import { expandAssistantWindow } from '../../services/windowMode';
+import { collapseAssistantWindow, expandAssistantWindow, showAssistBubbleWindow } from '../../services/windowMode';
 import { BubbleEmrContext, useBubbleStore, getBubbleContextKey } from '../../stores/useBubbleStore';
 import { usePatientStore } from '../../stores/usePatientStore';
 import { watchEmrContext } from '../../services/emrContext/watchEmrContext';
 import { activateEmrContext, buildPatientFromEmrContext } from '../../services/emrContext/activateEmrContext';
 import { buildDischargeCase } from '../../services/samples/discharge';
 import { submitDocument } from '../../services/emsBridge';
+import {
+  buildEditAssistSuggestions,
+  copyEditAssistSuggestion,
+  getEditAssistModeLabel,
+  getLatestBsEditAssistContext,
+  isUsableEditAssistContext,
+  type BsEditAssistContext,
+  type EditAssistSuggestion,
+} from '../../services/editAssistService';
 
 interface BubbleShellProps {
   onExpand?: (context: BubbleEmrContext | null) => void;
 }
 
 type BubbleDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written' | 'error';
+type CopyStatus = 'idle' | 'copied' | 'error';
 
 const GENERATION_STEPS = [
   '拉取入院记录',
@@ -40,6 +52,10 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const [draftStatus, setDraftStatus] = useState<BubbleDraftStatus>('idle');
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
+  const [editContext, setEditContext] = useState<BsEditAssistContext | null>(null);
+  const [suggestionBatch, setSuggestionBatch] = useState(0);
+  const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
+  const [copiedSuggestionId, setCopiedSuggestionId] = useState('');
   const generatedPatient = useMemo(
     () => (detectedContext ? buildPatientFromEmrContext(detectedContext) : null),
     [contextKey],
@@ -47,6 +63,25 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const generatedDraft = useMemo(
     () => (generatedPatient && detectedContext ? buildBubbleDischargeDraft(generatedPatient, detectedContext.docName) : null),
     [generatedPatient, detectedContext?.docName],
+  );
+  const editContextKey = useMemo(
+    () =>
+      editContext
+        ? [
+            editContext.patientId,
+            editContext.docCode,
+            editContext.fieldKey,
+            editContext.selectedText,
+            editContext.prefix,
+            editContext.selectionStart,
+            editContext.selectionEnd,
+          ].join('|')
+        : '',
+    [editContext],
+  );
+  const suggestions = useMemo(
+    () => (editContext ? buildEditAssistSuggestions(editContext, suggestionBatch) : []),
+    [editContext, suggestionBatch],
   );
 
   // 监听 EMR 上下文变化，只更新气泡状态，不自动展开
@@ -57,6 +92,40 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
 
     return cleanup;
   }, [setDetectedContext]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const pollEditContext = async () => {
+      const context = await getLatestBsEditAssistContext();
+      if (disposed) return;
+      setEditContext(isUsableEditAssistContext(context) ? context : null);
+    };
+
+    void pollEditContext();
+    const timer = window.setInterval(() => {
+      void pollEditContext();
+    }, 700);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    setSuggestionBatch(0);
+    setCopyStatus('idle');
+    setCopiedSuggestionId('');
+  }, [editContextKey]);
+
+  useEffect(() => {
+    if (editContext) {
+      void showAssistBubbleWindow();
+      return;
+    }
+    void collapseAssistantWindow();
+  }, [editContext]);
 
   useEffect(() => {
     if (!isDetected || !detectedContext) {
@@ -133,8 +202,125 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setStatusText('回写失败，点开处理');
   };
 
+  const handleRefreshSuggestions = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setSuggestionBatch((value) => value + 1);
+    setCopyStatus('idle');
+    setCopiedSuggestionId('');
+  };
+
+  const handleCopySuggestion = async (
+    event: MouseEvent<HTMLButtonElement>,
+    suggestion: EditAssistSuggestion,
+  ) => {
+    event.stopPropagation();
+    try {
+      await copyEditAssistSuggestion(suggestion.text);
+      setCopyStatus('copied');
+      setCopiedSuggestionId(suggestion.id);
+      window.setTimeout(() => {
+        setCopyStatus('idle');
+        setCopiedSuggestionId('');
+      }, 1800);
+    } catch {
+      setCopyStatus('error');
+      setCopiedSuggestionId(suggestion.id);
+    }
+  };
+
   const canWriteback = draftStatus === 'ready' || draftStatus === 'error';
   const isWorking = draftStatus === 'generating' || draftStatus === 'writing';
+
+  if (editContext) {
+    return (
+      <div
+        data-tauri-drag-region
+        className={[
+          'w-full h-full bg-white border border-emerald-500 shadow-xl overflow-hidden',
+          'flex flex-col text-left',
+        ].join(' ')}
+        style={{ cursor: 'move' }}
+      >
+        <div data-tauri-drag-region className="px-3 py-2 bg-emerald-50 border-b border-emerald-100">
+          <div data-tauri-drag-region className="flex items-start justify-between gap-2">
+            <div data-tauri-drag-region className="min-w-0">
+              <div data-tauri-drag-region className="text-[11px] font-bold text-emerald-700 truncate">
+                {editContext.fieldLabel} · {getEditAssistModeLabel(editContext)}
+              </div>
+              <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
+                {editContext.selectedText || editContext.prefix}
+              </div>
+            </div>
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={handleExpand}
+              className="w-7 h-7 shrink-0 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+              title="打开完整助手"
+              aria-label="打开完整助手"
+            >
+              <ArrowRightOutlined className="text-xs" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-2 space-y-1.5">
+          {suggestions.length > 0 ? (
+            suggestions.map((suggestion) => (
+              <button
+                key={suggestion.id}
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={(event) => handleCopySuggestion(event, suggestion)}
+                className={[
+                  'w-full min-h-[34px] px-2.5 py-1.5 text-left border text-[11px] leading-[1.45]',
+                  'bg-white hover:bg-emerald-50 transition-colors',
+                  copiedSuggestionId === suggestion.id && copyStatus === 'copied'
+                    ? 'border-emerald-500 text-emerald-800'
+                    : 'border-slate-200 text-slate-700',
+                ].join(' ')}
+                title="复制候选"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <CopyOutlined className="text-[10px] text-emerald-600" />
+                  <span>{suggestion.text}</span>
+                </span>
+              </button>
+            ))
+          ) : (
+            <div className="h-full min-h-[90px] flex items-center justify-center text-[11px] text-slate-400">
+              暂无合适候选
+            </div>
+          )}
+        </div>
+
+        <div className="px-2.5 py-2 border-t border-slate-100 flex items-center justify-between gap-2">
+          <span
+            className={[
+              'text-[10px] font-medium truncate',
+              copyStatus === 'copied' ? 'text-emerald-700' : copyStatus === 'error' ? 'text-red-600' : 'text-slate-500',
+            ].join(' ')}
+          >
+            {copyStatus === 'copied'
+              ? '已复制，可粘贴到当前字段'
+              : copyStatus === 'error'
+                ? '复制失败，请重试'
+                : '点击候选复制'}
+          </span>
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            onClick={handleRefreshSuggestions}
+            className="h-7 px-2.5 shrink-0 inline-flex items-center gap-1 bg-slate-900 text-white hover:bg-slate-700 text-[11px] font-bold"
+            title="换一批候选"
+          >
+            <ReloadOutlined className="text-[10px]" />
+            换一批
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

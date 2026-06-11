@@ -7,6 +7,7 @@ use tokio::{
 };
 
 pub const CONTEXT_BRIDGE_ADDR: &str = "127.0.0.1:17860";
+const REQUEST_BUFFER_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,9 +24,34 @@ pub struct EmrContext {
     pub received_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BsEditAssistContext {
+    pub source: String,
+    pub patient_id: String,
+    pub patient_name: String,
+    pub doc_code: String,
+    pub doc_name: String,
+    pub field_key: String,
+    pub field_label: String,
+    pub field_value: String,
+    pub selected_text: String,
+    pub prefix: String,
+    pub selection_start: usize,
+    pub selection_end: usize,
+    pub trigger: String,
+    pub detected_at: String,
+    pub received_at: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EmrContextState {
     latest: Arc<Mutex<Option<EmrContext>>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BsEditAssistState {
+    latest: Arc<Mutex<Option<BsEditAssistContext>>>,
 }
 
 impl EmrContextState {
@@ -42,7 +68,24 @@ impl EmrContextState {
     }
 }
 
-pub async fn start_context_bridge(state: EmrContextState) {
+impl BsEditAssistState {
+    pub async fn get_latest(&self) -> Option<BsEditAssistContext> {
+        self.latest.lock().await.clone()
+    }
+
+    pub async fn set_latest(&self, context: BsEditAssistContext) {
+        *self.latest.lock().await = Some(context);
+    }
+
+    pub async fn clear_latest(&self) {
+        *self.latest.lock().await = None;
+    }
+}
+
+pub async fn start_context_bridge(
+    emr_state: EmrContextState,
+    edit_assist_state: BsEditAssistState,
+) {
     let listener = match TcpListener::bind(CONTEXT_BRIDGE_ADDR).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -56,9 +99,12 @@ pub async fn start_context_bridge(state: EmrContextState) {
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                let state = state.clone();
+                let emr_state = emr_state.clone();
+                let edit_assist_state = edit_assist_state.clone();
                 tokio::spawn(async move {
-                    if let Err(error) = handle_connection(stream, state).await {
+                    if let Err(error) =
+                        handle_connection(stream, emr_state, edit_assist_state).await
+                    {
                         log::debug!("EMR 上下文桥接请求处理失败：{error}");
                     }
                 });
@@ -70,9 +116,10 @@ pub async fn start_context_bridge(state: EmrContextState) {
 
 async fn handle_connection(
     mut stream: TcpStream,
-    state: EmrContextState,
+    emr_state: EmrContextState,
+    edit_assist_state: BsEditAssistState,
 ) -> Result<(), std::io::Error> {
-    let mut buffer = [0_u8; 4096];
+    let mut buffer = [0_u8; REQUEST_BUFFER_BYTES];
     let read = stream.read(&mut buffer).await?;
     let request = String::from_utf8_lossy(&buffer[..read]);
     let target = request
@@ -83,11 +130,32 @@ async fn handle_connection(
 
     if target.starts_with("/emr-context?") {
         if let Some(context) = parse_context_target(target) {
-            state.set_latest(context).await;
+            emr_state.set_latest(context).await;
             write_response(&mut stream, "204 No Content", "").await?;
         } else {
             write_response(&mut stream, "400 Bad Request", "invalid emr context").await?;
         }
+        return Ok(());
+    }
+
+    if target.starts_with("/bs-edit-assist?") {
+        if let Some(context) = parse_edit_assist_target(target) {
+            edit_assist_state.set_latest(context).await;
+            write_response(&mut stream, "204 No Content", "").await?;
+        } else {
+            write_response(
+                &mut stream,
+                "400 Bad Request",
+                "invalid edit assist context",
+            )
+            .await?;
+        }
+        return Ok(());
+    }
+
+    if target.starts_with("/bs-edit-assist-clear") {
+        edit_assist_state.clear_latest().await;
+        write_response(&mut stream, "204 No Content", "").await?;
         return Ok(());
     }
 
@@ -135,11 +203,49 @@ fn parse_context_target(target: &str) -> Option<EmrContext> {
     })
 }
 
+fn parse_edit_assist_target(target: &str) -> Option<BsEditAssistContext> {
+    let query = target.split_once('?')?.1;
+    let params = parse_query(query);
+    Some(BsEditAssistContext {
+        source: params
+            .get("source")
+            .cloned()
+            .unwrap_or_else(|| "demo-bs".to_string()),
+        patient_id: required(&params, "patientId")?,
+        patient_name: required(&params, "patientName")?,
+        doc_code: required(&params, "docCode")?,
+        doc_name: required(&params, "docName")?,
+        field_key: required(&params, "fieldKey")?,
+        field_label: required(&params, "fieldLabel")?,
+        field_value: params.get("fieldValue").cloned().unwrap_or_default(),
+        selected_text: params.get("selectedText").cloned().unwrap_or_default(),
+        prefix: params.get("prefix").cloned().unwrap_or_default(),
+        selection_start: parse_usize(&params, "selectionStart"),
+        selection_end: parse_usize(&params, "selectionEnd"),
+        trigger: params
+            .get("trigger")
+            .cloned()
+            .unwrap_or_else(|| "focus".to_string()),
+        detected_at: params
+            .get("detectedAt")
+            .cloned()
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+        received_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 fn required(params: &HashMap<String, String>, key: &str) -> Option<String> {
     params
         .get(key)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn parse_usize(params: &HashMap<String, String>, key: &str) -> usize {
+    params
+        .get(key)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0)
 }
 
 fn parse_query(query: &str) -> HashMap<String, String> {
