@@ -12,9 +12,9 @@ import {
 import appIcon from '../../../src-tauri/icons/app-icon-64.png';
 import { expandAssistantWindow } from '../../services/windowMode';
 import { BubbleEmrContext, useBubbleStore, getBubbleContextKey } from '../../stores/useBubbleStore';
-import { Patient, usePatientStore } from '../../stores/usePatientStore';
+import { usePatientStore } from '../../stores/usePatientStore';
 import { watchEmrContext } from '../../services/emrContext/watchEmrContext';
-import { getDocByCode } from '../../config/docRegistry';
+import { activateEmrContext, buildPatientFromEmrContext } from '../../services/emrContext/activateEmrContext';
 import { buildDischargeCase } from '../../services/samples/discharge';
 import { submitDocument } from '../../services/emsBridge';
 
@@ -41,7 +41,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
   const generatedPatient = useMemo(
-    () => (detectedContext ? buildPatientFromContext(detectedContext) : null),
+    () => (detectedContext ? buildPatientFromEmrContext(detectedContext) : null),
     [contextKey],
   );
   const generatedDraft = useMemo(
@@ -94,20 +94,11 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     if (isDetected && detectedContext) {
       // 避免重复激活同一上下文
       if (!hasActivated(contextKey)) {
-        // 关联患者
-        if (generatedPatient) selectPatient(generatedPatient);
-
-        // 选择 DOC010 文书
-        const doc = getDocByCode(detectedContext.docCode);
-        if (doc) {
-          selectDoc(doc);
+        const activation = activateEmrContext(detectedContext, selectPatient, selectDoc);
+        if (activation) {
+          markActivated(contextKey);
+          navigate(`/doc/${activation.docCode}`);
         }
-
-        // 标记已激活
-        markActivated(contextKey);
-
-        // 导航到文书工作区
-        navigate(`/doc/${detectedContext.docCode}`);
       }
     }
 
@@ -259,22 +250,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   );
 }
 
-function buildPatientFromContext(context: BubbleEmrContext): Patient {
-  return {
-    id: context.patientId,
-    name: context.patientName,
-    gender: '男',
-    age: '65岁',
-    bedNo: '1201',
-    deptName: '心血管内科',
-    admissionDate: '2026-06-01',
-    admissionDays: 4,
-    doctor: '林志远',
-    diagnosis: '冠状动脉粥样硬化性心脏病',
-  };
-}
-
-function buildBubbleDischargeDraft(patient: Patient, docName: string) {
+function buildBubbleDischargeDraft(patient: ReturnType<typeof buildPatientFromEmrContext>, docName: string) {
   const dischargeCase = buildDischargeCase(patient);
   const mapping: Record<string, string> = {
     入院日期: 'admissionDate',
