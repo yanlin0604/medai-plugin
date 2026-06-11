@@ -17,8 +17,10 @@ interface Props {
   sectionEdits?: Record<string, string>;
   resetKeys?: Record<string, number>;
   sectionSuffixes?: Record<string, ReactNode>;
+  regeneratingSectionKey?: string | null;
   onChange: (sectionKey: string, text: string) => void;
   onReset: (sectionKey: string) => void;
+  onRegenerateSection?: (sectionKey: string) => void;
   onFocusSection?: (sectionKey: string) => void;
   optimize: SectionOptimize;
   optimizeSection?: SectionListOptimize;
@@ -39,8 +41,10 @@ export default function EditableDocumentPaper({
   sectionEdits,
   resetKeys,
   sectionSuffixes,
+  regeneratingSectionKey,
   onChange,
   onReset,
+  onRegenerateSection,
   onFocusSection,
   optimize,
   optimizeSection,
@@ -62,8 +66,10 @@ export default function EditableDocumentPaper({
         sectionEdits={sectionEdits}
         resetKeys={resetKeys}
         sectionSuffixes={sectionSuffixes}
+        regeneratingSectionKey={regeneratingSectionKey}
         onChange={onChange}
         onReset={onReset}
+        onRegenerateSection={onRegenerateSection}
         onFocusSection={onFocusSection}
         optimize={optimize}
         optimizeSection={optimizeSection}

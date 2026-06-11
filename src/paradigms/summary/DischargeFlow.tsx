@@ -22,8 +22,10 @@ import { saveDraft, loadDraft } from '../../services/draftService';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import {
   applyDischargeFieldAutomation,
+  clearDischargeRuntimeCache,
   isDischargeMetaSection,
   loadDischargeRuntime,
+  loadDischargeRuntimeField,
   type DischargeRuntimeState,
 } from '../../services/dischargeRuntime';
 import { buildSubmitSnapshot } from '../../services/documentFlow';
@@ -205,6 +207,8 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   const [runtimeLoading, setRuntimeLoading] = useState(true);
   const [runtimeError, setRuntimeError] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
+  const [runtimeRegenerating, setRuntimeRegenerating] = useState(false);
+  const [regeneratingSectionKey, setRegeneratingSectionKey] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
   const [sectionResetKeys, setSectionResetKeys] = useState<Record<string, number>>({});
   const [activeSectionKey, setActiveSectionKey] = useState<string | null>(null);
@@ -243,6 +247,29 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     setEvidenceLoading(false);
   }, []);
 
+  const applyRuntimeState = useCallback((
+    runtime: DischargeRuntimeState,
+    options: { restoreDraft: boolean },
+  ) => {
+    const saved = options.restoreDraft ? loadDraft(doc.code, patient.id) : null;
+    const restoredSections = saved
+      ? runtime.sections.map((section) => ({
+          ...section,
+          text: (saved.values[section.key] as string)
+            ?? (saved.values[section.title] as string)
+            ?? section.text,
+        }))
+      : runtime.sections;
+
+    setRuntimeState(runtime);
+    setSections(applyDischargeFieldAutomation(restoredSections));
+    setAcceptedDiagnoses(
+      saved ? (saved.values.dischargeDiagnoses as IcdItem[] | undefined) ?? runtime.icdCandidates : runtime.icdCandidates,
+    );
+    setLocked(saved?.status === 'submitted');
+    hydratedRef.current = true;
+  }, [doc.code, patient.id, setLocked]);
+
   useEffect(() => {
     let cancelled = false;
     hydratedRef.current = false;
@@ -253,27 +280,13 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     setSections([]);
     setSectionResetKeys({});
     setAcceptedDiagnoses([]);
+    setRuntimeRegenerating(false);
+    setRegeneratingSectionKey(null);
 
-    loadDischargeRuntime(doc.code, patient.id, patientBrief)
+    loadDischargeRuntime(doc.code, patient.id, patientBrief, { forceRefresh: reloadToken > 0 })
       .then((runtime) => {
         if (cancelled) return;
-        const saved = loadDraft(doc.code, patient.id);
-        const restoredSections = saved
-          ? runtime.sections.map((section) => ({
-              ...section,
-              text: (saved.values[section.key] as string)
-                ?? (saved.values[section.title] as string)
-                ?? section.text,
-            }))
-          : runtime.sections;
-
-        setRuntimeState(runtime);
-        setSections(applyDischargeFieldAutomation(restoredSections));
-        setAcceptedDiagnoses(
-          saved ? (saved.values.dischargeDiagnoses as IcdItem[] | undefined) ?? runtime.icdCandidates : runtime.icdCandidates,
-        );
-        setLocked(saved?.status === 'submitted');
-        hydratedRef.current = true;
+        applyRuntimeState(runtime, { restoreDraft: true });
       })
       .catch((error) => {
         if (cancelled) return;
@@ -288,7 +301,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     return () => {
       cancelled = true;
     };
-  }, [doc.code, patient.id, patientBrief, reloadToken, resetEvidenceWorkspace, setLocked]);
+  }, [applyRuntimeState, doc.code, patient.id, patientBrief, reloadToken, resetEvidenceWorkspace, setLocked]);
 
   const updateSection = useCallback((sectionKey: string, text: string) => {
     setSections((prev) => applyDischargeFieldAutomation(
@@ -301,6 +314,16 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
       ...prev,
       [sectionKey]: (prev[sectionKey] ?? 0) + 1,
     }));
+  }, []);
+
+  const bumpSectionResetKeys = useCallback((sectionKeys: string[]) => {
+    setSectionResetKeys((prev) => {
+      const next = { ...prev };
+      sectionKeys.forEach((sectionKey) => {
+        next[sectionKey] = (next[sectionKey] ?? 0) + 1;
+      });
+      return next;
+    });
   }, []);
 
   const metaRows = useMemo(
@@ -474,6 +497,117 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     if (sectionKey === 'dischargeDiagnosis') setAcceptedDiagnoses(runtimeState?.icdCandidates ?? []);
   };
 
+  const regenerateAllSections = useCallback(async () => {
+    if (runtimeRegenerating) return;
+    if (mismatch) {
+      message.error('防串户锁定中，禁止重新生成。请先在病历系统中切回当前患者。');
+      return;
+    }
+    if (locked) {
+      message.warning('当前文书已锁定，请先解除锁定后再重新生成。');
+      return;
+    }
+
+    setRuntimeRegenerating(true);
+    setRegeneratingSectionKey(null);
+    resetEvidenceWorkspace();
+    setPreviewMode('edit');
+    setAutoGenerateStatus('idle');
+    setAutoGeneratedSectionKeys([]);
+    setActiveAutoGenerateSectionKey(null);
+
+    try {
+      clearDischargeRuntimeCache(doc.code, patient.id);
+      const runtime = await loadDischargeRuntime(doc.code, patient.id, patientBrief, { forceRefresh: true });
+      applyRuntimeState(runtime, { restoreDraft: false });
+      bumpSectionResetKeys(runtime.sections.map((section) => section.key));
+      message.success('已重新生成全部字段。');
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : '出院记录字段重新生成失败';
+      message.error(messageText);
+    } finally {
+      setRuntimeRegenerating(false);
+    }
+  }, [
+    applyRuntimeState,
+    bumpSectionResetKeys,
+    doc.code,
+    locked,
+    mismatch,
+    patient.id,
+    patientBrief,
+    resetEvidenceWorkspace,
+    runtimeRegenerating,
+  ]);
+
+  const regenerateSection = useCallback(async (sectionKey: string) => {
+    if (!runtimeState || runtimeRegenerating || regeneratingSectionKey) return;
+    if (mismatch) {
+      message.error('防串户锁定中，禁止重新生成。请先在病历系统中切回当前患者。');
+      return;
+    }
+    if (locked) {
+      message.warning('当前文书已锁定，请先解除锁定后再重新生成。');
+      return;
+    }
+
+    const currentSection = sections.find((section) => section.key === sectionKey);
+    if (!currentSection?.editable) {
+      message.warning('当前字段不可编辑，不能单独重新生成。');
+      return;
+    }
+
+    setRegeneratingSectionKey(sectionKey);
+    try {
+      const fieldState = await loadDischargeRuntimeField(doc.code, patient.id, sectionKey, runtimeState.template);
+      const generatedValue = fieldState.values.values?.[sectionKey];
+      setRuntimeState((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          values: {
+            ...current.values,
+            values: {
+              ...(current.values.values ?? {}),
+              ...(generatedValue ? { [sectionKey]: generatedValue } : {}),
+            },
+            pulledSources: fieldState.values.pulledSources,
+            resolvedAt: fieldState.values.resolvedAt,
+          },
+          sections: current.sections.map((section) => (section.key === sectionKey ? fieldState.section : section)),
+          readOnlyHints: {
+            ...current.readOnlyHints,
+            [sectionKey]: fieldState.readOnlyHint,
+          },
+          icdCandidates: sectionKey === 'dischargeDiagnosis' ? fieldState.icdCandidates : current.icdCandidates,
+        };
+      });
+      setSections((current) => applyDischargeFieldAutomation(
+        current.map((section) => (section.key === sectionKey ? fieldState.section : section)),
+      ));
+      if (sectionKey === 'dischargeDiagnosis') {
+        setAcceptedDiagnoses(fieldState.icdCandidates);
+      }
+      bumpSectionResetKey(sectionKey);
+      message.success(`已重新生成${fieldState.section.title}`);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : '字段重新生成失败';
+      message.error(messageText);
+    } finally {
+      setRegeneratingSectionKey(null);
+    }
+  }, [
+    bumpSectionResetKey,
+    doc.code,
+    locked,
+    mismatch,
+    patient.id,
+    regeneratingSectionKey,
+    runtimeRegenerating,
+    runtimeState,
+    sections,
+  ]);
+
   const rewriteSectionText = async (section: ClinicalSection, text: string, mode: string) => {
     const result = await pluginRuntimeApi.rewriteText({
       docCode: doc.code,
@@ -606,6 +740,10 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
 
   const handleSubmit = () => {
     if (locked || submitting) return;
+    if (runtimeRegenerating || regeneratingSectionKey) {
+      message.warning('字段正在重新生成，请完成后再提交。');
+      return;
+    }
     if (runtimeLoading || runtimeError || !sections.length) {
       message.error('出院记录模板或字段取值未就绪，暂不能提交。');
       return;
@@ -633,15 +771,28 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     });
   };
 
-  const renderActionButton = (children: ReactNode, onClick: () => void, title?: string) => (
+  const renderActionButton = (children: ReactNode, onClick: () => void, title?: string, disabled = false) => (
     <button
       onClick={onClick}
       title={title}
-      className="inline-flex items-center gap-1 text-[11px] font-semibold border rounded-md px-2 py-1 text-slate-500 hover:text-[#1E3A8A] border-slate-200 hover:border-[#1E3A8A] transition-colors"
+      disabled={disabled}
+      className={[
+        'inline-flex items-center gap-1 text-[11px] font-semibold border rounded-md px-2 py-1 transition-colors',
+        disabled
+          ? 'cursor-not-allowed border-slate-200 text-slate-300'
+          : 'text-slate-500 hover:text-[#1E3A8A] border-slate-200 hover:border-[#1E3A8A]',
+      ].join(' ')}
     >
       {children}
     </button>
   );
+
+  const regenerationDisabled = runtimeRegenerating
+    || Boolean(regeneratingSectionKey)
+    || locked
+    || mismatch
+    || runtimeLoading
+    || Boolean(runtimeError);
 
   return (
     <ParadigmShell
@@ -669,7 +820,10 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
               </p>
               {!runtimeLoading && (
                 <button
-                  onClick={() => setReloadToken((value) => value + 1)}
+                  onClick={() => {
+                    clearDischargeRuntimeCache(doc.code, patient.id);
+                    setReloadToken((value) => value + 1);
+                  }}
                   className="mt-4 text-xs font-bold text-blue-600 border border-blue-200 px-4 py-2 rounded-lg bg-white"
                 >
                   重新加载
@@ -682,10 +836,20 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
               patient={patientBrief}
               sections={bodySections}
               metaRows={metaRows}
-              actions={renderActionButton(
-                <><ReloadOutlined />编辑</>,
-                () => setPreviewMode('edit'),
-                '编辑出院记录',
+              actions={(
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  {renderActionButton(
+                    <><ReloadOutlined />编辑</>,
+                    () => setPreviewMode('edit'),
+                    '编辑出院记录',
+                  )}
+                  {renderActionButton(
+                    <><ReloadOutlined className={runtimeRegenerating ? 'animate-spin' : undefined} />重新生成全部</>,
+                    () => void regenerateAllSections(),
+                    '重新请求后台字段生成并覆盖当前正文',
+                    regenerationDisabled,
+                  )}
+                </div>
               )}
             />
           ) : (
@@ -697,19 +861,31 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
                     patient={patientBrief}
                     sections={bodySections}
                     metaRows={metaRows}
-                    actions={renderActionButton(
-                      <><ExpandAltOutlined />通读全文</>,
-                      () => {
-                        resetEvidenceWorkspace();
-                        setPreviewMode('read');
-                      },
+                    actions={(
+                      <div className="flex flex-wrap justify-end gap-1.5">
+                        {renderActionButton(
+                          <><ReloadOutlined className={runtimeRegenerating ? 'animate-spin' : undefined} />重新生成全部</>,
+                          () => void regenerateAllSections(),
+                          '重新请求后台字段生成并覆盖当前正文',
+                          regenerationDisabled,
+                        )}
+                        {renderActionButton(
+                          <><ExpandAltOutlined />通读全文</>,
+                          () => {
+                            resetEvidenceWorkspace();
+                            setPreviewMode('read');
+                          },
+                        )}
+                      </div>
                     )}
                     locked={locked}
                     sectionEdits={editedSectionMap}
                     resetKeys={sectionResetKeys}
                     sectionSuffixes={autoGenerateSectionSuffixes}
+                    regeneratingSectionKey={regeneratingSectionKey}
                     onChange={updateSection}
                     onReset={resetSection}
+                    onRegenerateSection={(sectionKey) => void regenerateSection(sectionKey)}
                     onFocusSection={setActiveSectionKey}
                     optimize={() => {
                       throw new Error('后台 AI 重写未配置');
@@ -737,7 +913,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
           label="提交出院记录"
           onWriteback={handleSubmit}
           locked={locked}
-          disabled={runtimeLoading || Boolean(runtimeError) || !sections.length}
+          disabled={runtimeLoading || Boolean(runtimeError) || !sections.length || runtimeRegenerating || Boolean(regeneratingSectionKey)}
           busy={submitting}
           busyText={submitText}
           progress={submitProgress}

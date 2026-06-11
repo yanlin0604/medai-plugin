@@ -1,9 +1,41 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockPluginRuntimeApi } = vi.hoisted(() => ({
+  mockPluginRuntimeApi: {
+    getRuntimeTemplate: vi.fn(),
+    resolveRuntimeValues: vi.fn(),
+    resolveRuntimeFieldValue: vi.fn(),
+  },
+}));
+
+vi.mock('./pluginRuntime', () => ({
+  pluginRuntimeApi: mockPluginRuntimeApi,
+  toIcdItem: (candidate: {
+    diagnosisName: string;
+    icdCode?: string;
+    confidence?: number;
+    matched?: boolean;
+    matchSource?: string;
+    matchReason?: string;
+  }) => ({
+    name: candidate.diagnosisName,
+    code: candidate.icdCode,
+    confidence: Math.round((candidate.confidence ?? 0) * 100),
+    ...(candidate.matched === undefined ? {} : { matched: candidate.matched }),
+    ...(candidate.matchSource ? { matchSource: candidate.matchSource } : {}),
+    ...(candidate.matchReason ? { matchReason: candidate.matchReason } : {}),
+  }),
+}));
+
 import {
   applyDischargeFieldAutomation,
   buildDischargeRuntime,
+  buildDischargeRuntimeField,
   calculateHospitalDays,
+  clearDischargeRuntimeCache,
   isDischargeMetaSection,
+  loadDischargeRuntime,
+  loadDischargeRuntimeField,
 } from './dischargeRuntime';
 import type {
   RuntimeDocFieldDto,
@@ -58,6 +90,46 @@ const values = (overrides?: Partial<RuntimeDocValueBundleDto>): RuntimeDocValueB
 });
 
 describe('dischargeRuntime', () => {
+  beforeEach(() => {
+    mockPluginRuntimeApi.getRuntimeTemplate.mockReset();
+    mockPluginRuntimeApi.resolveRuntimeValues.mockReset();
+    mockPluginRuntimeApi.resolveRuntimeFieldValue.mockReset();
+    clearDischargeRuntimeCache();
+  });
+
+  it('caches runtime loading per document and patient until explicitly cleared', async () => {
+    mockPluginRuntimeApi.getRuntimeTemplate.mockResolvedValue(template([field({})]));
+    mockPluginRuntimeApi.resolveRuntimeValues.mockResolvedValue(values());
+
+    const [first, second] = await Promise.all([
+      loadDischargeRuntime('DOC888', 'ZY001', patient),
+      loadDischargeRuntime('DOC888', 'ZY001', patient),
+    ]);
+    const third = await loadDischargeRuntime('DOC888', 'ZY001', patient);
+
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    expect(mockPluginRuntimeApi.getRuntimeTemplate).toHaveBeenCalledTimes(1);
+    expect(mockPluginRuntimeApi.resolveRuntimeValues).toHaveBeenCalledTimes(1);
+
+    clearDischargeRuntimeCache('DOC888', 'ZY001');
+    await loadDischargeRuntime('DOC888', 'ZY001', patient);
+
+    expect(mockPluginRuntimeApi.getRuntimeTemplate).toHaveBeenCalledTimes(2);
+    expect(mockPluginRuntimeApi.resolveRuntimeValues).toHaveBeenCalledTimes(2);
+  });
+
+  it('force refresh bypasses the runtime cache for the same document and patient', async () => {
+    mockPluginRuntimeApi.getRuntimeTemplate.mockResolvedValue(template([field({})]));
+    mockPluginRuntimeApi.resolveRuntimeValues.mockResolvedValue(values());
+
+    await loadDischargeRuntime('DOC888', 'ZY001', patient);
+    await loadDischargeRuntime('DOC888', 'ZY001', patient, { forceRefresh: true });
+
+    expect(mockPluginRuntimeApi.getRuntimeTemplate).toHaveBeenCalledTimes(2);
+    expect(mockPluginRuntimeApi.resolveRuntimeValues).toHaveBeenCalledTimes(2);
+  });
+
   it('builds sections, meta rows, read-only hints and writeback keys from backend config', () => {
     const runtime = buildDischargeRuntime(
       template([
@@ -140,5 +212,114 @@ describe('dischargeRuntime', () => {
     ]);
 
     expect(sections.find((section) => section.key === 'hospitalDays')?.text).toBe('9天');
+  });
+
+  it('maps generation warnings and ICD match metadata without changing field text', () => {
+    const runtime = buildDischargeRuntime(
+      template([
+        field({
+          fieldKey: 'treatmentCourse',
+          fieldLabel: '诊疗经过',
+          sectionName: '诊疗经过',
+          fieldOrder: 20,
+          sourceType: 'ai',
+          inputType: 'text',
+          writebackFieldKey: 'bs.treatment_course',
+          renderRule: { metaSlot: 'body', editable: true },
+        }),
+      ]),
+      values({
+        values: {
+          treatmentCourse: {
+            fieldKey: 'treatmentCourse',
+            value: '住院期间完善相关检查。',
+            sourceType: 'ai',
+            strategyType: 'hybrid',
+            warnings: ['可用证据不足，字段生成结果需人工复核'],
+            sourceStatuses: [
+              { sourceSystem: 'PACS', status: 'failed', message: 'PACS连接超时' },
+            ],
+          },
+        },
+        icdCandidates: [
+          {
+            diagnosisName: '急性非ST段抬高型心肌梗死',
+            icdCode: 'I21.401',
+            confidence: 0.91,
+            matched: true,
+            matchSource: 'alias',
+            matchReason: '按诊断别名匹配',
+          },
+        ],
+      }),
+      patient,
+    );
+
+    expect(runtime.sections[0].text).toBe('住院期间完善相关检查。');
+    expect(runtime.readOnlyHints.treatmentCourse).toContain('可用证据不足');
+    expect(runtime.readOnlyHints.treatmentCourse).toContain('PACS: PACS连接超时');
+    expect(runtime.icdCandidates[0]).toMatchObject({
+      code: 'I21.401',
+      matched: true,
+      matchSource: 'alias',
+      matchReason: '按诊断别名匹配',
+    });
+  });
+
+  it('loads and maps one runtime field without resolving the whole document again', async () => {
+    const runtimeTemplate = template([
+      field({
+        fieldKey: 'treatmentCourse',
+        fieldLabel: '诊疗经过',
+        sectionName: '诊疗经过',
+        fieldOrder: 20,
+        sourceType: 'emr',
+        inputType: 'text',
+        writebackFieldKey: 'bs.treatment_course',
+        renderRule: { metaSlot: 'body', editable: true },
+      }),
+    ]);
+    mockPluginRuntimeApi.resolveRuntimeFieldValue.mockResolvedValue(values({
+      values: {
+        treatmentCourse: {
+          fieldKey: 'treatmentCourse',
+          value: '单字段重新生成内容。',
+          sourceType: 'emr',
+          warnings: ['单字段证据不足'],
+        },
+      },
+    }));
+
+    const fieldState = await loadDischargeRuntimeField('DOC888', 'ZY001', 'treatmentCourse', runtimeTemplate);
+
+    expect(fieldState.section).toMatchObject({
+      key: 'treatmentCourse',
+      title: '诊疗经过',
+      text: '单字段重新生成内容。',
+    });
+    expect(fieldState.readOnlyHint).toBe('单字段证据不足');
+    expect(mockPluginRuntimeApi.resolveRuntimeFieldValue).toHaveBeenCalledWith('DOC888', 'ZY001', 'treatmentCourse');
+    expect(mockPluginRuntimeApi.resolveRuntimeValues).not.toHaveBeenCalled();
+  });
+
+  it('maps a single runtime field from an already loaded value bundle', () => {
+    const fieldState = buildDischargeRuntimeField(
+      template([
+        field({
+          fieldKey: 'admissionDate',
+          fieldLabel: '入院日期',
+          sectionName: '入院日期',
+          sourceType: 'his',
+        }),
+      ]),
+      values({
+        values: {
+          admissionDate: { fieldKey: 'admissionDate', value: '2026-06-08', sourceType: 'his' },
+        },
+      }),
+      'admissionDate',
+    );
+
+    expect(fieldState.section.text).toBe('2026-06-08');
   });
 });

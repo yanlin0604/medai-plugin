@@ -6,6 +6,9 @@ export interface IcdItem {
   code: string;
   /** 匹配度百分比 */
   confidence: number;
+  matched?: boolean;
+  matchSource?: string;
+  matchReason?: string;
 }
 
 interface Props {

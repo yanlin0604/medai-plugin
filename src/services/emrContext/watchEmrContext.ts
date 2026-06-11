@@ -40,9 +40,7 @@ export function watchEmrContext(
       if (!initialized) {
         initialized = true;
         lastContextKey = nextContextKey;
-        if (context) {
-          onChange(context);
-        }
+        onChange(context);
         return;
       }
 

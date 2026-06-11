@@ -20,18 +20,69 @@ export interface DischargeRuntimeState {
   icdCandidates: IcdItem[];
 }
 
+export interface DischargeRuntimeFieldState {
+  values: RuntimeDocValueBundleDto;
+  section: ClinicalSection;
+  readOnlyHint: string;
+  icdCandidates: IcdItem[];
+}
+
 const MAX_META_CELLS_PER_ROW = 3;
+const runtimeCache = new Map<string, Promise<DischargeRuntimeState>>();
+
+interface LoadDischargeRuntimeOptions {
+  forceRefresh?: boolean;
+}
+
+function runtimeCacheKey(docCode: string, patientIdHis: string): string {
+  return `${docCode}:${patientIdHis}`;
+}
+
+export function clearDischargeRuntimeCache(docCode?: string, patientIdHis?: string): void {
+  if (!docCode || !patientIdHis) {
+    runtimeCache.clear();
+    return;
+  }
+
+  runtimeCache.delete(runtimeCacheKey(docCode, patientIdHis));
+}
 
 export async function loadDischargeRuntime(
   docCode: string,
   patientIdHis: string,
   patient: PatientBrief,
+  options: LoadDischargeRuntimeOptions = {},
 ): Promise<DischargeRuntimeState> {
-  const [template, values] = await Promise.all([
-    pluginRuntimeApi.getRuntimeTemplate(docCode),
-    pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis),
-  ]);
-  return buildDischargeRuntime(template, values, patient);
+  const cacheKey = runtimeCacheKey(docCode, patientIdHis);
+  if (options.forceRefresh) {
+    runtimeCache.delete(cacheKey);
+  }
+
+  let promise = runtimeCache.get(cacheKey);
+  if (!promise) {
+    promise = Promise.all([
+      pluginRuntimeApi.getRuntimeTemplate(docCode),
+      pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis),
+    ])
+      .then(([template, values]) => buildDischargeRuntime(template, values, patient))
+      .catch((error) => {
+        runtimeCache.delete(cacheKey);
+        throw error;
+      });
+    runtimeCache.set(cacheKey, promise);
+  }
+
+  return promise;
+}
+
+export async function loadDischargeRuntimeField(
+  docCode: string,
+  patientIdHis: string,
+  fieldKey: string,
+  template: RuntimeDocTemplateDto,
+): Promise<DischargeRuntimeFieldState> {
+  const values = await pluginRuntimeApi.resolveRuntimeFieldValue(docCode, patientIdHis, fieldKey);
+  return buildDischargeRuntimeField(template, values, fieldKey);
 }
 
 export function buildDischargeRuntime(
@@ -60,6 +111,26 @@ export function buildDischargeRuntime(
     metaRows: buildDischargeMetaRows(patient, metaFields, values),
     metaFieldKeys,
     readOnlyHints,
+    icdCandidates: values.icdCandidates?.map(toIcdItem) ?? [],
+  };
+}
+
+export function buildDischargeRuntimeField(
+  template: RuntimeDocTemplateDto,
+  values: RuntimeDocValueBundleDto,
+  fieldKey: string,
+): DischargeRuntimeFieldState {
+  validateRuntimeConfig(template, values);
+  const field = template.fields.find((item) => item.fieldKey === fieldKey);
+  if (!field) {
+    throw new Error(`后台出院记录模板未配置字段：${fieldKey}`);
+  }
+  const value = values.values?.[fieldKey];
+
+  return {
+    values,
+    section: toClinicalSection(field, value),
+    readOnlyHint: readOnlyHintOf(field, value),
     icdCandidates: values.icdCandidates?.map(toIcdItem) ?? [],
   };
 }
@@ -256,7 +327,22 @@ function isRuntimeIcdCandidate(value: unknown): value is RuntimeIcdCandidateDto 
 }
 
 function readOnlyHintOf(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): string {
-  return value?.errorMessage || field.renderRule?.readOnlyHint || '';
+  return [
+    value?.errorMessage,
+    ...(value?.warnings ?? []),
+    ...sourceStatusHints(value),
+    field.renderRule?.readOnlyHint,
+  ].filter((item): item is string => Boolean(item?.trim())).filter(uniqueText).join('；');
+}
+
+function sourceStatusHints(value?: RuntimeFieldValueDto): string[] {
+  return value?.sourceStatuses
+    ?.filter((status) => status.status !== 'success' && status.message)
+    .map((status) => `${status.sourceSystem}: ${status.message}`) ?? [];
+}
+
+function uniqueText(value: string, index: number, values: string[]): boolean {
+  return values.indexOf(value) === index;
 }
 
 function normalizeFieldSource(sourceType: string): FieldSource {

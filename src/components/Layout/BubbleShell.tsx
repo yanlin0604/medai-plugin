@@ -17,8 +17,11 @@ import { BubbleEmrContext, useBubbleStore, getBubbleContextKey } from '../../sto
 import { usePatientStore } from '../../stores/usePatientStore';
 import { watchEmrContext } from '../../services/emrContext/watchEmrContext';
 import { activateEmrContext, buildPatientFromEmrContext } from '../../services/emrContext/activateEmrContext';
-import { buildDischargeCase } from '../../services/samples/discharge';
-import { submitDocument } from '../../services/emsBridge';
+import {
+  buildBubbleDischargeDraft,
+  submitBubbleDischargeDraft,
+  type BubbleDischargeDraft,
+} from '../../services/bubbleDischargeWriteback';
 import {
   buildEditAssistSuggestions,
   copyEditAssistSuggestion,
@@ -49,9 +52,12 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const { selectPatient, selectDoc } = usePatientStore();
   const isDetected = mode === 'detected' && Boolean(detectedContext);
   const contextKey = detectedContext ? getBubbleContextKey(detectedContext) : '';
+  const detectedDocName = detectedContext?.docName ?? '';
   const [draftStatus, setDraftStatus] = useState<BubbleDraftStatus>('idle');
+  const [preparedDraft, setPreparedDraft] = useState<BubbleDischargeDraft | null>(null);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
+  const [regenerateToken, setRegenerateToken] = useState(0);
   const [editContext, setEditContext] = useState<BsEditAssistContext | null>(null);
   const [suggestionBatch, setSuggestionBatch] = useState(0);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
@@ -59,10 +65,6 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const generatedPatient = useMemo(
     () => (detectedContext ? buildPatientFromEmrContext(detectedContext) : null),
     [contextKey],
-  );
-  const generatedDraft = useMemo(
-    () => (generatedPatient && detectedContext ? buildBubbleDischargeDraft(generatedPatient, detectedContext.docName) : null),
-    [generatedPatient, detectedContext?.docName],
   );
   const editContextKey = useMemo(
     () =>
@@ -128,35 +130,58 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   }, [editContext]);
 
   useEffect(() => {
-    if (!isDetected || !detectedContext) {
+    if (!detectedContext || !detectedDocName || !generatedPatient) {
       setDraftStatus('idle');
+      setPreparedDraft(null);
       setProgress(0);
       setStatusText('');
       return;
     }
 
     setDraftStatus('generating');
+    setPreparedDraft(null);
     setProgress(8);
     setStatusText(GENERATION_STEPS[0]);
 
+    let cancelled = false;
     let tick = 0;
     const timer = window.setInterval(() => {
       tick += 1;
-      const nextProgress = Math.min(100, 8 + tick * 9);
+      const nextProgress = Math.min(92, 8 + tick * 7);
       const stepIndex = Math.min(
         GENERATION_STEPS.length - 1,
         Math.floor((nextProgress / 100) * GENERATION_STEPS.length),
       );
       setProgress(nextProgress);
-      setStatusText(nextProgress >= 100 ? '出院记录已生成' : GENERATION_STEPS[stepIndex]);
-      if (nextProgress >= 100) {
-        window.clearInterval(timer);
-        setDraftStatus('ready');
-      }
+      setStatusText(GENERATION_STEPS[stepIndex]);
     }, 260);
 
-    return () => window.clearInterval(timer);
-  }, [contextKey, detectedContext, isDetected]);
+    buildBubbleDischargeDraft(generatedPatient, detectedDocName, {
+      forceRefresh: regenerateToken > 0,
+    })
+      .then((draft) => {
+        if (cancelled) return;
+        window.clearInterval(timer);
+        setPreparedDraft(draft);
+        setProgress(100);
+        setStatusText('出院记录已生成');
+        setDraftStatus('ready');
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        window.clearInterval(timer);
+        const messageText = error instanceof Error ? error.message : '字段生成失败，点开处理';
+        setPreparedDraft(null);
+        setProgress(100);
+        setStatusText(messageText);
+        setDraftStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [contextKey, detectedContext, detectedDocName, generatedPatient, regenerateToken]);
 
   const handleExpand = () => {
     // 如果是检测态气泡，需要关联患者与文书
@@ -185,21 +210,46 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
 
   const handleWriteback = async (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    if (!detectedContext || !generatedDraft || draftStatus === 'writing') return;
+    if (!detectedContext || !generatedPatient || !preparedDraft || draftStatus === 'writing') return;
 
     setDraftStatus('writing');
     setStatusText('正在回写病历系统');
     setProgress(100);
 
-    const result = await submitDocument(generatedDraft);
+    let result;
+    try {
+      result = await submitBubbleDischargeDraft(
+        generatedPatient,
+        detectedContext.docName,
+        '林志远 主治医师',
+        { preparedDraft },
+      );
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : '回写失败，点开处理';
+      setDraftStatus('error');
+      setStatusText(messageText);
+      return;
+    }
     if (result.ok) {
       setDraftStatus('written');
-      setStatusText('已回写到出院记录');
+      setStatusText(result.historyCreated ? '已回写并生成历史' : result.message);
+      return;
+    }
+
+    if (result.written) {
+      setDraftStatus('error');
+      setStatusText('已回写，历史生成失败');
       return;
     }
 
     setDraftStatus('error');
     setStatusText('回写失败，点开处理');
+  };
+
+  const handleRegenerateDraft = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!detectedContext || !generatedPatient || isWorking) return;
+    setRegenerateToken((value) => value + 1);
   };
 
   const handleRefreshSuggestions = (event: MouseEvent<HTMLButtonElement>) => {
@@ -228,7 +278,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     }
   };
 
-  const canWriteback = draftStatus === 'ready' || draftStatus === 'error';
+  const canWriteback = Boolean(detectedContext && generatedPatient && preparedDraft)
+    && (draftStatus === 'ready' || draftStatus === 'error');
   const isWorking = draftStatus === 'generating' || draftStatus === 'writing';
 
   if (editContext) {
@@ -398,28 +449,42 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         )}
       </div>
 
-      {/* 箭头图标 */}
-      <div
-        className={[
-          'flex items-center justify-center w-7 h-7 shrink-0',
-          'transition-transform hover:scale-110',
-          isDetected ? 'bg-emerald-600 text-white' : 'bg-[#1E3A8A] text-white',
-        ].join(' ')}
-      >
-        {canWriteback ? (
+      {/* 操作图标 */}
+      <div className="flex items-center gap-1 shrink-0">
+        {isDetected && detectedContext && !isWorking ? (
           <button
             type="button"
             data-tauri-drag-region="false"
-            onClick={handleWriteback}
-            className="w-full h-full flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white"
-            title="回写出院记录"
-            aria-label="回写出院记录"
+            onClick={handleRegenerateDraft}
+            className="w-7 h-7 flex items-center justify-center border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+            title="重新生成出院记录"
+            aria-label="重新生成出院记录"
           >
-            <UploadOutlined className="text-xs" />
+            <ReloadOutlined className="text-xs" />
           </button>
-        ) : (
-          <ArrowRightOutlined className="text-xs" />
-        )}
+        ) : null}
+        <div
+          className={[
+            'flex items-center justify-center w-7 h-7',
+            'transition-transform hover:scale-110',
+            isDetected ? 'bg-emerald-600 text-white' : 'bg-[#1E3A8A] text-white',
+          ].join(' ')}
+        >
+          {canWriteback ? (
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={handleWriteback}
+              className="w-full h-full flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white"
+              title="回写出院记录"
+              aria-label="回写出院记录"
+            >
+              <UploadOutlined className="text-xs" />
+            </button>
+          ) : (
+            <ArrowRightOutlined className="text-xs" />
+          )}
+        </div>
       </div>
       {isDetected ? (
         <div data-tauri-drag-region className="absolute inset-x-0 bottom-0 h-0.5 bg-emerald-100">
@@ -434,45 +499,4 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       )}
     </div>
   );
-}
-
-function buildBubbleDischargeDraft(patient: ReturnType<typeof buildPatientFromEmrContext>, docName: string) {
-  const dischargeCase = buildDischargeCase(patient);
-  const mapping: Record<string, string> = {
-    入院日期: 'admissionDate',
-    出院日期: 'dischargeDate',
-    住院天数: 'hospitalDays',
-    入院情况: 'admissionCondition',
-    入院诊断: 'admissionDiagnosis',
-    诊疗经过: 'treatmentCourse',
-    出院诊断: 'dischargeDiagnosis',
-    出院情况: 'dischargeCondition',
-    出院医嘱: 'dischargeOrders',
-  };
-  const fields = Object.fromEntries(
-    dischargeCase.sections.map((section) => [mapping[section.section] ?? section.section, section.text]),
-  );
-  fields.patientInfo = `姓名：${patient.name}；性别：${patient.gender}；年龄：${patient.age}；床号：${patient.bedNo}；住院号：${patient.id}；科室：${patient.deptName}；入院日期：${patient.admissionDate}；主管医生：${patient.doctor}；诊断：${patient.diagnosis}`;
-  fields.physicianSignature = patient.doctor;
-
-  return {
-    docCode: 'DOC010',
-    docName,
-    patientId: patient.id,
-    fields,
-    fieldOrder: [
-      'patientInfo',
-      'admissionDate',
-      'dischargeDate',
-      'hospitalDays',
-      'admissionCondition',
-      'admissionDiagnosis',
-      'treatmentCourse',
-      'dischargeDiagnosis',
-      'dischargeCondition',
-      'dischargeOrders',
-      'physicianSignature',
-    ],
-    content: dischargeCase.sections.map((section) => `【${section.section}】${section.text}`).join('\n'),
-  };
 }

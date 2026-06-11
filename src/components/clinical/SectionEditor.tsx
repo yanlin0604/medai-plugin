@@ -6,7 +6,7 @@ import type {
   ReactNode,
 } from 'react';
 import { message } from 'antd';
-import { ThunderboltOutlined, UndoOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ThunderboltOutlined, UndoOutlined } from '@ant-design/icons';
 import { suggestTerms } from '../../services/clinicalService';
 
 export type SectionEditorVariant = 'card' | 'paper';
@@ -70,6 +70,9 @@ interface Props {
   onChange: (text: string) => void;
   /** 重置本段（撤销手动改写，回到要素渲染值；由父级经 key remount 实现） */
   onReset: () => void;
+  /** 重新请求后台字段生成，仅替换本段 */
+  onRegenerate?: () => void;
+  regenerating?: boolean;
   /** 划词优化实现（样例/真实 AI 由父注入） */
   optimize: SectionOptimize;
   /** 后台重写审计状态同步；同步失败不得回滚正文 */
@@ -108,6 +111,8 @@ export default function SectionEditor({
   variant = 'card',
   onChange,
   onReset,
+  onRegenerate,
+  regenerating,
   optimize,
   onRewriteStatusChange,
   onFocus,
@@ -154,6 +159,9 @@ export default function SectionEditor({
   const resetButtonClass = paper
     ? `inline-flex items-center gap-1 ${actionClass} text-slate-400 hover:text-[#854D0E] hover:bg-amber-50 rounded px-1.5 py-0.5`
     : `inline-flex items-center gap-1 ${actionClass} text-slate-400 hover:text-[#854D0E]`;
+  const regenerateButtonClass = paper
+    ? `inline-flex items-center gap-1 ${actionClass} text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded px-1.5 py-0.5 disabled:cursor-not-allowed disabled:opacity-60`
+    : `inline-flex items-center gap-1 ${actionClass} text-slate-500 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60`;
   const editableClass = paper
     ? `${editorClass} text-slate-700 outline-none bg-white/70 border-l-2 border-transparent rounded-sm whitespace-pre-wrap transition-colors hover:border-l-slate-200 focus:border-l-[#1E3A8A] focus:bg-[#F8FAFC] focus:ring-1 focus:ring-[#93C5FD]`
     : `${editorClass} text-slate-700 outline-none bg-white border border-slate-200 rounded-md focus:border-[#1E3A8A] transition-colors`;
@@ -460,13 +468,24 @@ export default function SectionEditor({
           <div className={actionWrapClass}>
             <button
               onClick={polishSection}
-              disabled={optimizing}
+              disabled={optimizing || regenerating}
               title="对整段生成润色建议，采纳后才替换正文"
               className={polishButtonClass}
             >
               <ThunderboltOutlined />
               {optimizing ? '处理中' : '补全'}
             </button>
+            {onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                disabled={regenerating || optimizing}
+                title="重新请求后台字段生成结果，仅替换本段"
+                className={regenerateButtonClass}
+              >
+                <ReloadOutlined className={regenerating ? 'animate-spin' : undefined} />
+                {regenerating ? '生成中' : '重生成'}
+              </button>
+            )}
             {edited && (
               <button
                 onClick={onReset}

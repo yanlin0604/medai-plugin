@@ -215,6 +215,9 @@ export function toIcdItem(candidate: RuntimeIcdCandidateDto): IcdItem {
     name: candidate.diagnosisName,
     code: candidate.icdCode,
     confidence: Math.round((candidate.confidence ?? 0) * 100),
+    ...(candidate.matched === undefined ? {} : { matched: candidate.matched }),
+    ...(candidate.matchSource ? { matchSource: candidate.matchSource } : {}),
+    ...(candidate.matchReason ? { matchReason: candidate.matchReason } : {}),
   };
 }
 
@@ -283,6 +286,18 @@ export async function resolveRuntimeValues(
 ): Promise<RuntimeDocValues> {
   return requestRuntime<RuntimeDocValueBundleDto>(
     http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
+      params: { patientIdHis },
+    }),
+  );
+}
+
+export async function resolveRuntimeFieldValue(
+  docCode: string,
+  patientIdHis: string,
+  fieldKey: string,
+): Promise<RuntimeDocValues> {
+  return requestRuntime<RuntimeDocValueBundleDto>(
+    http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/fields/${encodePath(fieldKey)}/value`, {
       params: { patientIdHis },
     }),
   );
@@ -363,6 +378,7 @@ export const pluginRuntimeApi = {
   getRuntimeTemplate,
   getRuntimeDocTemplate,
   resolveRuntimeValues,
+  resolveRuntimeFieldValue,
   getEvidence,
   completeField,
   auditFieldWriteback,

@@ -69,6 +69,7 @@ export interface RuntimeDocFieldOptionDto {
 
 export interface RuntimeFieldRenderRuleDto {
   valueRef?: RuntimeFieldValueRefDto;
+  generation?: RuntimeFieldGenerationRuleDto;
   editable?: boolean;
   metaSlot?: string;
   readOnlyHint?: string;
@@ -76,6 +77,25 @@ export interface RuntimeFieldRenderRuleDto {
   calculation?: RuntimeFieldCalculationDto;
   todayDocMerge?: RuntimeTodayDocMergeRuleDto;
   evidence?: RuntimeFieldEvidenceRuleDto;
+}
+
+export interface RuntimeFieldGenerationRuleDto {
+  strategy?: 'direct' | 'calculate' | 'extract' | 'evidence_summary' | 'ai_summary' | 'hybrid' | string;
+  sources?: RuntimeGenerationSourceRefDto[];
+  promptKey?: string;
+  fallbackMode?: 'empty' | 'default' | 'concat' | 'evidence_concat' | string;
+  requireTimeline?: boolean;
+  auditEnabled?: boolean;
+  focusHints?: string[];
+}
+
+export interface RuntimeGenerationSourceRefDto {
+  sourceSystem?: string;
+  adapterKey?: string;
+  sourcePath?: string;
+  transform?: string;
+  required?: boolean;
+  evidenceTypes?: string[];
 }
 
 export interface RuntimeFieldCalculationDto {
@@ -259,8 +279,14 @@ export interface RuntimeFieldValueDto {
   sourceType?: string;
   sourcePath?: string;
   simulated?: boolean;
+  updateTime?: string;
   updatedAt?: string;
   errorMessage?: string;
+  strategyType?: string;
+  generationId?: string;
+  usedEvidenceIds?: string[];
+  sourceStatuses?: RuntimeEvidenceSourceStatusDto[];
+  warnings?: string[];
 }
 
 export interface RuntimeIcdCandidateDto {
@@ -270,6 +296,9 @@ export interface RuntimeIcdCandidateDto {
   reason?: string;
   confidence?: number;
   simulated?: boolean;
+  matched?: boolean;
+  matchSource?: string;
+  matchReason?: string;
 }
 
 export interface RuntimePulledSourceDto {
