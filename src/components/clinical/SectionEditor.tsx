@@ -3,6 +3,7 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   DragEvent as ReactDragEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   ReactNode,
 } from 'react';
 import { message } from 'antd';
@@ -421,6 +422,11 @@ export default function SectionEditor({
     await applyOptimize('polish');
   };
 
+  const regenerateSection = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onRegenerate?.();
+  };
+
   const syncRewriteStatus = async (requestId: string | number, status: SectionRewriteStatus) => {
     if (!onRewriteStatusChange) return;
     try {
@@ -477,13 +483,14 @@ export default function SectionEditor({
             </button>
             {onRegenerate && (
               <button
-                onClick={onRegenerate}
+                type="button"
+                onClick={regenerateSection}
                 disabled={regenerating || optimizing}
                 title="重新请求后台字段生成结果，仅替换本段"
                 className={regenerateButtonClass}
               >
                 <ReloadOutlined className={regenerating ? 'animate-spin' : undefined} />
-                {regenerating ? '生成中' : '重生成'}
+                {regenerating ? '生成中' : '重新生成'}
               </button>
             )}
             {edited && (

@@ -75,6 +75,27 @@ export async function loadDischargeRuntime(
   return promise;
 }
 
+export async function loadDischargeRuntimeTemplate(
+  docCode: string,
+  patientIdHis: string,
+  patient: PatientBrief,
+): Promise<DischargeRuntimeState> {
+  const template = await pluginRuntimeApi.getRuntimeTemplate(docCode);
+  return buildDischargeRuntime(template, emptyRuntimeValues(docCode, patientIdHis), patient);
+}
+
+export async function loadDischargeRuntimeValues(
+  docCode: string,
+  patientIdHis: string,
+  patient: PatientBrief,
+  template: RuntimeDocTemplateDto,
+): Promise<DischargeRuntimeState> {
+  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis);
+  const runtime = buildDischargeRuntime(template, values, patient);
+  runtimeCache.set(runtimeCacheKey(docCode, patientIdHis), Promise.resolve(runtime));
+  return runtime;
+}
+
 export async function loadDischargeRuntimeField(
   docCode: string,
   patientIdHis: string,
@@ -371,4 +392,15 @@ function normalizeFieldSource(sourceType: string): FieldSource {
 
 function byFieldOrder(a: RuntimeDocFieldDto, b: RuntimeDocFieldDto): number {
   return (a.fieldOrder ?? 0) - (b.fieldOrder ?? 0);
+}
+
+function emptyRuntimeValues(docCode: string, patientIdHis: string): RuntimeDocValueBundleDto {
+  return {
+    docCode,
+    patientIdHis,
+    values: {},
+    icdCandidates: [],
+    pulledSources: [],
+    resolvedAt: new Date().toISOString(),
+  };
 }
