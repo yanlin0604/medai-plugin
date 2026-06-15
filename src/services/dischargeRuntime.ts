@@ -2,6 +2,7 @@ import type { DocumentPaperMetaCell } from '../components/clinical/DocumentPaper
 import type { PatientBrief } from '../components/clinical/EmrContextCard';
 import type { ClinicalFieldCalculation, ClinicalSection, FieldSource, IcdItem } from './types';
 import { pluginRuntimeApi, toIcdItem } from './pluginRuntime';
+import { loadDraft } from './draftService';
 import type {
   RuntimeDocFieldDto,
   RuntimeDocTemplateDto,
@@ -38,6 +39,11 @@ function runtimeCacheKey(docCode: string, patientIdHis: string): string {
   return `${docCode}:${patientIdHis}`;
 }
 
+function hasDraft(docCode: string, patientIdHis: string): boolean {
+  const draft = loadDraft(docCode, patientIdHis);
+  return !!draft && Object.keys(draft.values || {}).length > 0;
+}
+
 export function clearDischargeRuntimeCache(docCode?: string, patientIdHis?: string): void {
   if (!docCode || !patientIdHis) {
     runtimeCache.clear();
@@ -60,9 +66,10 @@ export async function loadDischargeRuntime(
 
   let promise = runtimeCache.get(cacheKey);
   if (!promise) {
+    const skipGeneration = !options.forceRefresh && hasDraft(docCode, patientIdHis);
     promise = Promise.all([
       pluginRuntimeApi.getRuntimeTemplate(docCode),
-      pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis),
+      pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, skipGeneration),
     ])
       .then(([template, values]) => buildDischargeRuntime(template, values, patient))
       .catch((error) => {
@@ -89,8 +96,9 @@ export async function loadDischargeRuntimeValues(
   patientIdHis: string,
   patient: PatientBrief,
   template: RuntimeDocTemplateDto,
+  options: { skipGeneration?: boolean } = {},
 ): Promise<DischargeRuntimeState> {
-  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis);
+  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, options.skipGeneration);
   const runtime = buildDischargeRuntime(template, values, patient);
   runtimeCache.set(runtimeCacheKey(docCode, patientIdHis), Promise.resolve(runtime));
   return runtime;
@@ -217,8 +225,14 @@ function isMetaField(field: RuntimeDocFieldDto): boolean {
 }
 
 function resolveFieldText(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): string {
+  // AI字段生成失败时，即使有兜底内容也不使用
+  if (value?.errorMessage || value?.warnings?.some(w => w.includes('AI字段生成失败'))) {
+    return '';
+  }
+
   const resolved = runtimeValueToText(value?.value);
   if (resolved) return resolved;
+
   if (field.renderRule?.defaultValueMode === 'today') return todayDate();
   return field.staticText || field.defaultValue || '';
 }

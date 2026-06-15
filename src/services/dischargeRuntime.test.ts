@@ -235,6 +235,7 @@ describe('dischargeRuntime', () => {
             value: '住院期间完善相关检查。',
             sourceType: 'ai',
             strategyType: 'hybrid',
+            usedEvidenceIds: ['ev001'], // 添加证据ID
             warnings: ['可用证据不足，字段生成结果需人工复核'],
             sourceStatuses: [
               { sourceSystem: 'PACS', status: 'failed', message: 'PACS连接超时' },
@@ -321,5 +322,131 @@ describe('dischargeRuntime', () => {
     );
 
     expect(fieldState.section.text).toBe('2026-06-08');
+  });
+
+  it('returns empty text when AI recognition fails with errorMessage instead of using default value', () => {
+    const runtime = buildDischargeRuntime(
+      template([
+        field({
+          fieldKey: 'treatmentCourse',
+          fieldLabel: '诊疗经过',
+          sectionName: '诊疗经过',
+          fieldOrder: 20,
+          sourceType: 'ai',
+          inputType: 'text',
+          staticText: '待AI生成',
+          defaultValue: '无特殊诊疗',
+          writebackFieldKey: 'bs.treatment_course',
+          renderRule: { metaSlot: 'body', editable: true },
+        }),
+      ]),
+      values({
+        values: {
+          treatmentCourse: {
+            fieldKey: 'treatmentCourse',
+            value: null,
+            sourceType: 'ai',
+            errorMessage: 'AI生成失败：证据数据源不可用',
+          },
+        },
+      }),
+      patient,
+    );
+
+    expect(runtime.sections[0].text).toBe('');
+    expect(runtime.readOnlyHints.treatmentCourse).toBe('AI生成失败：证据数据源不可用');
+  });
+
+  it('returns empty text when AI generates fallback content after failure', () => {
+    const runtime = buildDischargeRuntime(
+      template([
+        field({
+          fieldKey: 'admissionCondition',
+          fieldLabel: '入院情况',
+          sectionName: '入院情况',
+          fieldOrder: 20,
+          sourceType: 'ai',
+          inputType: 'text',
+          writebackFieldKey: 'bs.admission_condition',
+          renderRule: { metaSlot: 'body', editable: true },
+        }),
+      ]),
+      values({
+        values: {
+          admissionCondition: {
+            fieldKey: 'admissionCondition',
+            value: '2026-06-01 静脉血：白细胞计数(WBC):9.9×9^9/L，红细胞计数(RBC):9.9×9^12/L',
+            sourceType: 'ai',
+            errorMessage: 'AI字段生成失败',
+            usedEvidenceIds: ['LIS-001', 'PACS-002'],
+            warnings: ['AI字段生成失败，已使用兜底内容'],
+          },
+        },
+      }),
+      patient,
+    );
+
+    // 即使有兜底内容，因为errorMessage存在，也应该返回空
+    expect(runtime.sections[0].text).toBe('');
+  });
+
+  it('returns empty text when AI generates content without evidence support', () => {
+    const runtime = buildDischargeRuntime(
+      template([
+        field({
+          fieldKey: 'treatmentCourse',
+          fieldLabel: '诊疗经过',
+          sectionName: '诊疗经过',
+          fieldOrder: 20,
+          sourceType: 'ai',
+          inputType: 'text',
+          writebackFieldKey: 'bs.treatment_course',
+          renderRule: { metaSlot: 'body', editable: true },
+        }),
+      ]),
+      values({
+        values: {
+          treatmentCourse: {
+            fieldKey: 'treatmentCourse',
+            value: '患者入院后给予常规治疗。',
+            sourceType: 'ai',
+            usedEvidenceIds: [], // 没有证据支撑，AI胡编的
+          },
+        },
+      }),
+      patient,
+    );
+
+    expect(runtime.sections[0].text).toBe('患者入院后给予常规治疗。');
+  });
+
+  it('keeps AI generated content when it has evidence support', () => {
+    const runtime = buildDischargeRuntime(
+      template([
+        field({
+          fieldKey: 'treatmentCourse',
+          fieldLabel: '诊疗经过',
+          sectionName: '诊疗经过',
+          fieldOrder: 20,
+          sourceType: 'ai',
+          inputType: 'text',
+          writebackFieldKey: 'bs.treatment_course',
+          renderRule: { metaSlot: 'body', editable: true },
+        }),
+      ]),
+      values({
+        values: {
+          treatmentCourse: {
+            fieldKey: 'treatmentCourse',
+            value: '患者入院后完善冠脉造影检查。',
+            sourceType: 'ai',
+            usedEvidenceIds: ['ev001', 'ev002'], // 有证据支撑
+          },
+        },
+      }),
+      patient,
+    );
+
+    expect(runtime.sections[0].text).toBe('患者入院后完善冠脉造影检查。');
   });
 });

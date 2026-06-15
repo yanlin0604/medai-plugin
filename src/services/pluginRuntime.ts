@@ -283,10 +283,11 @@ export async function getRuntimeDocTemplate(docCode: string): Promise<DocTemplat
 export async function resolveRuntimeValues(
   docCode: string,
   patientIdHis: string,
+  skipGeneration = false,
 ): Promise<RuntimeDocValues> {
   return requestRuntime<RuntimeDocValueBundleDto>(
     http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
-      params: { patientIdHis },
+      params: { patientIdHis, skipGeneration },
     }),
   );
 }

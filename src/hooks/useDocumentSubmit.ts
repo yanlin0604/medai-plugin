@@ -61,7 +61,7 @@ export function useDocumentSubmit({
     return () => {
       cancelled = true;
     };
-  }, [docCode, patientId, locked, versionAdapter]);
+  }, [docCode, patientId, versionAdapter]);
 
   const submit = useCallback(
     async ({

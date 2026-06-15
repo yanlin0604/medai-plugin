@@ -318,6 +318,10 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
       clearDischargeRuntimeCache(doc.code, patient.id);
     }
 
+    // 检查是否有草稿，决定是否跳过生成
+    const hasDraft = !!loadDraft(doc.code, patient.id);
+    const skipGeneration = reloadToken === 0 && hasDraft;
+
     loadDischargeRuntimeTemplate(doc.code, patient.id, patientBrief)
       .then((runtime) => {
         if (cancelled) return;
@@ -327,7 +331,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
         applyRuntimeState(runtime, { restoreDraft: true });
         setRuntimeLoading(false);
         setRuntimeValuesLoading(true);
-        return loadDischargeRuntimeValues(doc.code, patient.id, patientBrief, runtime.template);
+        return loadDischargeRuntimeValues(doc.code, patient.id, patientBrief, runtime.template, { skipGeneration });
       })
       .then((runtime) => {
         if (cancelled || !runtime) return;
@@ -351,14 +355,10 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
       cancelled = true;
     };
   }, [
-    applyRuntimeState,
-    applyRuntimeValues,
     doc.code,
     patient.id,
     patientBrief,
     reloadToken,
-    resetEvidenceWorkspace,
-    setLocked,
   ]);
 
   const updateSection = useCallback((sectionKey: string, text: string) => {

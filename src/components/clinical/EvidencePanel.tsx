@@ -1,7 +1,7 @@
-import { CloseOutlined, DatabaseOutlined, PlusOutlined, WarningOutlined } from '@ant-design/icons';
-import { Alert, Button, Empty, Spin, Tag, Tooltip } from 'antd';
+import { CloseOutlined, DatabaseOutlined, PlusOutlined, WarningOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { Alert, Button, Empty, Spin, Tag, Tooltip, Modal, Checkbox, Radio, Input } from 'antd';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   RuntimeEvidenceBundleDto,
   RuntimeEvidenceItemDto,
@@ -128,6 +128,312 @@ export function formatEvidenceInsertText(item: RuntimeEvidenceItemDto): string {
   return [header, title, body].filter(Boolean).join('\n');
 }
 
+export interface ParsedSubItem {
+  id: string;
+  text: string;
+  isAbnormal: boolean;
+}
+
+export function parseSubItems(item: RuntimeEvidenceItemDto): ParsedSubItem[] {
+  // 1. 优先尝试从 structuredData 中解析
+  const struct = item.structuredData;
+  const rawItem = item as any;
+  if (struct || rawItem.items) {
+    const list = Array.isArray(struct?.items) ? struct.items :
+                 Array.isArray(struct?.indicators) ? struct.indicators :
+                 Array.isArray(struct?.results) ? struct.results :
+                 Array.isArray(rawItem.items) ? rawItem.items : null;
+    
+    if (list && list.length > 0) {
+      return list.map((sub: any, idx: number) => {
+        const name = sub.name || sub.label || sub.title || sub.itemName || '';
+        const value = sub.value || sub.result || '';
+        const unit = sub.unit || '';
+        const refRange = sub.reference || sub.refRange || '';
+        const flag = sub.abnormalFlag || sub.flag || '';
+        const isAbnormal = ['h', 'l', '↑', '↓', 'abnormal', 'critical', 'positive', '阳性', '异常'].some(
+          (k) => String(flag).toLowerCase().includes(k.toLowerCase())
+        );
+        
+        let text = `${name}: ${value}`;
+        if (unit) text += ` ${unit}`;
+        if (refRange) text += ` (参考: ${refRange})`;
+        if (flag && flag !== 'N' && flag !== 'normal') text += ` ${flag}`;
+        
+        return {
+          id: `struct-${idx}`,
+          text: text.trim(),
+          isAbnormal,
+        };
+      });
+    }
+  }
+
+  // 2. 如果没有结构化数据，使用文本行拆分
+  const rawText = item.originalText || item.summary || '';
+  if (!rawText.trim()) return [];
+
+  // 使用换行符或分号切分
+  const lines = rawText.split(/\r?\n/);
+  const result: ParsedSubItem[] = [];
+  let idx = 0;
+
+  lines.forEach((line) => {
+    const parts = line.split(/[;；]/);
+    parts.forEach((part) => {
+      const trimmed = part.trim();
+      if (!trimmed) return;
+      
+      const cleanText = trimmed.replace(/\/[Ll]/g, '');
+      const isAbnormal = /[↑↓\*]|异常|危急|阳性|偏高|偏低|positive|(?:\b[HLhl]\b)/.test(cleanText);
+      result.push({
+        id: `text-${idx++}`,
+        text: trimmed,
+        isAbnormal,
+      });
+    });
+  });
+
+  return result;
+}
+
+interface EvidenceDetailModalProps {
+  item: RuntimeEvidenceItemDto;
+  onClose: () => void;
+  onInsert: (text: string) => void;
+}
+
+function EvidenceDetailModal({ item, onClose, onInsert }: EvidenceDetailModalProps) {
+  const parsedItems = useMemo(() => parseSubItems(item), [item]);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => 
+    parsedItems.map(p => p.id) // 默认全选，方便快速全部插入
+  );
+  const [joinMode, setJoinMode] = useState<'compact' | 'list' | 'raw'>('list');
+  const [editedText, setEditedText] = useState<string>('');
+  const [isManualEdited, setIsManualEdited] = useState(false);
+
+  // 自动生成的拼接内容
+  const generatedText = useMemo(() => {
+    const selectedTexts = parsedItems
+      .filter((p) => selectedIds.includes(p.id))
+      .map((p) => p.text);
+
+    if (selectedTexts.length === 0) return '';
+
+    const header = `[${sourceLabel(item.sourceSystem)} ${evidenceTypeLabel(item.evidenceType)}] ${formatDateTime(item.occurredAt)}`;
+    const title = item.title?.trim() || '';
+
+    if (joinMode === 'compact') {
+      const body = selectedTexts.join('; ');
+      return [header, title, body].filter(Boolean).join(' ');
+    } else if (joinMode === 'list') {
+      const body = selectedTexts.map((t) => `  - ${t}`).join('\n');
+      return [header, title ? `【${title}】` : '', body].filter(Boolean).join('\n');
+    } else {
+      // 纯内容拼接
+      return selectedTexts.join('\n');
+    }
+  }, [parsedItems, selectedIds, joinMode, item]);
+
+  // 当自动生成的文本改变时，更新编辑框内容（如果用户没有手动编辑过的话）
+  useEffect(() => {
+    if (!isManualEdited) {
+      setEditedText(generatedText);
+    }
+  }, [generatedText, isManualEdited]);
+
+  const handleCheckboxChange = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = checked ? [...prev, id] : prev.filter((x) => x !== id);
+      setIsManualEdited(false); // 重置手动编辑标记，以便用新勾选的内容覆盖
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    setSelectedIds(parsedItems.map((p) => p.id));
+    setIsManualEdited(false);
+  };
+
+  const handleSelectNone = () => {
+    setSelectedIds([]);
+    setIsManualEdited(false);
+  };
+
+  const handleSelectAbnormal = () => {
+    const abnormalIds = parsedItems.filter((p) => p.isAbnormal).map((p) => p.id);
+    setSelectedIds(abnormalIds);
+    setIsManualEdited(false);
+  };
+
+  const rawDisplayContent = item.originalText || item.summary || '暂无详细内容';
+
+  return (
+    <Modal
+      open
+      title={
+        <div className="flex items-center gap-2 pr-6">
+          <DatabaseOutlined className="text-blue-600" />
+          <span className="text-sm font-bold text-slate-800">临床资料详情与子项选择</span>
+        </div>
+      }
+      onCancel={onClose}
+      width={820}
+      footer={[
+        <Button key="cancel" onClick={onClose} className="rounded-md">
+          取消
+        </Button>,
+        <Button
+          key="insertAll"
+          onClick={() => onInsert(formatEvidenceInsertText(item))}
+          className="rounded-md"
+        >
+          插入全部原始文本
+        </Button>,
+        <Button
+          key="insertSelected"
+          type="primary"
+          onClick={() => onInsert(editedText)}
+          disabled={!editedText.trim()}
+          className="rounded-md bg-blue-600 hover:bg-blue-700"
+        >
+          确认插入已选
+        </Button>,
+      ]}
+      styles={{
+        body: { padding: '16px 20px' },
+      }}
+    >
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-slate-100 pb-3">
+        <Tag color="blue" className="rounded-[4px] px-2 py-0.5 font-bold">
+          {sourceLabel(item.sourceSystem)}
+        </Tag>
+        <Tag color="cyan" className="rounded-[4px] px-2 py-0.5">
+          {evidenceTypeLabel(item.evidenceType)}
+        </Tag>
+        <span className="text-xs text-slate-500">{formatDateTime(item.occurredAt)}</span>
+        <span className="ml-auto text-xs text-slate-400">已选 {selectedIds.length} / {parsedItems.length} 项</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+        {/* 左侧：完整文本视图 */}
+        <div className="md:col-span-5 flex flex-col">
+          <div className="mb-2 text-xs font-bold text-slate-600 flex items-center justify-between">
+            <span>原始完整记录</span>
+            <Button
+              size="small"
+              type="link"
+              onClick={() => {
+                navigator.clipboard.writeText(rawDisplayContent);
+              }}
+              className="p-0 h-auto text-[11px]"
+            >
+              复制原文
+            </Button>
+          </div>
+          <div className="flex-1 rounded-md border border-slate-200 bg-slate-50 p-2.5 max-h-[300px] overflow-y-auto">
+            <pre className="m-0 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700 font-sans">
+              {rawDisplayContent}
+            </pre>
+          </div>
+        </div>
+
+        {/* 右侧：子项拆分与多选 */}
+        <div className="md:col-span-7 flex flex-col border-l border-slate-100 pl-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-600">选择子项指标</span>
+            <div className="flex gap-1.5">
+              <Button size="small" type="dashed" className="text-[11px] px-1.5" onClick={handleSelectAll}>
+                全选
+              </Button>
+              <Button size="small" type="dashed" className="text-[11px] px-1.5" onClick={handleSelectNone}>
+                清空
+              </Button>
+              {parsedItems.some((p) => p.isAbnormal) && (
+                <Button size="small" danger type="dashed" className="text-[11px] px-1.5" onClick={handleSelectAbnormal}>
+                  仅异常项
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 rounded-md border border-slate-200 p-1.5 max-h-[250px] overflow-y-auto">
+            {parsedItems.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-400">无可拆分的子项指标</div>
+            ) : (
+              <div className="space-y-1">
+                {parsedItems.map((p) => {
+                  const isChecked = selectedIds.includes(p.id);
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={(e) => {
+                        // 避免与Checkbox自身的onChange冲突
+                        if ((e.target as HTMLElement).closest('.ant-checkbox')) return;
+                        handleCheckboxChange(p.id, !isChecked);
+                      }}
+                      className={`flex items-start gap-2 rounded px-2 py-1.5 transition-colors cursor-pointer hover:bg-slate-50 ${
+                        isChecked ? 'bg-blue-50/30' : ''
+                      }`}
+                    >
+                      <Checkbox
+                        checked={isChecked}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleCheckboxChange(p.id, e.target.checked);
+                        }}
+                        className="mt-0.5"
+                      />
+                      <span className={`text-[11px] leading-4 flex-1 ${
+                        p.isAbnormal ? 'text-red-600 font-medium' : 'text-slate-700'
+                      }`}>
+                        {p.text}
+                        {p.isAbnormal && <span className="ml-1 text-red-500 font-bold">异常</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-600">拼接格式：</span>
+            <Radio.Group
+              size="small"
+              value={joinMode}
+              onChange={(e) => {
+                setJoinMode(e.target.value);
+                setIsManualEdited(false);
+              }}
+              className="text-[11px]"
+            >
+              <Radio value="list" className="text-[11px] mr-2">多行列表</Radio>
+              <Radio value="compact" className="text-[11px] mr-2">单行紧凑</Radio>
+              <Radio value="raw" className="text-[11px]">仅数值</Radio>
+            </Radio.Group>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-slate-100 pt-3">
+        <div className="mb-1 text-xs font-bold text-slate-600">插入文本预览 (可在下方框内直接修改润色)</div>
+        <Input.TextArea
+          rows={3}
+          value={editedText}
+          onChange={(e) => {
+            setEditedText(e.target.value);
+            setIsManualEdited(true);
+          }}
+          className="text-xs font-sans text-slate-800 rounded-md border-slate-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-100"
+          placeholder="勾选右侧子项生成预览，或直接在此输入"
+        />
+      </div>
+    </Modal>
+  );
+}
+
+
 function groupEvidence(items: RuntimeEvidenceItemDto[]): Array<[string, RuntimeEvidenceItemDto[]]> {
   const groups = new Map<string, RuntimeEvidenceItemDto[]>();
   items.forEach((item) => {
@@ -172,6 +478,7 @@ export default function EvidencePanel({
   const evidenceItems = bundle?.evidenceItems ?? [];
   const groupedEvidence = useMemo(() => groupEvidence(evidenceItems), [evidenceItems]);
   const [activeSource, setActiveSource] = useState('全部');
+  const [selectedItemForDetail, setSelectedItemForDetail] = useState<RuntimeEvidenceItemDto | null>(null);
   const trayItems = useMemo(
     () => (activeSource === '全部'
       ? evidenceItems
@@ -319,13 +626,30 @@ export default function EvidencePanel({
                         <div className="truncate text-[10px] leading-[14px] text-slate-500">{item.summary || item.originalText || '无摘要'}</div>
                       </div>
                       {onInsertEvidence && (
-                        <button
-                          type="button"
-                          onClick={() => onInsertEvidence(item, insertText)}
-                          className="mt-0.5 h-5 w-5 shrink-0 rounded bg-[#EFF6FF] text-[12px] font-bold leading-5 text-[#1D4ED8] hover:bg-[#DBEAFE]"
-                        >
-                          +
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0 self-center">
+                          <button
+                            type="button"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              onInsertEvidence(item, insertText);
+                            }}
+                            title="直接插入全部原始文本"
+                            className="h-5 w-5 rounded bg-[#EFF6FF] text-[12px] font-bold leading-5 text-[#1D4ED8] hover:bg-[#DBEAFE] flex items-center justify-center"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              setSelectedItemForDetail(item);
+                            }}
+                            title="选择子项指标插入"
+                            className="h-5 w-5 rounded bg-slate-100 text-[10px] leading-5 text-slate-600 hover:bg-slate-200 flex items-center justify-center"
+                          >
+                            <UnorderedListOutlined />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </article>
@@ -335,6 +659,18 @@ export default function EvidencePanel({
           )}
         </div>
         {renderDragGhost()}
+        {selectedItemForDetail && (
+          <EvidenceDetailModal
+            item={selectedItemForDetail}
+            onClose={() => setSelectedItemForDetail(null)}
+            onInsert={(text) => {
+              if (onInsertEvidence) {
+                onInsertEvidence(selectedItemForDetail, text);
+              }
+              setSelectedItemForDetail(null);
+            }}
+          />
+        )}
       </aside>
     );
   }
@@ -380,7 +716,7 @@ export default function EvidencePanel({
         ))}
       </div>
 
-      <div className="px-2 py-1.5">
+      <div className="max-h-[420px] overflow-y-auto px-2 py-1.5">
         {loading ? (
           <div className="min-h-[160px] flex items-center justify-center">
             <Spin size="small" />
@@ -393,7 +729,7 @@ export default function EvidencePanel({
           <div className="space-y-2">
             {groupedEvidence.map(([source, items]) => (
               <section key={source} className="space-y-1">
-                <div className="bg-white/95 py-0.5 flex items-center justify-between">
+                <div className="sticky top-0 bg-white/95 py-0.5 flex items-center justify-between z-10">
                   <span className="text-[11px] font-bold text-slate-700">{source}</span>
                   <span className="text-[10px] text-slate-400">{items.length} 条</span>
                 </div>
@@ -423,29 +759,48 @@ export default function EvidencePanel({
                             </div>
                             <h4 className="truncate text-[11px] font-bold text-slate-900 leading-5">{item.title || '未命名资料'}</h4>
                             {item.summary && (
-                              <p
-                                className="truncate text-[10px] leading-4 text-slate-600"
-                              >
+                              <p className="line-clamp-2 text-[10px] leading-4 text-slate-600">
                                 {item.summary}
                               </p>
                             )}
                             {item.originalText && (
-                              <details className="mt-0.5 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500">
-                                <summary className="cursor-pointer select-none font-medium text-slate-600">原始记录</summary>
-                                <p className="mt-1 whitespace-pre-wrap leading-5">{item.originalText}</p>
+                              <details className="mt-0.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500">
+                                <summary className="cursor-pointer select-none font-medium text-slate-600 hover:text-slate-900">原始记录</summary>
+                                <div className="mt-1 max-h-[180px] overflow-y-auto">
+                                  <p className="whitespace-pre-wrap leading-5">{item.originalText}</p>
+                                </div>
                               </details>
                             )}
                           </div>
-                          {onInsertEvidence && (
-                            <Button
-                              size="small"
-                              type="text"
-                              icon={<PlusOutlined />}
-                              onClick={() => onInsertEvidence(item, insertText)}
-                              className="h-6 shrink-0 px-1 text-[#1E3A8A]"
-                            >
-                              加
-                            </Button>
+                           {onInsertEvidence && (
+                            <div className="flex flex-col gap-0.5 shrink-0">
+                              <Button
+                                size="small"
+                                type="text"
+                                icon={<PlusOutlined />}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  onInsertEvidence(item, insertText);
+                                }}
+                                className="h-6 px-1 text-[#1E3A8A]"
+                                title="直接插入全部原始文本"
+                              >
+                                加
+                              </Button>
+                              <Button
+                                size="small"
+                                type="text"
+                                icon={<UnorderedListOutlined />}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedItemForDetail(item);
+                                }}
+                                className="h-6 px-1 text-slate-500 hover:text-slate-700"
+                                title="选择子项指标插入"
+                              >
+                                选
+                              </Button>
+                            </div>
                           )}
                         </div>
                       </article>
@@ -459,6 +814,18 @@ export default function EvidencePanel({
       </div>
       {dragGhost && (
         renderDragGhost()
+      )}
+      {selectedItemForDetail && (
+        <EvidenceDetailModal
+          item={selectedItemForDetail}
+          onClose={() => setSelectedItemForDetail(null)}
+          onInsert={(text) => {
+            if (onInsertEvidence) {
+              onInsertEvidence(selectedItemForDetail, text);
+            }
+            setSelectedItemForDetail(null);
+          }}
+        />
       )}
     </aside>
   );
