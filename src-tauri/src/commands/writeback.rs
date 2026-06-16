@@ -6,8 +6,18 @@ use writeback_engine::{DocumentPayload, FieldMapper, WritebackStats};
 pub async fn writeback_to_bs_inbox(
     payload: DocumentPayload,
     url: String,
+    source: Option<String>,
 ) -> Result<WritebackStats, String> {
-    persist_bs_writeback_inbox(&payload, &url)?;
+    let source = source.as_deref().unwrap_or("demo-bs");
+
+    if source == "demo-cs" || url.starts_with("http://") || url.starts_with("https://") {
+        // CS 端：写入固定路径
+        persist_cs_writeback_inbox(&payload)?;
+    } else {
+        // BS 端：从 file:// URL 解析路径
+        persist_bs_writeback_inbox(&payload, &url)?;
+    }
+
     let fields = FieldMapper::identity().map(&payload);
     let mut stats = WritebackStats::new(fields.len());
     for _ in fields {
@@ -20,6 +30,16 @@ fn persist_bs_writeback_inbox(payload: &DocumentPayload, url: &str) -> Result<()
     let bs_root =
         bs_root_from_file_url(url).ok_or_else(|| "无法从 BS URL 解析演示系统目录".to_string())?;
     let inbox_path = bs_root.join("js").join("writeback-inbox.js");
+    write_writeback_inbox(&inbox_path, payload)
+}
+
+fn persist_cs_writeback_inbox(payload: &DocumentPayload) -> Result<(), String> {
+    // CS 端：固定路径
+    let cs_inbox = PathBuf::from("E:/xxxxxx/aaaaaaaaa/ai-hospitalized/demo-medical-system/cs/public/writeback-inbox.js");
+    write_writeback_inbox(&cs_inbox, payload)
+}
+
+fn write_writeback_inbox(inbox_path: &PathBuf, payload: &DocumentPayload) -> Result<(), String> {
     let updated_at = chrono::Utc::now().to_rfc3339();
 
     let mut docs_by_code = Map::new();
@@ -46,8 +66,9 @@ fn persist_bs_writeback_inbox(payload: &DocumentPayload, url: &str) -> Result<()
         serde_json::to_string_pretty(&inbox).map_err(|error| error.to_string())?
     );
 
-    fs::write(&inbox_path, content).map_err(|error| format!("写入 BS 回写 inbox 失败：{error}"))
+    fs::write(&inbox_path, content).map_err(|error| format!("写入回写 inbox 失败：{error}"))
 }
+
 
 fn bs_root_from_file_url(url: &str) -> Option<PathBuf> {
     let path_part = url.strip_prefix("file:///")?.split('?').next()?;

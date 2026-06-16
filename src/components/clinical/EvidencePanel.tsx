@@ -40,6 +40,8 @@ const SOURCE_LABELS: Record<string, string> = {
   EMR: 'EMR',
   PACS: 'PACS',
   RIS: 'RIS',
+  'bs-demo': 'EMR',  // 演示系统映射为标准来源
+  'cs-demo': 'EMR',  // 演示系统映射为标准来源
 };
 
 const EVIDENCE_TYPE_LABELS: Record<string, string> = {
@@ -51,6 +53,7 @@ const EVIDENCE_TYPE_LABELS: Record<string, string> = {
   imaging: '影像',
   procedure: '操作',
   progress_note: '病程',
+  external_document: '文书',
 };
 
 function formatDateTime(value?: string): string {

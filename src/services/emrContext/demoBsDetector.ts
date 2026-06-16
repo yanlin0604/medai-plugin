@@ -28,7 +28,8 @@ export async function getCurrentEmrContext(): Promise<EmrContext | null> {
 }
 
 export function isValidDemoBsDischargeContext(context: EmrContext) {
-  if (context.source !== 'demo-bs') {
+  // ✅ 同时接受 demo-bs 和 demo-cs
+  if (context.source !== 'demo-bs' && context.source !== 'demo-cs') {
     return false;
   }
 
