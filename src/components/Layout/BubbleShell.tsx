@@ -378,7 +378,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       role="button"
       tabIndex={0}
       data-tauri-drag-region
-      onClick={handleExpand}
+      onDoubleClick={handleExpand}
       onKeyDown={handleShellKeyDown}
       className={[
         'relative flex items-center gap-2 px-2.5 py-2 w-full h-full overflow-hidden',
