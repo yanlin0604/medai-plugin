@@ -152,7 +152,6 @@ function buildCurrentMetaRows(
     [
       { label: '床位号', value: patient.bed },
       { label: '住院号', value: patient.admissionNo },
-      { label: '入院诊断', value: patient.diagnosis ?? '待完善' },
     ],
   ];
   const sectionByKey = new Map(sections.map((section) => [section.key, section]));
@@ -385,13 +384,18 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   }, []);
 
   const metaRows = useMemo(
-    () => buildCurrentMetaRows(
-      patientBrief,
-      sections,
-      runtimeState?.metaFieldKeys ?? [],
-      previewMode === 'edit' && !locked,
-      updateSection,
-    ),
+    () => {
+      const metaFieldKeys = runtimeState?.metaFieldKeys ?? [];
+      console.log('[DischargeFlow] metaFieldKeys:', metaFieldKeys);
+      console.log('[DischargeFlow] sections:', sections.map(s => ({ key: s.key, title: s.title, inputType: s.inputType, editable: s.editable })));
+      return buildCurrentMetaRows(
+        patientBrief,
+        sections,
+        metaFieldKeys,
+        previewMode === 'edit' && !locked,
+        updateSection,
+      );
+    },
     [locked, patientBrief, previewMode, runtimeState?.metaFieldKeys, sections, updateSection],
   );
 
