@@ -19,7 +19,8 @@ import { useHotkey } from '../../hooks/useHotkey';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { usePatientStore } from '../../stores/usePatientStore';
 import { admissionPatient } from '../../services/samples/admission';
-import { getDocTemplate, recommendIcd, renderDocument } from '../../services/clinicalService';
+import { pluginRuntimeApi, toIcdItem } from '../../services/pluginRuntime';
+import { renderDocument } from '../../services/clinicalService';
 import { saveDraft, loadDraft } from '../../services/draftService';
 import type {
   DocFieldDef,
@@ -29,11 +30,38 @@ import type {
   ClinicalSection,
   PatientBrief,
 } from '../../services/types';
+import type { RuntimeDocTemplateDto } from '../../services/pluginRuntimeTypes';
 
 type PreviewMode = 'read' | 'edit';
 
 const SECTION_EDITS_KEY = '__sectionEdits';
 const HIDDEN_SECTIONS = new Set(['患者基本信息']);
+
+/** 将后端 RuntimeDocTemplateDto 转换为前端 DocTemplate */
+function toDocTemplate(runtimeTemplate: RuntimeDocTemplateDto): DocTemplate {
+  return {
+    docCode: runtimeTemplate.docCode,
+    version: runtimeTemplate.templateVersion,
+    title: runtimeTemplate.title || runtimeTemplate.docName,
+    fields: runtimeTemplate.fields.map((field): DocFieldDef => ({
+      key: field.fieldKey,
+      label: field.fieldLabel,
+      section: field.sectionName,
+      source: field.sourceType as any,
+      required: field.required ?? false,
+      inputType: field.inputType as any,
+      options: field.options?.map(opt => ({
+        value: opt.optionValue,
+        label: opt.optionLabel,
+        render: opt.renderText || opt.optionLabel,
+      })),
+      default: field.defaultValue,
+      placeholder: field.placeholder,
+      staticText: field.staticText,
+      dictatable: field.dictatable ?? false,
+    })),
+  };
+}
 
 function optimizeText(text: string, mode: string): string {
   if (mode === 'expand') return `${text}（详见专科查体记录）`;
@@ -147,39 +175,56 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     hydratedRef.current = false;
 
     (async () => {
-      const [tpl, icdItems] = await Promise.all([
-        getDocTemplate(doc.code),
-        recommendIcd(patient.admissionNo),
-      ]);
-      if (!alive || !tpl) return;
+      try {
+        // 调用后端接口获取模板和字段值
+        const [runtimeTemplate, runtimeValues] = await Promise.all([
+          pluginRuntimeApi.getRuntimeTemplate(doc.code),
+          pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.admissionNo, false),
+        ]);
 
-      const initialValues: Record<string, FieldValue> = {};
-      tpl.fields.forEach((field) => {
-        if (field.key === 'patientInfo') {
-          initialValues[field.key] = `姓名：${patient.name}，性别：${patient.gender}，年龄：${patient.age}，入院诊断：${diagnosis}。`;
-        } else if (field.key === 'treatmentPlan') {
-          initialValues[field.key] = field.default ?? buildTreatmentPlan(diagnosis);
-        } else if (field.inputType === 'options' || field.inputType === 'text' || field.inputType === 'date') {
-          initialValues[field.key] = field.default ?? '';
-        } else if (field.inputType === 'icd') {
-          initialValues[field.key] = icdItems;
-        } else if (field.inputType === 'static') {
-          initialValues[field.key] = field.staticText ?? '';
+        if (!alive) return;
+
+        // 转换为前端格式
+        const tpl = toDocTemplate(runtimeTemplate);
+        const backendValues = runtimeValues.values || {};
+        const icdItems = (runtimeValues.icdCandidates || []).map(toIcdItem);
+
+        const initialValues: Record<string, FieldValue> = {};
+        tpl.fields.forEach((field) => {
+          // 优先使用后端返回的值
+          const backendVal = backendValues[field.key];
+          if (backendVal !== undefined && backendVal !== null) {
+            initialValues[field.key] = backendVal as unknown as FieldValue;
+          } else if (field.key === 'patientInfo') {
+            initialValues[field.key] = `姓名：${patient.name}，性别：${patient.gender}，年龄：${patient.age}，入院诊断：${diagnosis}。`;
+          } else if (field.key === 'treatmentPlan') {
+            initialValues[field.key] = field.default ?? buildTreatmentPlan(diagnosis);
+          } else if (field.inputType === 'options' || field.inputType === 'text' || field.inputType === 'date') {
+            initialValues[field.key] = field.default ?? '';
+          } else if (field.inputType === 'icd') {
+            initialValues[field.key] = icdItems;
+          } else if (field.inputType === 'static') {
+            initialValues[field.key] = field.staticText ?? '';
+          }
+        });
+
+        const saved = loadDraft(doc.code, patient.admissionNo);
+        setTemplate(tpl);
+        if (saved) {
+          setValues(stripDraftMeta(saved.values));
+          setSectionEdits(parseSectionEdits(saved.values[SECTION_EDITS_KEY]));
+          setLocked(saved.status === 'submitted');
+        } else {
+          setValues(initialValues);
+          setSectionEdits({});
+          setLocked(false);
         }
-      });
-
-      const saved = loadDraft(doc.code, patient.admissionNo);
-      setTemplate(tpl);
-      if (saved) {
-        setValues(stripDraftMeta(saved.values));
-        setSectionEdits(parseSectionEdits(saved.values[SECTION_EDITS_KEY]));
-        setLocked(saved.status === 'submitted');
-      } else {
-        setValues(initialValues);
-        setSectionEdits({});
-        setLocked(false);
+        hydratedRef.current = true;
+      } catch (error) {
+        if (!alive) return;
+        console.error('加载入院记录模板失败:', error);
+        message.error(error instanceof Error ? error.message : '加载模板失败');
       }
-      hydratedRef.current = true;
     })();
 
     return () => {

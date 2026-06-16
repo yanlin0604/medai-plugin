@@ -7,7 +7,7 @@ export type EditAssistSuggestionType = 'term' | 'phrase' | 'rewrite';
 export type EditAssistSuggestionSource = 'terms' | 'mock-ai';
 
 export interface BsEditAssistContext {
-  source: 'demo-bs' | (string & {});
+  source: 'demo-bs' | 'demo-cs' | (string & {});
   patientId: string;
   patientName: string;
   docCode: 'DOC010' | (string & {});
@@ -162,7 +162,9 @@ export function isUsableEditAssistContext(
   now = Date.now(),
 ): context is BsEditAssistContext {
   if (!context) return false;
-  if (context.source !== 'demo-bs' || context.docCode !== 'DOC010') return false;
+  // 支持 BS 端和 CS 端
+  const isValidSource = context.source === 'demo-bs' || context.source === 'demo-cs';
+  if (!isValidSource || context.docCode !== 'DOC010') return false;
   if (!context.fieldKey || !context.fieldLabel) return false;
   if (isEditAssistContextStale(context, now)) return false;
   return getEditAssistToken(context).length >= MIN_TOKEN_LENGTH;

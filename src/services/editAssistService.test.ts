@@ -29,6 +29,16 @@ describe('editAssistService', () => {
     expect(isUsableEditAssistContext(baseContext, Date.parse(baseContext.receivedAt))).toBe(true);
   });
 
+  it('accepts CS端 (demo-cs) edit context', () => {
+    const csContext = { ...baseContext, source: 'demo-cs' as const };
+    expect(isUsableEditAssistContext(csContext, Date.parse(csContext.receivedAt))).toBe(true);
+  });
+
+  it('rejects invalid source edit context', () => {
+    const invalidContext = { ...baseContext, source: 'unknown-source' };
+    expect(isUsableEditAssistContext(invalidContext, Date.parse(invalidContext.receivedAt))).toBe(false);
+  });
+
   it('rejects stale edit context', () => {
     expect(isEditAssistContextStale(baseContext, Date.parse(baseContext.receivedAt) + 10_001)).toBe(true);
     expect(isUsableEditAssistContext(baseContext, Date.parse(baseContext.receivedAt) + 10_001)).toBe(false);
@@ -48,5 +58,12 @@ describe('editAssistService', () => {
 
     expect(suggestions.length).toBeGreaterThan(0);
     expect(suggestions.every((item) => item.type === 'term' || item.type === 'rewrite')).toBe(true);
+  });
+
+  it('builds suggestions for CS端 context', () => {
+    const csContext = { ...baseContext, source: 'demo-cs' as const, prefix: '阿司匹林' };
+    const suggestions = buildEditAssistSuggestions(csContext, 0);
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions.some((item) => item.text.includes('阿司匹林'))).toBe(true);
   });
 });
