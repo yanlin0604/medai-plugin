@@ -10,7 +10,8 @@
 
 import type { Patient, DocumentPayload, SubmitResult, PatientConsistency } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { WRITEBACK_MODE_LABEL, resolveBsUrl } from './writebackConfig';
+import { WRITEBACK_MODE_LABEL, resolveWorkspaceUrl } from './writebackConfig';
+import { getCurrentEmrContext } from './emrContext/demoBsDetector';
 
 interface WritebackStats {
   total: number;
@@ -89,9 +90,14 @@ async function executeWriteback(payload: DocumentPayload): Promise<WritebackStat
     return mockWriteback(payload);
   }
 
+  // 获取当前 EMR 上下文以确定 source
+  const context = await getCurrentEmrContext();
+  const source = context?.source || 'demo-bs'; // 默认 BS
+
   return invoke<WritebackStats>('writeback_to_bs_inbox', {
     payload,
-    url: resolveBsUrl({ patientId: payload.patientId, docCode: payload.docCode }),
+    url: resolveWorkspaceUrl(source, { patientId: payload.patientId, docCode: payload.docCode }),
+    source, // 传递 source 给后端
   });
 }
 
