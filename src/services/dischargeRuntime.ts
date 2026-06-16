@@ -121,11 +121,18 @@ export function buildDischargeRuntime(
 ): DischargeRuntimeState {
   validateRuntimeConfig(template, values);
   const sortedFields = [...template.fields].sort(byFieldOrder);
+  console.log('[dischargeRuntime] sortedFields:', sortedFields.map(f => ({
+    fieldKey: f.fieldKey,
+    fieldLabel: f.fieldLabel,
+    renderRule: f.renderRule,
+    metaSlot: f.renderRule?.metaSlot
+  })));
   const fieldValues = values.values ?? {};
   const sections = applyDischargeFieldAutomation(
     sortedFields.map((field) => toClinicalSection(field, fieldValues[field.fieldKey])),
   );
   const metaFields = sortedFields.filter(isMetaField);
+  console.log('[dischargeRuntime] metaFields:', metaFields.map(f => f.fieldKey));
   const metaFieldKeys = metaFields.map((field) => field.fieldKey);
   const readOnlyHints = Object.fromEntries(
     sortedFields
@@ -219,7 +226,11 @@ function validateRuntimeConfig(template: RuntimeDocTemplateDto, values: RuntimeD
   });
 }
 
+/** 强制将入院日期、出院日期、住院天数识别为 meta 字段（显示在顶部表格） */
+const FORCED_META_FIELD_KEYS = new Set(['admissionDate', 'dischargeDate', 'hospitalDays']);
+
 function isMetaField(field: RuntimeDocFieldDto): boolean {
+  if (FORCED_META_FIELD_KEYS.has(field.fieldKey)) return true;
   const slot = field.renderRule?.metaSlot;
   return slot === 'patient' || slot === 'date';
 }
@@ -314,7 +325,6 @@ function buildDischargeMetaRows(
     [
       { label: '床位号', value: patient.bed },
       { label: '住院号', value: patient.admissionNo },
-      { label: '入院诊断', value: patient.diagnosis ?? '待完善' },
     ],
   ];
 
