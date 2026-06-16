@@ -199,7 +199,7 @@ export default function AppLayout() {
     setDocsError('');
     try {
       const docs = await pluginRuntimeApi.listRuntimeDocuments();
-      setRuntimeDocs(docs.filter((doc) => doc.code !== 'DOC000'));
+      setRuntimeDocs(docs);
       if (!docs.length) {
         setDocsError('后台未返回启用的运行时文书配置');
       }

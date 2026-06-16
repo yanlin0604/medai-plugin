@@ -119,9 +119,9 @@ export interface DocDefinition {
 export const DOC_REGISTRY: DocDefinition[] = [
   // ---------- 时限必填文书（红） ----------
   {
-    code: 'DOC000', id: 'doc-000', name: '病案首页', py: 'basy',
-    paradigm: 'summary', group: 'timed', icon: 'HomeOutlined',
-    prototype: 'doc_000_homepage.html',
+    code: 'DOC099', id: 'doc-099', name: '住院病案首页', py: 'zybasfy',
+    paradigm: 'record', group: 'timed', icon: 'FileTextOutlined',
+    prototype: 'doc_099_case_summary.html',
     dataSources: ['HIS', 'EMR', '医嘱'], inputMode: '选项+自动填充',
     timeLimit: '出院24小时内',
   },
