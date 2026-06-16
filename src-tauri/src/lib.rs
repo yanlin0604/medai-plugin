@@ -1,4 +1,4 @@
-use tauri::Manager;
+use tauri::{menu::MenuBuilder, Manager};
 
 mod audio;
 mod commands;
@@ -11,6 +11,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .on_menu_event(|app, event| {
+            if event.id() == "quit" {
+                app.exit(0);
+            }
+        })
         .setup(|app| {
             // 初始化日志
             utils::logger::init();
@@ -31,6 +36,14 @@ pub fn run() {
                 edit_assist_state,
                 demo_clinical_data_state,
             ));
+
+            let tray_menu = MenuBuilder::new(app)
+                .text("quit", "退出")
+                .build()?;
+            if let Some(tray) = app.tray_by_id("main") {
+                tray.set_menu(Some(tray_menu))?;
+                tray.set_show_menu_on_left_click(false)?;
+            }
 
             Ok(())
         })
