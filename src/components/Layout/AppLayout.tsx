@@ -25,10 +25,8 @@ import {
   UserOutlined,
   LogoutOutlined,
   CheckCircleOutlined,
-  MinusOutlined,
   BorderOutlined,
   HomeOutlined,
-  CloseOutlined,
   PushpinFilled,
   PushpinOutlined,
 } from '@ant-design/icons';
@@ -80,10 +78,6 @@ const WindowTitleBar = () => {
     void collapseAssistantWindow();
   };
 
-  const handleMinimize = () => {
-    if (isTauri) getCurrentWindow().minimize();
-  };
-
   const handleToggleMaximize = () => {
     if (isTauri) getCurrentWindow().toggleMaximize();
   };
@@ -96,8 +90,20 @@ const WindowTitleBar = () => {
     }
   };
 
-  const handleClose = () => {
-    if (isTauri) getCurrentWindow().close();
+  const handleExit = () => {
+    Modal.confirm({
+      title: '确认退出系统？',
+      icon: <ExclamationCircleOutlined className="text-amber-500" />,
+      content: '退出后将关闭病历书写助手，如需继续使用请重新打开系统。',
+      okText: '确认退出',
+      cancelText: '再想想',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        if (isTauri) {
+          void getCurrentWindow().close();
+        }
+      },
+    });
   };
 
   return (
@@ -145,7 +151,7 @@ const WindowTitleBar = () => {
         >
           <SwapOutlined className="text-xs" />
         </button>
-        <button
+        {/* <button
           type="button"
           data-tauri-drag-region="false"
           onClick={handleMinimize}
@@ -153,7 +159,7 @@ const WindowTitleBar = () => {
           aria-label="最小化"
         >
           <MinusOutlined className="text-xs" />
-        </button>
+        </button> */}
         <button
           type="button"
           data-tauri-drag-region="false"
@@ -166,11 +172,12 @@ const WindowTitleBar = () => {
         <button
           type="button"
           data-tauri-drag-region="false"
-          onClick={handleClose}
-          className="w-8 h-8 rounded-md hover:bg-rose-500 hover:text-white transition-colors flex items-center justify-center"
-          aria-label="关闭"
+          onClick={handleExit}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-bold hover:bg-white/10 hover:text-white  transition-colors"
+          aria-label="退出系统"
+          title="退出系统"
         >
-          <CloseOutlined className="text-xs" />
+          <LogoutOutlined className="text-xs" />
         </button>
       </div>
     </header>

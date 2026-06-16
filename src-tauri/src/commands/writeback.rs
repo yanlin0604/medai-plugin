@@ -35,7 +35,8 @@ fn persist_bs_writeback_inbox(payload: &DocumentPayload, url: &str) -> Result<()
 
 fn persist_cs_writeback_inbox(payload: &DocumentPayload) -> Result<(), String> {
     // CS 端：固定路径
-    let cs_inbox = PathBuf::from("E:/xxxxxx/aaaaaaaaa/ai-hospitalized/demo-medical-system/cs/public/writeback-inbox.js");
+    
+    let cs_inbox = PathBuf::from("E:/2025-zl/demo-medical-system/cs/public/writeback-inbox.js");
     write_writeback_inbox(&cs_inbox, payload)
 }
 

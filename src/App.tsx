@@ -11,7 +11,7 @@ import DocWorkspace from './pages/DocWorkspace';
 import Meeting from './pages/Meeting';
 import Settings from './pages/Settings';
 import { useBubbleStore } from './stores/useBubbleStore';
-import { collapseAssistantWindow } from './services/windowMode';
+import { collapseAssistantWindow, expandAssistantWindow } from './services/windowMode';
 
 message.config({
   top: 24,
@@ -23,12 +23,15 @@ message.config({
 function AppShell() {
   const mode = useBubbleStore((state) => state.mode);
 
-  // 应用启动时初始化窗口位置（气泡模式）
+  // 应用启动时初始化窗口位置：完整面板靠右全高，气泡模式悬浮右下角
   useEffect(() => {
-    if (mode !== 'expanded') {
-      void collapseAssistantWindow();
+    if (mode === 'expanded') {
+      void expandAssistantWindow();
+      return;
     }
-  }, []);
+
+    void collapseAssistantWindow();
+  }, [mode]);
 
   if (mode !== 'expanded') {
     return <BubbleShell />;

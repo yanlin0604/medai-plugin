@@ -428,9 +428,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               <div data-tauri-drag-region className="text-[11px] font-bold text-emerald-700 truncate">
                 {detectedContext.patientName} · {draftStatus === 'written' ? '已回写' : draftStatus === 'ready' ? '可回写' : '生成中'}
               </div>
-              <div data-tauri-drag-region className="text-[9px] tabular-nums font-bold text-emerald-600">
+              {/* <div data-tauri-drag-region className="text-[9px] tabular-nums font-bold text-emerald-600">
                 {Math.round(progress)}%
-              </div>
+              </div> */}
             </div>
             <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
               {statusText || '准备生成出院记录'}

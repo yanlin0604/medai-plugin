@@ -24,20 +24,45 @@ export function isTauriRuntime() {
   return typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__);
 }
 
-async function moveToBottomRight(appWindow: TauriWindow, size: AssistantWindowSize) {
+async function getCurrentWorkArea(appWindow: TauriWindow) {
   const monitor = (await currentMonitor()) ?? (await primaryMonitor());
   if (!monitor) {
-    return;
+    return null;
   }
 
   const scaleFactor = monitor.scaleFactor || (await appWindow.scaleFactor());
-  const workAreaPosition = monitor.workArea.position.toLogical(scaleFactor);
-  const workAreaSize = monitor.workArea.size.toLogical(scaleFactor);
+  return {
+    position: monitor.workArea.position.toLogical(scaleFactor),
+    size: monitor.workArea.size.toLogical(scaleFactor),
+  };
+}
 
-  // 固定在右下角
-  const x = workAreaPosition.x + workAreaSize.width - size.width - WINDOW_MARGIN;
-  const y = workAreaPosition.y + workAreaSize.height - size.height - WINDOW_MARGIN;
+async function moveToBottomRight(appWindow: TauriWindow, size: AssistantWindowSize) {
+  const workArea = await getCurrentWorkArea(appWindow);
+  if (!workArea) {
+    return;
+  }
 
+  // 收起后固定悬浮在屏幕可视区域右下角
+  const x = workArea.position.x + workArea.size.width - size.width - WINDOW_MARGIN;
+  const y = workArea.position.y + workArea.size.height - size.height - WINDOW_MARGIN;
+
+  await appWindow.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+}
+
+async function applyRightDockedPanel(appWindow: TauriWindow, width: number) {
+  const workArea = await getCurrentWorkArea(appWindow);
+  if (!workArea) {
+    await appWindow.setSize(new LogicalSize(width, ASSISTANT_WINDOW_SIZES.panel.height));
+    return;
+  }
+
+  // 展开后靠右停靠，高度适配屏幕可视区域，宽度保持不变
+  const height = Math.max(1, Math.round(workArea.size.height));
+  const x = workArea.position.x + workArea.size.width - width;
+  const y = workArea.position.y;
+
+  await appWindow.setSize(new LogicalSize(width, height));
   await appWindow.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
 }
 
@@ -55,8 +80,12 @@ async function applyAssistantWindowSize(size: AssistantWindowSize, shouldFocus: 
     await appWindow.setAlwaysOnTop(isBubble);
 
     // 设置尺寸和位置
-    await appWindow.setSize(new LogicalSize(size.width, size.height));
-    await moveToBottomRight(appWindow, size);
+    if (isBubble) {
+      await appWindow.setSize(new LogicalSize(size.width, size.height));
+      await moveToBottomRight(appWindow, size);
+    } else {
+      await applyRightDockedPanel(appWindow, size.width);
+    }
     await appWindow.show().catch(() => undefined);
 
     if (shouldFocus) {

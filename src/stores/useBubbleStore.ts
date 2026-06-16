@@ -21,7 +21,7 @@ export function getBubbleContextKey(context: Pick<BubbleEmrContext, 'patientId' 
 }
 
 export const useBubbleStore = create<BubbleState>((set, get) => ({
-  mode: 'idle',
+  mode: 'expanded',
   detectedContext: null,
   activatedContextKeys: [],
 
