@@ -1,5 +1,14 @@
 use tauri::{menu::MenuBuilder, Manager};
 
+#[tauri::command]
+fn toggle_devtools(window: tauri::WebviewWindow) {
+    if window.is_devtools_open() {
+        window.close_devtools();
+    } else {
+        window.open_devtools();
+    }
+}
+
 mod audio;
 mod commands;
 mod his;
@@ -71,6 +80,7 @@ pub fn run() {
             commands::writeback::writeback_to_bs_inbox,
             // 系统命令
             commands::system_tray::get_system_info,
+            toggle_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("AI智能病历书写助手启动失败");

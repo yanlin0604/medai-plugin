@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, message } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import AppLayout from './components/Layout/AppLayout';
 import BubbleShell from './components/Layout/BubbleShell';
@@ -11,6 +12,13 @@ import Meeting from './pages/Meeting';
 import Settings from './pages/Settings';
 import { useBubbleStore } from './stores/useBubbleStore';
 import { collapseAssistantWindow } from './services/windowMode';
+
+message.config({
+  top: 24,
+  duration: 2,
+  maxCount: 3,
+  getContainer: () => document.getElementById('root') ?? document.body,
+});
 
 function AppShell() {
   const mode = useBubbleStore((state) => state.mode);
@@ -47,6 +55,19 @@ function AppShell() {
 }
 
 export default function App() {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'F12') return;
+      event.preventDefault();
+      void invoke('toggle_devtools').catch((error) => {
+        console.error('打开调试工具失败', error);
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <ConfigProvider locale={zhCN}>
       <BrowserRouter>
