@@ -66,7 +66,7 @@ function buildSections(docCode: string, docName: string, patient: SummaryPatient
     ];
   }
 
-  if (docCode === 'DOC000') {
+  if (docCode === 'DOC099') {
     return [
       {
         key: 'basicInfo',

@@ -7,9 +7,9 @@
 
 import type { DocTemplate } from '../types';
 
-/** 病案首页（DOC000）字段模板 */
+/** 住院病案首页（DOC099）字段模板 */
 export const homepageTemplate: DocTemplate = {
-  docCode: 'DOC000',
+  docCode: 'DOC099',
   version: 'v1.0',
   title: '病案首页',
   fields: [
@@ -188,6 +188,6 @@ export const admissionTemplate: DocTemplate = {
 
 /** 按 docCode 索引的模板表（后台下发后由此返回） */
 export const docTemplates: Record<string, DocTemplate> = {
-  DOC000: homepageTemplate,
+  DOC099: homepageTemplate,
   DOC001: admissionTemplate,
 };

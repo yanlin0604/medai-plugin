@@ -79,7 +79,7 @@ const shiftConfig: SummaryConfig = {
   ],
 };
 
-// ==================== 病案首页（DOC000）标杆数据 ====================
+// ==================== 住院病案首页（DOC099）标杆数据 ====================
 
 const homepageConfig: SummaryConfig = {
   form: {
@@ -144,10 +144,10 @@ function buildFallback(doc: DocDefinition, p: Patient): SummaryConfig {
   };
 }
 
-/** 按文书取范式一配置（标杆 DOC006/DOC000 用真实数据，其余兜底） */
+/** 按文书取范式一配置（标杆 DOC006/DOC099 用真实数据，其余兜底） */
 export function getSummaryConfig(doc: DocDefinition, currentPatient: Patient | null): SummaryConfig {
   if (doc.code === 'DOC006') return shiftConfig;
-  if (doc.code === 'DOC000') return homepageConfig;
+  if (doc.code === 'DOC099') return homepageConfig;
   if (currentPatient) return buildFallback(doc, currentPatient);
   return shiftConfig; // 极端兜底
 }
