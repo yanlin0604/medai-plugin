@@ -72,8 +72,8 @@ export async function submitDocument(payload: DocumentPayload): Promise<SubmitRe
     return {
       ok,
       message: ok
-        ? `「${payload.docName}」${WRITEBACK_MODE_LABEL}完成：${stats.success}/${stats.total} 个字段已写入`
-        : `「${payload.docName}」${WRITEBACK_MODE_LABEL}部分失败：${stats.success}/${stats.total} 个字段成功`,
+        ? `「${payload.docName}」内容已发送！请在病历系统查收回写效果✨`
+        : `「${payload.docName}」发送失败：仅有 ${stats.success}/${stats.total} 个字段送达`,
       nextDocCode: ok ? nextMap[payload.docCode] : undefined,
     };
   } catch (error) {
@@ -96,7 +96,7 @@ async function executeWriteback(payload: DocumentPayload): Promise<WritebackStat
 
   return invoke<WritebackStats>('writeback_to_bs_inbox', {
     payload,
-    url: resolveWorkspaceUrl(source, { patientId: payload.patientId, docCode: payload.docCode }),
+    url: context?.url || resolveWorkspaceUrl(source, { patientId: payload.patientId, docCode: payload.docCode }),
     source, // 传递 source 给后端
   });
 }

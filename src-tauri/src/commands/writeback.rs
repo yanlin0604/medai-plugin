@@ -10,11 +10,11 @@ pub async fn writeback_to_bs_inbox(
 ) -> Result<WritebackStats, String> {
     let source = source.as_deref().unwrap_or("demo-bs");
 
-    if source == "demo-cs" || url.starts_with("http://") || url.starts_with("https://") {
-        // CS 端：写入固定路径
-        persist_cs_writeback_inbox(&payload)?;
+    if source == "demo-cs" && (url.starts_with("http://") || url.starts_with("https://")) {
+        // HTTP 推送
+        push_writeback_http(&payload, &url).await?;
     } else {
-        // BS 端：从 file:// URL 解析路径
+        // BS 端：从 file:// URL 解析路径，或旧版写文件逻辑
         persist_bs_writeback_inbox(&payload, &url)?;
     }
 
@@ -33,11 +33,20 @@ fn persist_bs_writeback_inbox(payload: &DocumentPayload, url: &str) -> Result<()
     write_writeback_inbox(&inbox_path, payload)
 }
 
-fn persist_cs_writeback_inbox(payload: &DocumentPayload) -> Result<(), String> {
-    // CS 端：固定路径
-    
-    let cs_inbox = PathBuf::from("E:/2025-zl/demo-medical-system/cs/public/writeback-inbox.js");
-    write_writeback_inbox(&cs_inbox, payload)
+pub async fn push_writeback_http(payload: &DocumentPayload, url: &str) -> Result<(), String> {
+    println!("[Assistant] Preparing to HTTP POST writeback to url: {}", url);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(url)
+        .json(payload)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP 推送回写失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP 回写接口返回错误: {}", response.status()));
+    }
+    Ok(())
 }
 
 fn write_writeback_inbox(inbox_path: &PathBuf, payload: &DocumentPayload) -> Result<(), String> {
