@@ -4,10 +4,7 @@ import { message, Modal } from 'antd';
 import {
   ExpandAltOutlined,
   HistoryOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   ReloadOutlined,
-  PlusOutlined,
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
@@ -16,8 +13,6 @@ import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspa
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
-import ObjectiveTimeline from '../../components/clinical/ObjectiveTimeline';
-import DictationConsole from '../../components/clinical/DictationConsole';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { useHotkey } from '../../hooks/useHotkey';
 import { saveDraft, loadDraft } from '../../services/draftService';
@@ -106,9 +101,7 @@ function buildMetaRows(config: RecordConfig): DocumentPaperMetaCell[][] {
 
 export default function RecordDocumentFlow({ doc, config }: Props) {
   const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
-  const [voicePanelOpen, setVoicePanelOpen] = useState(true);
   const [diagnoses, setDiagnoses] = useState<IcdItem[]>([]);
-  const [dictation, setDictation] = useState(config.dictationInit);
   const diagnosisText = useMemo(() => diagnoses.map((item) => `${item.name} ${item.code}`).join('；'), [diagnoses]);
   const baseSections = useMemo(() => buildSections(doc.code, doc.name, config, diagnosisText), [config, diagnosisText, doc.code, doc.name]);
   const [sections, setSections] = useState<ClinicalSection[]>(baseSections);
@@ -139,18 +132,16 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
         ...section,
         text: (saved.values[section.key] as string | undefined) ?? section.text,
       })));
-      setDictation((saved.values.doctorNarrative as string | undefined) ?? config.dictationInit);
       setDiagnoses((saved.values.relatedDiagnoses as IcdItem[] | undefined) ?? []);
       setLocked(saved.status === 'submitted');
     } else {
       setSections(baseSections);
-      setDictation(config.dictationInit);
       setDiagnoses([]);
       setLocked(false);
     }
     setResetKeys({});
     setPreviewMode('edit');
-  }, [baseSections, config.dictationInit, config.patient.admissionNo, doc.code, setLocked]);
+  }, [baseSections, config.patient.admissionNo, doc.code, setLocked]);
 
   useEffect(() => {
     setSections((prev) => prev.map((section) => (
@@ -163,7 +154,6 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
     const t = window.setTimeout(() => {
       const values: Record<string, FieldValue> = Object.fromEntries(sections.map((section) => [section.key, section.text]));
       values.relatedDiagnoses = diagnoses;
-      values.doctorNarrative = dictation;
       saveDraft({
         docCode: doc.code,
         patientId: config.patient.admissionNo,
@@ -175,7 +165,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
       });
     }, 800);
     return () => window.clearTimeout(t);
-  }, [config.patient.admissionNo, diagnoses, dictation, doc.code, locked, sections]);
+  }, [config.patient.admissionNo, diagnoses, doc.code, locked, sections]);
 
   const updateSection = (sectionKey: string, text: string) => {
     setSections((prev) => prev.map((section) => (section.key === sectionKey ? { ...section, text } : section)));
@@ -186,21 +176,6 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
     if (!base) return;
     updateSection(sectionKey, base.text);
     setResetKeys((prev) => ({ ...prev, [sectionKey]: (prev[sectionKey] ?? 0) + 1 }));
-  };
-
-  const appendDictationToDraft = () => {
-    const text = dictation.trim();
-    if (!text) {
-      message.warning('口述内容为空，无法并入正文。');
-      return;
-    }
-    const targetKey = config.dictationAppendSectionKey ?? 'doctorNarrative';
-    setSections((prev) => prev.map((section) => {
-      if (section.key !== targetKey) return section;
-      const nextText = section.text ? `${section.text}\n${text}` : text;
-      return { ...section, text: nextText };
-    }));
-    message.success('口述内容已并入对应段落，请继续核对。');
   };
 
   const doSubmit = async () => {
@@ -214,7 +189,6 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
     }
     const values: Record<string, FieldValue> = Object.fromEntries(sections.map((section) => [section.key, section.text]));
     values.relatedDiagnoses = diagnoses;
-    values.doctorNarrative = dictation;
     await submit({
       ...snapshot,
       draftValues: values,
@@ -321,55 +295,6 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
             }}
           />
         </main>
-
-        <aside
-          className={`${voicePanelOpen ? 'w-[360px]' : 'w-[52px]'} shrink-0 border-l border-slate-200 bg-white shadow-[-10px_0_30px_rgba(15,23,42,0.03)] transition-[width] duration-200 ease-out`}
-        >
-          {voicePanelOpen ? (
-            <>
-              <div className="flex items-center gap-2 border-b border-[#1E3A8A]/10 bg-[#F0F5FF] px-4 py-3 text-[13px] font-bold text-[#1E3A8A]">
-                <span className="min-w-0 flex-1 truncate">{config.topCardText}</span>
-                <button
-                  type="button"
-                  onClick={() => setVoicePanelOpen(false)}
-                  title="收起语音面板"
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#BFDBFE] bg-white/70 text-[#1E3A8A] hover:bg-white"
-                >
-                  <MenuFoldOutlined />
-                </button>
-              </div>
-              <div className="h-[calc(100%-52px)] overflow-y-auto p-4 space-y-4">
-                {config.showTimelinePanel !== false && (
-                  <ObjectiveTimeline title={config.timelineTitle} nodes={config.timeline} />
-                )}
-                <DictationConsole
-                  title={config.dictationTitle}
-                  value={dictation}
-                  onChange={setDictation}
-                  mockTranscript={config.dictationMock}
-                />
-                <button
-                  onClick={appendDictationToDraft}
-                  disabled={locked}
-                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-bold text-[#1E3A8A] hover:bg-[#DBEAFE] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <PlusOutlined />
-                  并入口述段落
-                </button>
-              </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setVoicePanelOpen(true)}
-              title="展开语音面板"
-              className="flex h-full w-full flex-col items-center gap-2 bg-[#F8FAFC] px-2 py-4 text-[#1E3A8A] hover:bg-[#F0F5FF]"
-            >
-              <MenuUnfoldOutlined />
-              <span className="text-[12px] font-bold [writing-mode:vertical-rl]">语音</span>
-            </button>
-          )}
-        </aside>
 
         <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={config.patient.admissionNo} />
       </div>

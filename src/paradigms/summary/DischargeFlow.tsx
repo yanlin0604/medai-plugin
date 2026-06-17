@@ -127,6 +127,7 @@ function mergeEvidenceBundles(
 }
 
 const MAX_META_CELLS_PER_ROW = 3;
+const SHOW_EVIDENCE_PANEL = false;
 
 function normalizeDateInputValue(value: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
@@ -631,7 +632,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   );
 
   useEffect(() => {
-    if (previewMode !== 'edit' || runtimeLoading || runtimeValuesLoading || runtimeError) return;
+    if (!SHOW_EVIDENCE_PANEL || previewMode !== 'edit' || runtimeLoading || runtimeValuesLoading || runtimeError) return;
     void loadEvidenceForFields(materialFieldKeys ? materialFieldKeys.split('|') : []);
   }, [loadEvidenceForFields, materialFieldKeys, previewMode, runtimeError, runtimeLoading, runtimeValuesLoading]);
 
@@ -858,16 +859,18 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
                   onRewriteStatusChange={updateRewriteStatus}
                 />
               </div>
-              <div className="sticky bottom-0 z-30">
-                <EvidencePanel
-                  bundle={evidenceBundle}
-                  loading={evidenceLoading}
-                  error={evidenceError}
-                  title="临床资料"
-                  variant="tray"
-                  onInsertEvidence={(_item, insertText) => insertEvidenceIntoTarget(insertText)}
-                />
-              </div>
+              {SHOW_EVIDENCE_PANEL && (
+                <div className="sticky bottom-0 z-30">
+                  <EvidencePanel
+                    bundle={evidenceBundle}
+                    loading={evidenceLoading}
+                    error={evidenceError}
+                    title="临床资料"
+                    variant="tray"
+                    onInsertEvidence={(_item, insertText) => insertEvidenceIntoTarget(insertText)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
