@@ -1,6 +1,6 @@
 use crate::his::window_detect::{
     BsEditAssistContext, BsEditAssistState, DemoClinicalDataContext, DemoClinicalDataState,
-    EmrContext, EmrContextState,
+    EmrContext, EmrContextState, FieldAssistContext, FieldAssistState,
 };
 use arboard::Clipboard;
 use serde::Serialize;
@@ -60,6 +60,21 @@ pub async fn get_latest_bs_edit_assist_context(
 #[tauri::command]
 pub async fn clear_latest_bs_edit_assist_context(
     state: State<'_, BsEditAssistState>,
+) -> Result<(), String> {
+    state.clear_latest().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_latest_field_assist_context(
+    state: State<'_, FieldAssistState>,
+) -> Result<Option<FieldAssistContext>, String> {
+    Ok(state.get_latest().await)
+}
+
+#[tauri::command]
+pub async fn clear_latest_field_assist_context(
+    state: State<'_, FieldAssistState>,
 ) -> Result<(), String> {
     state.clear_latest().await;
     Ok(())

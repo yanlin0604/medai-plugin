@@ -49,6 +49,27 @@ pub async fn push_writeback_http(payload: &DocumentPayload, url: &str) -> Result
     Ok(())
 }
 
+#[tauri::command]
+pub async fn push_field_writeback_http(payload: Value, url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("字段回填目标 URL 必须是 HTTP 地址".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|error| format!("字段回填 HTTP 推送失败: {error}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("字段回填接口返回错误: {}", response.status()));
+    }
+
+    Ok(())
+}
+
 fn write_writeback_inbox(inbox_path: &PathBuf, payload: &DocumentPayload) -> Result<(), String> {
     let updated_at = chrono::Utc::now().to_rfc3339();
 

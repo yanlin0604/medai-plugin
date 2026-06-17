@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { message } from 'antd';
 import ParadigmShell from '../ParadigmShell';
-import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
+import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspace';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { usePatientStore } from '../../stores/usePatientStore';
@@ -227,27 +227,29 @@ export default function FormDocumentFlow({ docCode, docName }: FormDocumentFlowP
     );
   }
 
+  const metaRows = [
+    [
+      { label: '姓名', value: patient.name },
+      { label: '性别', value: patient.gender },
+      { label: '年龄', value: patient.age },
+    ],
+    [
+      { label: '床位', value: patient.bed },
+      { label: '住院号', value: patient.admissionNo },
+      { label: '入院日期', value: currentPatient.admissionDate || '' },
+    ],
+  ];
+
   return (
     <>
       <ParadigmShell
         doc={{ code: docCode, name: docName } as DocDefinition}
       >
-        <EditableDocumentPaper
+        <DocumentChatWorkspace
           docName={template.title}
           patient={patient}
           sections={sections}
-          metaRows={[
-            [
-              { label: '姓名', value: patient.name },
-              { label: '性别', value: patient.gender },
-              { label: '年龄', value: patient.age },
-            ],
-            [
-              { label: '床位', value: patient.bed },
-              { label: '住院号', value: patient.admissionNo },
-              { label: '入院日期', value: currentPatient.admissionDate || '' },
-            ],
-          ]}
+          metaRows={metaRows}
           locked={locked}
           sectionEdits={sectionEdits}
           onChange={handleSectionChange}

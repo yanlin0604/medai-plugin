@@ -11,7 +11,7 @@ import {
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
 import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
-import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
+import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspace';
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
@@ -148,7 +148,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const [values, setValues] = useState<Record<string, FieldValue>>({});
   const [sectionEdits, setSectionEdits] = useState<Record<string, string>>({});
   const [resetKeys, setResetKeys] = useState<Record<string, number>>({});
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('edit');
   const [dictating, setDictating] = useState(false);
   const hydratedRef = useRef(false);
   const {
@@ -469,44 +469,42 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
               sections={editableSections}
               metaRows={metaRows}
               actions={renderActionButton(
-                <><ReloadOutlined />编辑</>,
+                <><ReloadOutlined />对话</>,
                 () => setPreviewMode('edit'),
-                '编辑入院记录',
+                '进入入院记录对话',
               )}
             />
           ) : (
-            <div className="p-4 space-y-3">
-              {dictating && (
-                <div className="rounded-md border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-semibold text-[#1E3A8A]">
+            <DocumentChatWorkspace
+              docName="入院记录"
+              patient={patient}
+              sections={editableSections}
+              metaRows={metaRows}
+              notice={dictating ? (
+                <div className="mx-auto max-w-[980px] rounded-md border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-semibold text-[#1E3A8A]">
                   正在聆听口述病史，说完点击“结束并填入”。
                 </div>
+              ) : null}
+              actions={(
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {!locked && renderActionButton(
+                    dictating ? <><StopOutlined />结束并填入</> : <><AudioOutlined />口述病史</>,
+                    handleDictation,
+                    dictating ? '结束口述并填入主诉、现病史' : '开始口述病史',
+                  )}
+                  {renderActionButton(
+                    <><ExpandAltOutlined />通读全文</>,
+                    () => setPreviewMode('read'),
+                  )}
+                </div>
               )}
-              <EditableDocumentPaper
-                docName="入院记录"
-                patient={patient}
-                sections={editableSections}
-                metaRows={metaRows}
-                actions={(
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    {!locked && renderActionButton(
-                      dictating ? <><StopOutlined />结束并填入</> : <><AudioOutlined />口述病史</>,
-                      handleDictation,
-                      dictating ? '结束口述并填入主诉、现病史' : '开始口述病史',
-                    )}
-                    {renderActionButton(
-                      <><ExpandAltOutlined />通读全文</>,
-                      () => setPreviewMode('read'),
-                    )}
-                  </div>
-                )}
-                locked={locked}
-                sectionEdits={sectionEdits}
-                resetKeys={resetKeys}
-                onChange={updateSection}
-                onReset={resetSection}
-                optimize={optimizeText}
-              />
-            </div>
+              locked={locked}
+              sectionEdits={sectionEdits}
+              resetKeys={resetKeys}
+              onChange={updateSection}
+              onReset={resetSection}
+              optimize={optimizeText}
+            />
           )}
         </div>
 

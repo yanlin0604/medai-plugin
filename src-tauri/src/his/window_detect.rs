@@ -47,6 +47,31 @@ pub struct BsEditAssistContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FieldAssistContext {
+    pub source: String,
+    pub patient_id: String,
+    pub patient_name: String,
+    pub doc_code: String,
+    pub doc_name: String,
+    pub field_key: String,
+    pub field_label: String,
+    pub field_value: String,
+    pub selected_text: String,
+    pub prefix: String,
+    pub selection_start: usize,
+    pub selection_end: usize,
+    pub trigger: String,
+    pub session_id: String,
+    pub writeback_url: String,
+    #[serde(default)]
+    pub truncated: bool,
+    pub detected_at: String,
+    #[serde(default)]
+    pub received_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DemoClinicalDataContext {
     pub source: String,
     pub patient_id: String,
@@ -66,6 +91,11 @@ pub struct EmrContextState {
 #[derive(Debug, Clone, Default)]
 pub struct BsEditAssistState {
     latest: Arc<Mutex<Option<BsEditAssistContext>>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FieldAssistState {
+    latest: Arc<Mutex<Option<FieldAssistContext>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -101,6 +131,20 @@ impl BsEditAssistState {
     }
 }
 
+impl FieldAssistState {
+    pub async fn get_latest(&self) -> Option<FieldAssistContext> {
+        self.latest.lock().await.clone()
+    }
+
+    pub async fn set_latest(&self, context: FieldAssistContext) {
+        *self.latest.lock().await = Some(context);
+    }
+
+    pub async fn clear_latest(&self) {
+        *self.latest.lock().await = None;
+    }
+}
+
 impl DemoClinicalDataState {
     pub async fn get_latest(&self) -> Option<DemoClinicalDataContext> {
         self.latest.lock().await.clone()
@@ -118,6 +162,7 @@ impl DemoClinicalDataState {
 pub async fn start_context_bridge(
     emr_state: EmrContextState,
     edit_assist_state: BsEditAssistState,
+    field_assist_state: FieldAssistState,
     demo_clinical_data_state: DemoClinicalDataState,
 ) {
     let listener = match TcpListener::bind(CONTEXT_BRIDGE_ADDR).await {
@@ -135,12 +180,14 @@ pub async fn start_context_bridge(
             Ok((stream, _)) => {
                 let emr_state = emr_state.clone();
                 let edit_assist_state = edit_assist_state.clone();
+                let field_assist_state = field_assist_state.clone();
                 let demo_clinical_data_state = demo_clinical_data_state.clone();
                 tokio::spawn(async move {
                     if let Err(error) = handle_connection(
                         stream,
                         emr_state,
                         edit_assist_state,
+                        field_assist_state,
                         demo_clinical_data_state,
                     )
                     .await
@@ -158,6 +205,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     emr_state: EmrContextState,
     edit_assist_state: BsEditAssistState,
+    field_assist_state: FieldAssistState,
     demo_clinical_data_state: DemoClinicalDataState,
 ) -> Result<(), std::io::Error> {
     let request = read_http_request(&mut stream).await?;
@@ -195,6 +243,22 @@ async fn handle_connection(
 
     if target.starts_with("/bs-edit-assist-clear") {
         edit_assist_state.clear_latest().await;
+        write_response(&mut stream, "204 No Content", "").await?;
+        return Ok(());
+    }
+
+    if target == "/field-context" && request.method == "POST" {
+        if let Some(context) = parse_field_context_body(&request.body) {
+            field_assist_state.set_latest(context).await;
+            write_response(&mut stream, "204 No Content", "").await?;
+        } else {
+            write_response(&mut stream, "400 Bad Request", "invalid field context").await?;
+        }
+        return Ok(());
+    }
+
+    if target.starts_with("/field-context-clear") {
+        field_assist_state.clear_latest().await;
         write_response(&mut stream, "204 No Content", "").await?;
         return Ok(());
     }
@@ -365,6 +429,25 @@ fn parse_demo_clinical_data_body(body: &str) -> Option<DemoClinicalDataContext> 
     }
     if context.source.trim().is_empty() {
         context.source = "demo-bs".to_string();
+    }
+    context.received_at = chrono::Utc::now().to_rfc3339();
+    Some(context)
+}
+
+fn parse_field_context_body(body: &str) -> Option<FieldAssistContext> {
+    let mut context: FieldAssistContext = serde_json::from_str(body).ok()?;
+    if context.patient_id.trim().is_empty()
+        || context.patient_name.trim().is_empty()
+        || context.doc_code.trim().is_empty()
+        || context.doc_name.trim().is_empty()
+        || context.field_key.trim().is_empty()
+        || context.field_label.trim().is_empty()
+        || context.session_id.trim().is_empty()
+    {
+        return None;
+    }
+    if context.source.trim().is_empty() {
+        context.source = "demo-cs".to_string();
     }
     context.received_at = chrono::Utc::now().to_rfc3339();
     Some(context)

@@ -1,0 +1,68 @@
+import type {
+  RuntimeEvidenceWritebackMode,
+  RuntimeFieldCompletionResponse,
+} from '../pluginRuntimeTypes';
+
+export type FieldAssistTrigger = 'focus' | 'input' | 'selection' | (string & {});
+
+export type FieldAssistIntent =
+  | 'idle'
+  | 'term'
+  | 'rewrite'
+  | 'autoGenerate'
+  | 'draftReady';
+
+export interface FieldAssistContext {
+  source: 'demo-cs' | (string & {});
+  patientId: string;
+  patientName: string;
+  docCode: string;
+  docName: string;
+  fieldKey: string;
+  fieldLabel: string;
+  fieldValue: string;
+  selectedText: string;
+  prefix: string;
+  selectionStart: number;
+  selectionEnd: number;
+  trigger: FieldAssistTrigger;
+  sessionId: string;
+  writebackUrl: string;
+  truncated?: boolean;
+  detectedAt: string;
+  receivedAt: string;
+}
+
+export interface FieldAssistDraft {
+  contextKey: string;
+  response: RuntimeFieldCompletionResponse;
+  generatedText: string;
+  source?: 'generation' | 'suggestion';
+  instruction?: string;
+  createdAt: string;
+}
+
+export interface FieldWritebackPayload {
+  kind: 'field';
+  patientId: string;
+  docCode: string;
+  fieldKey: string;
+  sessionId: string;
+  text: string;
+  writebackMode: RuntimeEvidenceWritebackMode | 'replaceSelection';
+  selectionStart: number;
+  selectionEnd: number;
+  generationId?: string;
+}
+
+export function getFieldAssistContextKey(
+  context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey' | 'sessionId'>,
+) {
+  return `${context.patientId}:${context.docCode}:${context.fieldKey}:${context.sessionId}`;
+}
+
+export function getFieldIdentityKey(
+  context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey'>,
+) {
+  return `${context.patientId}:${context.docCode}:${context.fieldKey}`;
+}

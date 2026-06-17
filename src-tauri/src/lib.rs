@@ -38,11 +38,14 @@ pub fn run() {
             app.manage(emr_context_state.clone());
             let edit_assist_state = his::window_detect::BsEditAssistState::default();
             app.manage(edit_assist_state.clone());
+            let field_assist_state = his::window_detect::FieldAssistState::default();
+            app.manage(field_assist_state.clone());
             let demo_clinical_data_state = his::window_detect::DemoClinicalDataState::default();
             app.manage(demo_clinical_data_state.clone());
             tauri::async_runtime::spawn(his::window_detect::start_context_bridge(
                 emr_context_state,
                 edit_assist_state,
+                field_assist_state,
                 demo_clinical_data_state,
             ));
 
@@ -75,9 +78,12 @@ pub fn run() {
             commands::his_bridge::clear_latest_emr_context,
             commands::his_bridge::get_latest_bs_edit_assist_context,
             commands::his_bridge::clear_latest_bs_edit_assist_context,
+            commands::his_bridge::get_latest_field_assist_context,
+            commands::his_bridge::clear_latest_field_assist_context,
             commands::his_bridge::get_latest_demo_clinical_data,
             commands::his_bridge::clear_latest_demo_clinical_data,
             commands::writeback::writeback_to_bs_inbox,
+            commands::writeback::push_field_writeback_http,
             // 系统命令
             commands::system_tray::get_system_info,
             toggle_devtools,

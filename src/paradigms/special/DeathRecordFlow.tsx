@@ -11,7 +11,7 @@ import {
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
 import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
-import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
+import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspace';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import WritebackBar from '../../components/clinical/WritebackBar';
@@ -83,7 +83,7 @@ function buildMetaRows(config: DeathRecordConfig, fields: Record<string, string>
 }
 
 export default function DeathRecordFlow({ doc, config }: Props) {
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('edit');
   const [fields, setFields] = useState<Record<string, string>>(() => (
     Object.fromEntries(config.fields.map((field) => [field.key, field.value]))
   ));
@@ -133,7 +133,7 @@ export default function DeathRecordFlow({ doc, config }: Props) {
       setLocked(false);
     }
     setResetKeys({});
-    setPreviewMode('read');
+      setPreviewMode('edit');
   }, [config, doc.code, setLocked]);
 
   useEffect(() => {
@@ -299,23 +299,21 @@ export default function DeathRecordFlow({ doc, config }: Props) {
                 sections={sections}
                 metaRows={buildMetaRows(config, fields)}
                 emptyText="（请人工填写）"
-                actions={renderActionButton(<><FileTextOutlined />编辑</>, () => setPreviewMode('edit'))}
+                actions={renderActionButton(<><FileTextOutlined />对话</>, () => setPreviewMode('edit'))}
               />
             ) : (
-              <div className="p-4">
-                <EditableDocumentPaper
-                  docName={doc.name}
-                  patient={config.patient}
-                  sections={sections}
-                  metaRows={buildMetaRows(config, fields)}
-                  actions={renderActionButton(<><FileTextOutlined />预览</>, () => setPreviewMode('read'))}
-                  locked={locked}
-                  resetKeys={resetKeys}
-                  onChange={updateSection}
-                  onReset={resetSection}
-                  optimize={optimizeText}
-                />
-              </div>
+              <DocumentChatWorkspace
+                docName={doc.name}
+                patient={config.patient}
+                sections={sections}
+                metaRows={buildMetaRows(config, fields)}
+                actions={renderActionButton(<><FileTextOutlined />通读全文</>, () => setPreviewMode('read'))}
+                locked={locked}
+                resetKeys={resetKeys}
+                onChange={updateSection}
+                onReset={resetSection}
+                optimize={optimizeText}
+              />
             )}
           </div>
 

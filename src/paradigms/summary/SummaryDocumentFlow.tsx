@@ -5,7 +5,7 @@ import { ExpandAltOutlined, HistoryOutlined, ReloadOutlined, TeamOutlined } from
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
 import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
-import EditableDocumentPaper from '../../components/clinical/EditableDocumentPaper';
+import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspace';
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
@@ -231,7 +231,7 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
       setLocked(false);
     }
     setResetKeys({});
-    setPreviewMode('read');
+    setPreviewMode('edit');
   }, [baseSections, doc.code, patient.admissionNo, setLocked]);
 
   useEffect(() => {
@@ -375,15 +375,14 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
                 sections={sections}
                 metaRows={buildMetaRows(config, patient)}
                 actions={renderActionButton(
-                  <><ReloadOutlined />编辑</>,
+                  <><ReloadOutlined />对话</>,
                   () => setPreviewMode('edit'),
-                  `编辑${doc.name}`,
+                  `进入${doc.name}对话`,
                 )}
               />
             </div>
           ) : (
-            <div className="p-4 space-y-3">
-              <EditableDocumentPaper
+            <DocumentChatWorkspace
                 docName={doc.name}
                 patient={patient}
                 sections={sections}
@@ -395,7 +394,6 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
                 onReset={resetSection}
                 optimize={optimizeText}
               />
-            </div>
           )}
         </div>
 
