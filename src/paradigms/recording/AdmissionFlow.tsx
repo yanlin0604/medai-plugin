@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
 import {
   AudioOutlined,
   ExpandAltOutlined,
   HistoryOutlined,
-  ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
@@ -123,6 +123,8 @@ function stripDraftMeta(values: Record<string, FieldValue>): Record<string, Fiel
 }
 
 export default function AdmissionFlow({ doc }: ParadigmProps) {
+  const [searchParams] = useSearchParams();
+  const readOnlyEntry = searchParams.get('mode') === 'read';
   const { currentPatient } = usePatientStore();
   const patient: PatientBrief = useMemo(
     () =>
@@ -148,7 +150,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const [values, setValues] = useState<Record<string, FieldValue>>({});
   const [sectionEdits, setSectionEdits] = useState<Record<string, string>>({});
   const [resetKeys, setResetKeys] = useState<Record<string, number>>({});
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('edit');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
   const [dictating, setDictating] = useState(false);
   const hydratedRef = useRef(false);
   const {
@@ -324,7 +326,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   );
 
   useEffect(() => {
-    if (!hydratedRef.current || !template || locked) return;
+    if (readOnlyEntry || !hydratedRef.current || !template || locked) return;
     const t = window.setTimeout(() => {
       saveDraft({
         docCode: doc.code,
@@ -340,7 +342,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
       });
     }, 800);
     return () => window.clearTimeout(t);
-  }, [doc.code, finalContent, locked, patient.admissionNo, sectionEdits, template, values]);
+  }, [doc.code, finalContent, locked, patient.admissionNo, readOnlyEntry, sectionEdits, template, values]);
 
   const updateSection = (section: string, text: string) => {
     setSectionEdits((prev) => ({ ...prev, [section]: text }));
@@ -446,7 +448,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
       doc={doc}
       showParadigmBadge={false}
       showPatientId={false}
-      actions={renderActionButton(
+      actions={!readOnlyEntry ? renderActionButton(
         <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
         () => {
           if (!versionCount) {
@@ -456,7 +458,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           openHistory();
         },
         '历史版本与修改记录',
-      )}
+      ) : null}
     >
       <div className="h-full flex flex-col overflow-hidden bg-white">
         <div className="flex-1 overflow-y-auto">
@@ -468,11 +470,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
               patient={patient}
               sections={editableSections}
               metaRows={metaRows}
-              actions={renderActionButton(
-                <><ReloadOutlined />对话</>,
-                () => setPreviewMode('edit'),
-                '进入入院记录对话',
-              )}
             />
           ) : (
             <DocumentChatWorkspace
@@ -492,7 +489,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                     handleDictation,
                     dictating ? '结束口述并填入主诉、现病史' : '开始口述病史',
                   )}
-                  {renderActionButton(
+                  {!readOnlyEntry && renderActionButton(
                     <><ExpandAltOutlined />通读全文</>,
                     () => setPreviewMode('read'),
                   )}
@@ -508,18 +505,20 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           )}
         </div>
 
-        <WritebackBar
-          label="提交入院记录"
-          onWriteback={handleSubmit}
-          locked={locked}
-          busy={submitting}
-          busyText={submitText}
-          progress={submitProgress}
-          onUnlock={() => {
-            setLocked(false);
-            message.info('已解除锁定，可重新编辑后再次提交。');
-          }}
-        />
+        {!readOnlyEntry && (
+          <WritebackBar
+            label="提交入院记录"
+            onWriteback={handleSubmit}
+            locked={locked}
+            busy={submitting}
+            busyText={submitText}
+            progress={submitProgress}
+            onUnlock={() => {
+              setLocked(false);
+              message.info('已解除锁定，可重新编辑后再次提交。');
+            }}
+          />
+        )}
 
         <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={patient.admissionNo} />
       </div>

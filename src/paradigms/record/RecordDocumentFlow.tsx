@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
 import {
   ExpandAltOutlined,
   HistoryOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  ReloadOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
@@ -105,7 +105,9 @@ function buildMetaRows(config: RecordConfig): DocumentPaperMetaCell[][] {
 }
 
 export default function RecordDocumentFlow({ doc, config }: Props) {
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
+  const [searchParams] = useSearchParams();
+  const readOnlyEntry = searchParams.get('mode') === 'read';
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
   const [voicePanelOpen, setVoicePanelOpen] = useState(true);
   const [diagnoses, setDiagnoses] = useState<IcdItem[]>([]);
   const [dictation, setDictation] = useState(config.dictationInit);
@@ -149,8 +151,8 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
       setLocked(false);
     }
     setResetKeys({});
-    setPreviewMode('edit');
-  }, [baseSections, config.dictationInit, config.patient.admissionNo, doc.code, setLocked]);
+    setPreviewMode(readOnlyEntry ? 'read' : 'edit');
+  }, [baseSections, config.dictationInit, config.patient.admissionNo, doc.code, readOnlyEntry, setLocked]);
 
   useEffect(() => {
     setSections((prev) => prev.map((section) => (
@@ -159,7 +161,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
   }, [diagnosisText]);
 
   useEffect(() => {
-    if (locked) return;
+    if (readOnlyEntry || locked) return;
     const t = window.setTimeout(() => {
       const values: Record<string, FieldValue> = Object.fromEntries(sections.map((section) => [section.key, section.text]));
       values.relatedDiagnoses = diagnoses;
@@ -175,7 +177,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
       });
     }, 800);
     return () => window.clearTimeout(t);
-  }, [config.patient.admissionNo, diagnoses, dictation, doc.code, locked, sections]);
+  }, [config.patient.admissionNo, diagnoses, dictation, doc.code, locked, readOnlyEntry, sections]);
 
   const updateSection = (sectionKey: string, text: string) => {
     setSections((prev) => prev.map((section) => (section.key === sectionKey ? { ...section, text } : section)));
@@ -264,7 +266,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
       doc={doc}
       showParadigmBadge={false}
       showPatientId={false}
-      actions={renderActionButton(
+      actions={!readOnlyEntry ? renderActionButton(
         <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
         () => {
           if (!versionCount) {
@@ -274,7 +276,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
           openHistory();
         },
         '历史版本与修改记录',
-      )}
+      ) : null}
     >
       <div className="h-full flex overflow-hidden bg-white">
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -286,11 +288,6 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
                 patient={config.patient}
                 sections={sections}
                 metaRows={buildMetaRows(config)}
-                actions={renderActionButton(
-                  <><ReloadOutlined />对话</>,
-                  () => setPreviewMode('edit'),
-                  `进入${doc.name}对话`,
-                )}
               />
             ) : (
               <DocumentChatWorkspace
@@ -298,7 +295,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
                   patient={config.patient}
                   sections={sections}
                   metaRows={buildMetaRows(config)}
-                  actions={renderActionButton(<><ExpandAltOutlined />通读全文</>, () => setPreviewMode('read'))}
+                  actions={!readOnlyEntry ? renderActionButton(<><ExpandAltOutlined />通读全文</>, () => setPreviewMode('read')) : null}
                   locked={locked}
                   resetKeys={resetKeys}
                   onChange={updateSection}
@@ -307,22 +304,24 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
                 />
             )}
           </div>
-          <WritebackBar
-            label={buildSubmitLabel(doc.name)}
-            onWriteback={handleSubmit}
-            locked={locked}
-            disabled={mismatch}
-            busy={submitting}
-            busyText={submitText}
-            progress={submitProgress}
-            onUnlock={() => {
-              setLocked(false);
-              message.info('已解除锁定，可重新编辑后再次提交。');
-            }}
-          />
+          {!readOnlyEntry && (
+            <WritebackBar
+              label={buildSubmitLabel(doc.name)}
+              onWriteback={handleSubmit}
+              locked={locked}
+              disabled={mismatch}
+              busy={submitting}
+              busyText={submitText}
+              progress={submitProgress}
+              onUnlock={() => {
+                setLocked(false);
+                message.info('已解除锁定，可重新编辑后再次提交。');
+              }}
+            />
+          )}
         </main>
 
-        <aside
+        {!readOnlyEntry && <aside
           className={`${voicePanelOpen ? 'w-[360px]' : 'w-[52px]'} shrink-0 border-l border-slate-200 bg-white shadow-[-10px_0_30px_rgba(15,23,42,0.03)] transition-[width] duration-200 ease-out`}
         >
           {voicePanelOpen ? (
@@ -369,7 +368,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
               <span className="text-[12px] font-bold [writing-mode:vertical-rl]">语音</span>
             </button>
           )}
-        </aside>
+        </aside>}
 
         <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={config.patient.admissionNo} />
       </div>

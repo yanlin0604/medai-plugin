@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
 import {
   CheckCircleOutlined,
-  FileTextOutlined,
   HistoryOutlined,
   ReloadOutlined,
   WarningOutlined,
@@ -83,7 +83,9 @@ function buildMetaRows(config: DeathRecordConfig, fields: Record<string, string>
 }
 
 export default function DeathRecordFlow({ doc, config }: Props) {
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('edit');
+  const [searchParams] = useSearchParams();
+  const readOnlyEntry = searchParams.get('mode') === 'read';
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
   const [fields, setFields] = useState<Record<string, string>>(() => (
     Object.fromEntries(config.fields.map((field) => [field.key, field.value]))
   ));
@@ -133,11 +135,11 @@ export default function DeathRecordFlow({ doc, config }: Props) {
       setLocked(false);
     }
     setResetKeys({});
-      setPreviewMode('edit');
-  }, [config, doc.code, setLocked]);
+      setPreviewMode(readOnlyEntry ? 'read' : 'edit');
+  }, [config, doc.code, readOnlyEntry, setLocked]);
 
   useEffect(() => {
-    if (locked) return;
+    if (readOnlyEntry || locked) return;
     const timer = window.setTimeout(() => {
       const values: Record<string, FieldValue> = {
         ...fields,
@@ -154,7 +156,7 @@ export default function DeathRecordFlow({ doc, config }: Props) {
       });
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [config.patient.admissionNo, doc.code, fields, locked, sections]);
+  }, [config.patient.admissionNo, doc.code, fields, locked, readOnlyEntry, sections]);
 
   const updateField = (key: string, value: string) => {
     setFields((prev) => ({ ...prev, [key]: value }));
@@ -271,7 +273,7 @@ export default function DeathRecordFlow({ doc, config }: Props) {
       doc={doc}
       showParadigmBadge={false}
       showPatientId={false}
-      actions={renderActionButton(
+      actions={!readOnlyEntry ? renderActionButton(
         <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
         () => {
           if (!versionCount) {
@@ -281,7 +283,7 @@ export default function DeathRecordFlow({ doc, config }: Props) {
           openHistory();
         },
         '历史版本与修改记录',
-      )}
+      ) : null}
     >
       <div className="flex h-full overflow-hidden bg-white">
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -299,7 +301,6 @@ export default function DeathRecordFlow({ doc, config }: Props) {
                 sections={sections}
                 metaRows={buildMetaRows(config, fields)}
                 emptyText="（请人工填写）"
-                actions={renderActionButton(<><FileTextOutlined />对话</>, () => setPreviewMode('edit'))}
               />
             ) : (
               <DocumentChatWorkspace
@@ -307,7 +308,7 @@ export default function DeathRecordFlow({ doc, config }: Props) {
                 patient={config.patient}
                 sections={sections}
                 metaRows={buildMetaRows(config, fields)}
-                actions={renderActionButton(<><FileTextOutlined />通读全文</>, () => setPreviewMode('read'))}
+                actions={!readOnlyEntry ? renderActionButton(<span>通读全文</span>, () => setPreviewMode('read')) : null}
                 locked={locked}
                 resetKeys={resetKeys}
                 onChange={updateSection}
@@ -317,23 +318,25 @@ export default function DeathRecordFlow({ doc, config }: Props) {
             )}
           </div>
 
-          <WritebackBar
-            label={buildSubmitLabel(doc.name)}
-            onWriteback={handleSubmit}
-            locked={locked}
-            disabled={mismatch}
-            busy={submitting}
-            busyText={submitText}
-            progress={submitProgress}
-            onUnlock={() => {
-              setLocked(false);
-              setSeniorReviewConfirmed(false);
-              message.info('已解除锁定，请重新完成上级审核确认后再提交。');
-            }}
-          />
+          {!readOnlyEntry && (
+            <WritebackBar
+              label={buildSubmitLabel(doc.name)}
+              onWriteback={handleSubmit}
+              locked={locked}
+              disabled={mismatch}
+              busy={submitting}
+              busyText={submitText}
+              progress={submitProgress}
+              onUnlock={() => {
+                setLocked(false);
+                setSeniorReviewConfirmed(false);
+                message.info('已解除锁定，请重新完成上级审核确认后再提交。');
+              }}
+            />
+          )}
         </main>
 
-        <aside className="w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-[#F8FAFC] p-4">
+        {!readOnlyEntry && <aside className="w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-[#F8FAFC] p-4">
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="text-sm font-extrabold text-slate-800">结构化字段</div>
@@ -408,7 +411,7 @@ export default function DeathRecordFlow({ doc, config }: Props) {
               ))}
             </ul>
           </section>
-        </aside>
+        </aside>}
 
         <VersionHistoryDrawer
           open={historyOpen}
