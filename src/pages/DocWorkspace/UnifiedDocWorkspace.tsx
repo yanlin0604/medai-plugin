@@ -22,6 +22,7 @@ import type { Patient } from '../../stores/usePatientStore';
 import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../services/fieldAssist/contextBridge';
 import type { FieldAssistContext } from '../../services/fieldAssist/types';
 import { getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
+import { renderTextWithCitations } from '../../components/fieldAssist/FieldAssistPanel';
 
 interface Props {
   doc: DocDefinition;
@@ -210,7 +211,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
     Promise.all([
       pluginRuntimeApi.getRuntimeDocTemplate(doc.code),
-      pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, false),
+      pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, true),
     ]).then(([nextTemplate, values]) => {
       if (cancelled) return;
       setTemplate(nextTemplate);
@@ -482,9 +483,6 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                         {active ? (
                           <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-[#1E3A8A]">当前编辑</span>
                         ) : null}
-                        {session.field.required ? (
-                          <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">必填</span>
-                        ) : null}
                       </div>
                       <div className="mt-0.5 text-[10px] font-medium text-slate-400">
                         {hasDraft ? `最近生成 ${generatedAt}` : `来源 ${session.field.source}`}
@@ -523,7 +521,18 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
                   <div className="space-y-3 px-3 py-3">
                     <div className="max-w-[92%] rounded-lg rounded-bl-sm border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800">
-                      {session.value || <span className="text-slate-400">这个字段还没有内容。</span>}
+                      {session.value ? (
+                        <div className="whitespace-pre-wrap">
+                          {session.draft
+                            ? renderTextWithCitations(
+                              session.value || session.draft.generatedText || session.draft.response.generatedText || '',
+                              session.draft.response.evidenceSummary,
+                            )
+                            : session.value}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">这个字段还没有内容。</span>
+                      )}
                     </div>
                   </div>
                 </article>
