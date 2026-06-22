@@ -44,6 +44,7 @@ import { resolveFieldAssistIntent, shouldAutoGenerateField } from '../../service
 import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import type { FieldAssistContext, FieldAssistDraft, FieldAssistIntent } from '../../services/fieldAssist/types';
 import { getFieldAssistContextKey, getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
+import { renderTextWithCitations } from '../fieldAssist/FieldAssistPanel';
 
 interface BubbleShellProps {
   onExpand?: (context: BubbleEmrContext | null) => void;
@@ -780,7 +781,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               </div>
               {(fieldDraftStatus === 'ready' || fieldDraftStatus === 'written') && fieldDraft?.generatedText ? (
                 <div className="text-[11px] leading-[1.6] text-slate-700 whitespace-pre-wrap break-all">
-                  {fieldDraft.generatedText}
+                  {renderTextWithCitations(fieldDraft.generatedText, fieldDraft.response.evidenceSummary)}
                 </div>
               ) : (
                 <div className="text-[11px] text-slate-500">
