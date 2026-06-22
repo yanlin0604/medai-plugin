@@ -184,10 +184,22 @@ export const DOC_REGISTRY: DocDefinition[] = [
     prototype: 'doc_014_consultation.html',
     dataSources: ['HIS', 'EMR'], inputMode: '选项+手动',
   },
+  {
+    code: 'DOC030', id: 'doc-030', name: '会诊记录', py: 'hzjl',
+    paradigm: 'record', group: 'onDemand', icon: 'SolutionOutlined',
+    prototype: 'doc_014_consultation.html',
+    dataSources: ['HIS', 'EMR'], inputMode: '选项+手动',
+  },
 
   // ---------- 特定临床事件文书（灰） ----------
   {
     code: 'DOC009', id: 'doc-009', name: '抢救记录', py: 'qjjl',
+    paradigm: 'record', group: 'event', icon: 'HeartOutlined',
+    prototype: 'doc_009_rescue.html',
+    dataSources: ['医嘱', '录音'], inputMode: '语音+手动',
+  },
+  {
+    code: 'DOC050', id: 'doc-050', name: '抢救记录', py: 'qjjl',
     paradigm: 'record', group: 'event', icon: 'HeartOutlined',
     prototype: 'doc_009_rescue.html',
     dataSources: ['医嘱', '录音'], inputMode: '语音+手动',
@@ -200,14 +212,20 @@ export const DOC_REGISTRY: DocDefinition[] = [
     workspace: 'discharge',
   },
   {
-    code: 'DOC011', id: 'doc-011', name: '死亡记录', py: 'swjl',
+    code: 'DOC011', id: 'doc-011', name: '术前小结', py: 'sqxj',
+    paradigm: 'record', group: 'event', icon: 'ScissorOutlined',
+    prototype: 'doc_013_operation.html',
+    dataSources: ['HIS', 'EMR'], inputMode: '选项+手动',
+  },
+  {
+    code: 'DOC040', id: 'doc-040', name: '死亡记录', py: 'swjl',
     paradigm: 'special', group: 'event', icon: 'WarningOutlined',
     prototype: 'doc_011_death.html',
     dataSources: ['EMR'], inputMode: '手动为主',
     flags: ['ai-boundary', 'mandatory-review', 'no-asr'],
   },
   {
-    code: 'DOC012', id: 'doc-012', name: '死亡讨论记录', py: 'swtljl',
+    code: 'DOC012', id: 'doc-012', name: '围术期记录', py: 'wsqjl',
     paradigm: 'recording', group: 'event', icon: 'CommentOutlined',
     prototype: 'doc_012_death_discussion.html',
     dataSources: ['EMR', '录音'], inputMode: '手动为主',
@@ -217,6 +235,38 @@ export const DOC_REGISTRY: DocDefinition[] = [
     paradigm: 'record', group: 'event', icon: 'ScissorOutlined',
     prototype: 'doc_013_operation.html',
     dataSources: ['医嘱', '录音'], inputMode: '选项+手动',
+  },
+  {
+    code: 'D0C013', id: 'doc-his-013', name: '手术记录', py: 'ssjl',
+    paradigm: 'record', group: 'event', icon: 'ScissorOutlined',
+    prototype: 'doc_013_operation.html',
+    dataSources: ['医嘱', '录音'], inputMode: '选项+手动',
+  },
+  {
+    code: 'D0C001', id: 'doc-his-001', name: '入院记录', py: 'ryjl',
+    paradigm: 'recording', group: 'timed', icon: 'ImportOutlined',
+    prototype: 'doc_001_admission.html',
+    dataSources: ['HIS', '问诊', '录音'], inputMode: '语音+选项+手动',
+    timeLimit: '入院24小时内',
+  },
+  {
+    code: 'D0C011', id: 'doc-his-011', name: '术前小结', py: 'sqxj',
+    paradigm: 'record', group: 'event', icon: 'ScissorOutlined',
+    prototype: 'doc_013_operation.html',
+    dataSources: ['HIS', 'EMR'], inputMode: '选项+手动',
+  },
+  {
+    code: 'DOC020', id: 'doc-020', name: '知情同意书', py: 'zqtys',
+    paradigm: 'special', group: 'event', icon: 'FileTextOutlined',
+    prototype: 'doc_020_consent.html',
+    dataSources: ['HIS', 'EMR'], inputMode: '手动为主',
+    flags: ['mandatory-review'],
+  },
+  {
+    code: 'DOC060', id: 'doc-060', name: '出院小结', py: 'cyxj',
+    paradigm: 'summary', group: 'event', icon: 'ExportOutlined',
+    prototype: 'doc_060_discharge_summary.html',
+    dataSources: ['HIS', 'EMR'], inputMode: '选项+模板',
   },
 ];
 

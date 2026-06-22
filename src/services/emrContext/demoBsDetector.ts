@@ -1,55 +1,98 @@
 import { invoke } from '@tauri-apps/api/core';
+import { getDocByCode } from '../../config/docRegistry';
 import { isTauriRuntime } from '../windowMode';
-import type { EmrContext } from './types';
+import type { EmrContext, EmrContextDebug } from './types';
 
-export const DEMO_BS_DISCHARGE_DOC_CODE = 'DOC010';
 export const DEMO_BS_MIN_CONFIDENCE = 0.75;
 export const DEMO_BS_CONTEXT_MAX_AGE_MS = 5 * 60 * 1000;
 
 export async function getCurrentEmrContext(): Promise<EmrContext | null> {
+  const result = await inspectCurrentEmrContext();
+  return result.status === 'accepted' ? result.context : null;
+}
+
+export async function inspectCurrentEmrContext(): Promise<EmrContextDebug> {
+  const checkedAt = new Date().toISOString();
   if (!isTauriRuntime()) {
-    return null;
+    return {
+      status: 'unavailable',
+      message: '当前不是 Tauri 运行环境，无法读取 HIS 上报。',
+      context: null,
+      checkedAt,
+    };
   }
 
   try {
     const context = await invoke<EmrContext | null>('get_latest_emr_context');
-    if (!context || !isValidDemoBsDischargeContext(context)) {
-      return null;
+    const normalizedContext = context
+      ? {
+        ...context,
+        docCode: context.docCode.toUpperCase(),
+        signals: context.signals ?? [],
+      }
+      : null;
+
+    if (!normalizedContext) {
+      return {
+        status: 'empty',
+        message: '尚未收到 HIS 文书上下文上报。',
+        context: null,
+        checkedAt,
+      };
+    }
+
+    const rejectionReason = getDemoBsContextRejectionReason(normalizedContext);
+    if (rejectionReason) {
+      return {
+        status: 'rejected',
+        message: rejectionReason,
+        context: normalizedContext,
+        checkedAt,
+      };
     }
 
     return {
-      ...context,
-      docCode: context.docCode.toUpperCase(),
-      signals: context.signals ?? [],
+      status: 'accepted',
+      message: `已接收 ${normalizedContext.docCode} ${normalizedContext.docName}`,
+      context: normalizedContext,
+      checkedAt,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : '读取 HIS 上下文失败。',
+      context: null,
+      checkedAt,
+    };
   }
 }
 
-export function isValidDemoBsDischargeContext(context: EmrContext) {
+export function isValidDemoBsContext(context: EmrContext) {
+  return !getDemoBsContextRejectionReason(context);
+}
+
+export function getDemoBsContextRejectionReason(context: EmrContext): string {
   // ✅ 同时接受 demo-bs 和 demo-cs
   if (context.source !== 'demo-bs' && context.source !== 'demo-cs') {
-    return false;
+    return `不支持的来源 source=${context.source}`;
   }
 
-  if (context.docCode.toUpperCase() !== DEMO_BS_DISCHARGE_DOC_CODE) {
-    return false;
+  if (!getDocByCode(context.docCode.toUpperCase())) {
+    return `未注册的文书编码 docCode=${context.docCode}`;
   }
 
   if (context.confidence < DEMO_BS_MIN_CONFIDENCE) {
-    return false;
-  }
-
-  if (!context.signals.includes('field-marker')) {
-    return false;
+    return `可信度过低 confidence=${context.confidence}，需要 >= ${DEMO_BS_MIN_CONFIDENCE}`;
   }
 
   if (isStaleContext(context)) {
-    return false;
+    return 'HIS 上下文已过期，请重新切换文书标签触发上报。';
   }
 
-  return Boolean(context.patientId && context.patientName && context.docName);
+  if (!context.patientId) return '缺少 patientId';
+  if (!context.patientName) return '缺少 patientName';
+  if (!context.docName) return '缺少 docName';
+  return '';
 }
 
 export function isStaleContext(context: Pick<EmrContext, 'receivedAt' | 'detectedAt'>) {

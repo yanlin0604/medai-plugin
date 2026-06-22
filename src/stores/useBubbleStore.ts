@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getEmrContextKey, type EmrContext } from '../services/emrContext/types';
+import { getEmrContextKey, type EmrContext, type EmrContextDebug } from '../services/emrContext/types';
 
 export type BubbleMode = 'idle' | 'detected' | 'expanded';
 export type BubbleEmrContext = EmrContext;
@@ -7,9 +7,11 @@ export type BubbleEmrContext = EmrContext;
 interface BubbleState {
   mode: BubbleMode;
   detectedContext: BubbleEmrContext | null;
+  emrDebug: EmrContextDebug | null;
   activatedContextKeys: string[];
 
   setDetectedContext: (context: BubbleEmrContext | null) => void;
+  setEmrDebug: (debug: EmrContextDebug) => void;
   expand: (context?: BubbleEmrContext | null) => void;
   collapse: () => void;
   markActivated: (contextKey: string) => void;
@@ -23,6 +25,7 @@ export function getBubbleContextKey(context: Pick<BubbleEmrContext, 'patientId' 
 export const useBubbleStore = create<BubbleState>((set, get) => ({
   mode: 'idle',
   detectedContext: null,
+  emrDebug: null,
   activatedContextKeys: [],
 
   setDetectedContext: (detectedContext) =>
@@ -30,6 +33,8 @@ export const useBubbleStore = create<BubbleState>((set, get) => ({
       detectedContext,
       mode: state.mode === 'expanded' ? 'expanded' : detectedContext ? 'detected' : 'idle',
     })),
+
+  setEmrDebug: (emrDebug) => set({ emrDebug }),
 
   expand: (context) =>
     set((state) => ({

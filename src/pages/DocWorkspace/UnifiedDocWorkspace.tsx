@@ -81,6 +81,38 @@ function buildInitialSessions(template: DocTemplate, values: Record<string, unkn
   }));
 }
 
+function mergeLatestDraftsIntoSessions(
+  sessions: FieldSession[],
+  drafts: FieldAssistDraft[],
+  patientId: string,
+  docCode: string,
+): FieldSession[] {
+  const latestByField = new Map<string, FieldAssistDraft>();
+
+  drafts.forEach((draft) => {
+    const response = draft.response;
+    if (response.patientId !== patientId || response.docCode !== docCode || !response.fieldKey) return;
+
+    const current = latestByField.get(response.fieldKey);
+    if (!current || Date.parse(draft.createdAt) > Date.parse(current.createdAt)) {
+      latestByField.set(response.fieldKey, draft);
+    }
+  });
+
+  if (!latestByField.size) return sessions;
+
+  return sessions.map((session) => {
+    const draft = latestByField.get(session.field.key);
+    if (!draft) return session;
+
+    return {
+      ...session,
+      draft,
+      value: draft.generatedText || draft.response.generatedText || session.value,
+    };
+  });
+}
+
 function buildContext(
   doc: DocDefinition,
   patient: Patient,
@@ -141,6 +173,7 @@ function compactTopMetaItems(topSessions: FieldSession[]) {
 
 export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const addDraft = useFieldAssistStore((state) => state.addDraft);
+  const drafts = useFieldAssistStore((state) => state.drafts);
   const [template, setTemplate] = useState<DocTemplate | null>(null);
   const [sessions, setSessions] = useState<FieldSession[]>([]);
   const [fieldContext, setFieldContext] = useState<FieldAssistContext | null>(null);
@@ -181,7 +214,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     ]).then(([nextTemplate, values]) => {
       if (cancelled) return;
       setTemplate(nextTemplate);
-      const nextSessions = buildInitialSessions(nextTemplate, values.values ?? {});
+      const nextSessions = mergeLatestDraftsIntoSessions(
+        buildInitialSessions(nextTemplate, values.values ?? {}),
+        useFieldAssistStore.getState().drafts,
+        patient.id,
+        doc.code,
+      );
       setSessions(nextSessions);
       setActiveFieldKey(nextSessions.find((session) => !isTopWorkbenchField(session.field))?.field.key ?? '');
       setVoiceText('');
@@ -198,6 +236,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       cancelled = true;
     };
   }, [doc.code, patient.id]);
+
+  useEffect(() => {
+    setSessions((current) => mergeLatestDraftsIntoSessions(current, drafts, patient.id, doc.code));
+  }, [doc.code, drafts, patient.id]);
 
   useEffect(() => () => {
     if (voiceTimerRef.current) window.clearTimeout(voiceTimerRef.current);

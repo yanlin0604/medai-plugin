@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { usePatientStore } from '../../stores/usePatientStore';
 import type { DocDefinition } from '../../config/docRegistry';
-import { findDocInRegistry } from '../../config/docRegistry';
+import { findDocInRegistry, getDocByCode } from '../../config/docRegistry';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import UnifiedDocWorkspace from './UnifiedDocWorkspace';
 
@@ -35,17 +35,18 @@ export default function DocWorkspace() {
   }, []);
 
   // 优先用 store 选中文书；支持通过 URL code 直达（刷新/外链场景）
+  const localDoc = code ? getDocByCode(code) ?? null : null;
   const storeDoc = selectedDoc && selectedDoc.code === code ? selectedDoc : null;
-  const doc = storeDoc ?? runtimeDoc;
+  const doc = localDoc ?? storeDoc ?? runtimeDoc;
 
   useEffect(() => {
-    if (!code || storeDoc) return;
+    if (!code || localDoc || storeDoc) return;
     void loadDocByCode(code);
-  }, [code, loadDocByCode, storeDoc]);
+  }, [code, loadDocByCode, localDoc, storeDoc]);
 
   // URL 直达时回填 store
   useEffect(() => {
-    if (doc && selectedDoc?.code !== doc.code) selectDoc(doc);
+    if (doc && (selectedDoc?.code !== doc.code || selectedDoc?.name !== doc.name)) selectDoc(doc);
   }, [doc, selectedDoc, selectDoc]);
 
   if (!doc && code && (loadingDoc || docError)) {

@@ -82,7 +82,7 @@ function getEditContextSnapshotKey(context: BsEditAssistContext) {
 
 export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const navigate = useNavigate();
-  const { mode, detectedContext, expand, setDetectedContext, markActivated, hasActivated } = useBubbleStore();
+  const { mode, detectedContext, emrDebug, expand, setDetectedContext, setEmrDebug, markActivated, hasActivated } = useBubbleStore();
   const { currentPatient, selectPatient, selectDoc } = usePatientStore();
   const setStoredFieldContext = useFieldAssistStore((state) => state.setContext);
   const addStoredFieldDraft = useFieldAssistStore((state) => state.addDraft);
@@ -151,12 +151,15 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
 
   // 监听 EMR 上下文变化，只更新气泡状态，不自动展开
   useEffect(() => {
-    const cleanup = watchEmrContext((context) => {
-      setDetectedContext(context);
-    });
+    const cleanup = watchEmrContext(
+      (context) => {
+        setDetectedContext(context);
+      },
+      { onDebug: setEmrDebug },
+    );
 
     return cleanup;
-  }, [setDetectedContext]);
+  }, [setDetectedContext, setEmrDebug]);
 
   useEffect(() => {
     let disposed = false;
@@ -969,8 +972,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
                 {Math.round(progress)}%
               </div> */}
             </div>
-            <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
-              {statusText || '点击进入出院记录'}
+            <div data-tauri-drag-region className="mt-0.5 text-[11px] font-bold text-slate-700 truncate">
+              {statusText || `双击进入${detectedContext.docName}`}
             </div>
           </>
         ) : (
@@ -980,7 +983,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               病历助手
             </div>
             <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
-              等待病历系统文书
+              {emrDebug
+                ? `${emrDebug.status === 'accepted' ? '已接收' : emrDebug.status === 'rejected' ? '已过滤' : emrDebug.status === 'empty' ? '未收到' : '检测异常'}：${emrDebug.context?.docCode ?? ''}${emrDebug.context?.docName ? ` ${emrDebug.context.docName}` : ''}${emrDebug.message ? ` · ${emrDebug.message}` : ''}`
+                : '等待病历系统文书'}
             </div>
           </>
         )}

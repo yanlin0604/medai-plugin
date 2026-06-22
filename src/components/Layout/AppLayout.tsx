@@ -195,6 +195,7 @@ export default function AppLayout() {
     selectPatient,
     selectDoc,
   } = usePatientStore();
+  const emrDebug = useBubbleStore((state) => state.emrDebug);
 
   const [session, setSession] = useState<HostSession | null>(null);
   const [runtimeDocs, setRuntimeDocs] = useState<DocDefinition[]>([]);
@@ -297,6 +298,19 @@ export default function AppLayout() {
     return (
       <div className="h-screen w-screen bg-[#F8FAFC] overflow-hidden flex flex-col font-sans select-none relative">
         <WindowTitleBar />
+        {emrDebug ? (
+          <div className={[
+            'shrink-0 border-b px-4 py-1 text-[11px] font-medium',
+            emrDebug.status === 'accepted'
+              ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              : emrDebug.status === 'rejected'
+                ? 'border-amber-100 bg-amber-50 text-amber-700'
+                : 'border-slate-200 bg-white text-slate-500',
+          ].join(' ')}
+          >
+            HIS 上报：{emrDebug.context?.docCode ?? '--'} {emrDebug.context?.docName ?? ''} · {emrDebug.message}
+          </div>
+        ) : null}
         <Outlet />
       </div>
     );

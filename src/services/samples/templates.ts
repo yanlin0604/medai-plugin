@@ -6,6 +6,7 @@
 // TODO: 后端就绪后接模板配置服务。
 
 import type { DocTemplate } from '../types';
+import { getDocByCode } from '../../config/docRegistry';
 
 /** 住院病案首页（DOC099）字段模板 */
 export const homepageTemplate: DocTemplate = {
@@ -186,8 +187,66 @@ export const admissionTemplate: DocTemplate = {
   ],
 };
 
+const genericFieldLabels: Record<string, string[]> = {
+  DOC002: ['病例特点', '初步诊断', '诊断依据', '鉴别诊断', '诊疗计划'],
+  DOC011: ['术前诊断', '手术指征', '术前准备', '拟行手术', '注意事项'],
+  D0C011: ['术前诊断', '手术指征', '术前准备', '拟行手术', '注意事项'],
+  DOC012: ['围术期评估', '术前情况', '术中情况', '术后处理', '风险提示'],
+  DOC013: ['术前诊断', '手术名称', '手术经过', '术后诊断', '术后处理'],
+  D0C013: ['术前诊断', '手术名称', '手术经过', '术后诊断', '术后处理'],
+  DOC020: ['患者情况', '拟行诊疗', '风险告知', '替代方案', '患者意见'],
+  DOC030: ['申请科室意见', '会诊目的', '病情摘要', '会诊意见', '处理建议'],
+  DOC040: ['死亡时间', '死亡诊断', '诊疗经过', '死亡原因', '家属告知'],
+  DOC050: ['抢救时间轴', '抢救经过', '用药及处置', '抢救结果', '医师总结'],
+  DOC060: ['入院情况', '诊疗经过', '出院诊断', '出院情况', '出院医嘱'],
+};
+
+export function buildGenericDocTemplate(docCode: string): DocTemplate {
+  const doc = getDocByCode(docCode);
+  const title = doc?.name ?? docCode;
+  const labels = genericFieldLabels[docCode] ?? ['病例特点', '诊断依据', '诊疗经过', '处理意见', '注意事项'];
+
+  return {
+    docCode,
+    version: 'local-fallback-v1',
+    title,
+    fields: [
+      {
+        key: 'patientInfo',
+        label: '患者信息',
+        section: '基础信息',
+        source: 'his',
+        required: true,
+        inputType: 'static',
+        staticText: '',
+        metaSlot: 'patient',
+      },
+      ...labels.map((label, index) => ({
+        key: `section${index + 1}`,
+        label,
+        section: title,
+        source: index < 2 ? 'ai' as const : 'manual' as const,
+        required: index < 2,
+        inputType: 'text' as const,
+        placeholder: `填写${label}`,
+        dictatable: true,
+      })),
+    ],
+  };
+}
+
+function withDocCode(template: DocTemplate, docCode: string, title?: string): DocTemplate {
+  return {
+    ...template,
+    docCode,
+    title: title ?? template.title,
+    fields: template.fields,
+  };
+}
+
 /** 按 docCode 索引的模板表（后台下发后由此返回） */
 export const docTemplates: Record<string, DocTemplate> = {
   DOC099: homepageTemplate,
   DOC001: admissionTemplate,
+  D0C001: withDocCode(admissionTemplate, 'D0C001', '入院记录'),
 };

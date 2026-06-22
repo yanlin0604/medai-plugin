@@ -1,11 +1,13 @@
-import { getCurrentEmrContext } from './demoBsDetector';
-import { getEmrContextKey, type EmrContext } from './types';
+import { inspectCurrentEmrContext } from './demoBsDetector';
+import { getEmrContextKey, type EmrContext, type EmrContextDebug } from './types';
 
 export type EmrContextChangeHandler = (context: EmrContext | null) => void;
+export type EmrContextDebugHandler = (debug: EmrContextDebug) => void;
 
 export interface WatchEmrContextOptions {
   intervalMs?: number;
   immediate?: boolean;
+  onDebug?: EmrContextDebugHandler;
 }
 
 export const DEFAULT_EMR_CONTEXT_POLL_INTERVAL_MS = 1500;
@@ -31,11 +33,13 @@ export function watchEmrContext(
 
     polling = true;
     try {
-      const context = await getCurrentEmrContext();
+      const debug = await inspectCurrentEmrContext();
       if (disposed) {
         return;
       }
 
+      options.onDebug?.(debug);
+      const context = debug.status === 'accepted' ? debug.context : null;
       const nextContextKey = context ? getEmrContextKey(context) : null;
       if (!initialized) {
         initialized = true;

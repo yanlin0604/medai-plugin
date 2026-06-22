@@ -1,5 +1,6 @@
 import axios, { type AxiosResponse } from 'axios';
 import {
+  DOC_REGISTRY,
   getDocByCode,
 } from '../config/docRegistry';
 import type {
@@ -39,10 +40,36 @@ import type {
   RuntimeWritebackAuditRequest,
   RuntimeWritebackAuditResponse,
 } from './pluginRuntimeTypes';
+import { buildGenericDocTemplate, docTemplates } from './samples/templates';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 const RUNTIME_SUCCESS_CODE = 200;
 const RUNTIME_BASE_PATH = '/medical/pluginRuntime';
+const LOCAL_TEMPLATE_FIRST_DOC_CODES = new Set(['DOC011', 'D0C011', 'DOC012']);
+const LOCAL_DEFINITION_FIRST_DOC_CODES = new Set([
+  'DOC099',
+  'D0C001',
+  'DOC001',
+  'DOC002',
+  'D0C011',
+  'DOC011',
+  'D0C013',
+  'DOC013',
+  'DOC012',
+  'DOC020',
+  'DOC030',
+  'DOC010',
+  'DOC040',
+  'DOC050',
+  'DOC060',
+]);
+const DOC_DISPLAY_ALIAS_CODES: Record<string, string> = {
+  D0C001: 'DOC001',
+  D0C011: 'DOC011',
+  D0C013: 'DOC013',
+  DOC030: 'DOC014',
+  DOC050: 'DOC009',
+};
 
 const http = axios.create({
   baseURL: API_BASE_URL,
@@ -167,16 +194,17 @@ function byOptionOrder(a: RuntimeDocFieldOptionDto, b: RuntimeDocFieldOptionDto)
 export function toDocDefinition(dto: RuntimeDocDefinitionDto): DocDefinition {
   const registryDoc = getDocByCode(dto.docCode);
   const workspace = normalizeWorkspace(dto.workspaceKey);
+  const useLocalDefinition = Boolean(registryDoc && LOCAL_DEFINITION_FIRST_DOC_CODES.has(dto.docCode));
 
   return {
     code: dto.docCode,
     id: registryDoc?.id ?? normalizeDocId(dto.docCode),
-    name: dto.docName,
-    py: dto.pyCode ?? registryDoc?.py ?? '',
-    paradigm: normalizeParadigm(dto.interactionParadigm),
+    name: useLocalDefinition ? registryDoc!.name : dto.docName,
+    py: useLocalDefinition ? registryDoc!.py : dto.pyCode ?? registryDoc?.py ?? '',
+    paradigm: useLocalDefinition ? registryDoc!.paradigm : normalizeParadigm(dto.interactionParadigm),
     group: registryDoc?.group,
-    icon: dto.iconName || registryDoc?.icon || 'FileTextOutlined',
-    prototype: dto.prototypeFile ?? registryDoc?.prototype ?? '',
+    icon: useLocalDefinition ? registryDoc!.icon : dto.iconName || registryDoc?.icon || 'FileTextOutlined',
+    prototype: useLocalDefinition ? registryDoc!.prototype : dto.prototypeFile ?? registryDoc?.prototype ?? '',
     dataSources: registryDoc?.dataSources ?? [],
     inputMode: registryDoc?.inputMode ?? '',
     timeLimit: registryDoc?.timeLimit,
@@ -209,6 +237,21 @@ export function toDocFieldDef(field: RuntimeDocFieldDto): DocFieldDef {
     dictatable: field.dictatable,
     metaSlot: field.renderRule?.metaSlot,
   };
+}
+
+function dedupeDisplayDocuments(docs: DocDefinition[]): DocDefinition[] {
+  const docsByDisplayCode = new Map<string, DocDefinition>();
+
+  docs.forEach((doc) => {
+    const displayCode = DOC_DISPLAY_ALIAS_CODES[doc.code] ?? doc.code;
+    const existing = docsByDisplayCode.get(displayCode);
+
+    if (!existing || (doc.code === displayCode && existing.code !== displayCode)) {
+      docsByDisplayCode.set(displayCode, doc);
+    }
+  });
+
+  return [...docsByDisplayCode.values()];
 }
 
 export function toIcdItem(candidate: RuntimeIcdCandidateDto): IcdItem {
@@ -268,8 +311,17 @@ export async function listRuntimeDocumentDefinitions(): Promise<RuntimeDocDefini
 }
 
 export async function listRuntimeDocuments(): Promise<DocDefinition[]> {
-  const definitions = await listRuntimeDocumentDefinitions();
-  return definitions.map(toDocDefinition);
+  try {
+    const definitions = await listRuntimeDocumentDefinitions();
+    const runtimeDocs = definitions.map(toDocDefinition);
+    const runtimeCodes = new Set(runtimeDocs.map((doc) => doc.code));
+    return dedupeDisplayDocuments([
+      ...runtimeDocs,
+      ...DOC_REGISTRY.filter((doc) => !runtimeCodes.has(doc.code)),
+    ]);
+  } catch {
+    return dedupeDisplayDocuments(DOC_REGISTRY);
+  }
 }
 
 export async function getRuntimeTemplate(docCode: string): Promise<RuntimeDocTemplateDto> {
@@ -277,8 +329,16 @@ export async function getRuntimeTemplate(docCode: string): Promise<RuntimeDocTem
 }
 
 export async function getRuntimeDocTemplate(docCode: string): Promise<DocTemplate> {
-  const template = await getRuntimeTemplate(docCode);
-  return toDocTemplate(template);
+  if (LOCAL_TEMPLATE_FIRST_DOC_CODES.has(docCode)) {
+    return docTemplates[docCode] ?? buildGenericDocTemplate(docCode);
+  }
+
+  try {
+    const template = await getRuntimeTemplate(docCode);
+    return toDocTemplate(template);
+  } catch {
+    return docTemplates[docCode] ?? buildGenericDocTemplate(docCode);
+  }
 }
 
 export async function resolveRuntimeValues(
@@ -286,11 +346,22 @@ export async function resolveRuntimeValues(
   patientIdHis: string,
   skipGeneration = false,
 ): Promise<RuntimeDocValues> {
-  return requestRuntime<RuntimeDocValueBundleDto>(
-    http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
-      params: { patientIdHis, skipGeneration },
-    }),
-  );
+  try {
+    return await requestRuntime<RuntimeDocValueBundleDto>(
+      http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
+        params: { patientIdHis, skipGeneration },
+      }),
+    );
+  } catch {
+    return {
+      docCode,
+      patientIdHis,
+      values: {},
+      icdCandidates: [],
+      pulledSources: [],
+      resolvedAt: new Date().toISOString(),
+    };
+  }
 }
 
 export async function resolveRuntimeFieldValue(

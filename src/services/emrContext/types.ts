@@ -21,6 +21,15 @@ export interface EmrContext {
   receivedAt: string;
 }
 
+export type EmrContextDebugStatus = 'unavailable' | 'empty' | 'accepted' | 'rejected' | 'error';
+
+export interface EmrContextDebug {
+  status: EmrContextDebugStatus;
+  message: string;
+  context: EmrContext | null;
+  checkedAt: string;
+}
+
 export type EmrContextIdentity = Pick<EmrContext, 'patientId' | 'docCode'>;
 
 export function getEmrContextKey(context: EmrContextIdentity) {
