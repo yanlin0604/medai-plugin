@@ -8,6 +8,7 @@ import {
   EditOutlined,
   FileTextOutlined,
   Loading3QuartersOutlined,
+  MinusOutlined,
   ReloadOutlined,
   SearchOutlined,
   UploadOutlined,
@@ -42,7 +43,7 @@ import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAs
 import { resolveFieldAssistIntent, shouldAutoGenerateField } from '../../services/fieldAssist/intentResolver';
 import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import type { FieldAssistContext, FieldAssistDraft, FieldAssistIntent } from '../../services/fieldAssist/types';
-import { getFieldAssistContextKey } from '../../services/fieldAssist/types';
+import { getFieldAssistContextKey, getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
 
 interface BubbleShellProps {
   onExpand?: (context: BubbleEmrContext | null) => void;
@@ -58,20 +59,11 @@ const GENERATION_STEPS = [
   '校验出院诊断',
   '生成出院医嘱',
 ];
-const FIELD_CONTEXT_POLL_MS = 1800;
+const FIELD_CONTEXT_POLL_MS = 800;
 const FIELD_AUTO_GENERATE_DELAY_MS = 450;
 
 function getFieldContextSnapshotKey(context: FieldAssistContext) {
-  return [
-    getFieldAssistContextKey(context),
-    context.fieldValue,
-    context.selectedText,
-    context.prefix,
-    context.selectionStart,
-    context.selectionEnd,
-    context.trigger,
-    context.writebackUrl,
-  ].join('|');
+  return getFieldAssistSnapshotKey(context);
 }
 
 function getEditContextSnapshotKey(context: BsEditAssistContext) {
@@ -111,6 +103,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const latestDraftContextKeyRef = useRef('');
   const draftProgressTimerRef = useRef<number | null>(null);
   const autoGenerateRequestKeysRef = useRef<Set<string>>(new Set());
+  const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false);
+  const generatingContextKeyRef = useRef('');
+  const fieldDraftStickyRef = useRef(false);
   const [suggestionBatch, setSuggestionBatch] = useState(0);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
   const [copiedSuggestionId, setCopiedSuggestionId] = useState('');
@@ -122,14 +117,14 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     () =>
       editContext
         ? [
-            editContext.patientId,
-            editContext.docCode,
-            editContext.fieldKey,
-            editContext.selectedText,
-            editContext.prefix,
-            editContext.selectionStart,
-            editContext.selectionEnd,
-          ].join('|')
+          editContext.patientId,
+          editContext.docCode,
+          editContext.fieldKey,
+          editContext.selectedText,
+          editContext.prefix,
+          editContext.selectionStart,
+          editContext.selectionEnd,
+        ].join('|')
         : '',
     [editContext],
   );
@@ -146,6 +141,12 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   useEffect(() => {
     latestFieldContextKeyRef.current = fieldContextKey;
   }, [fieldContextKey]);
+
+  // 追踪草稿是否处于可展示状态（ready/written/error），用于防止轮询误清 context
+  useEffect(() => {
+    fieldDraftStickyRef.current =
+      fieldDraftStatus === 'ready' || fieldDraftStatus === 'written' || fieldDraftStatus === 'error';
+  }, [fieldDraftStatus]);
 
   // 监听 EMR 上下文变化，只更新气泡状态，不自动展开
   useEffect(() => {
@@ -166,9 +167,18 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       if (usableField) {
         const nextSnapshotKey = getFieldContextSnapshotKey(usableField);
         if (nextSnapshotKey !== latestFieldSnapshotKeyRef.current) {
-          latestFieldSnapshotKeyRef.current = nextSnapshotKey;
-          setFieldContext(usableField);
-          setStoredFieldContext(usableField);
+          // 如果正在生成中且字段身份相同（只是 prefix/selection 等微变），跳过更新防止生成被取消
+          const isGenerating = generatingContextKeyRef.current !== '';
+          const sameField = isGenerating
+            && generatingContextKeyRef.current === getFieldAssistContextKey(usableField);
+          if (sameField) {
+            // 仅更新快照 key 记录，不更新 state 以避免打断生成
+            latestFieldSnapshotKeyRef.current = nextSnapshotKey;
+          } else {
+            latestFieldSnapshotKeyRef.current = nextSnapshotKey;
+            setFieldContext(usableField);
+            setStoredFieldContext(usableField);
+          }
         }
         if (latestEditSnapshotKeyRef.current) {
           latestEditSnapshotKeyRef.current = '';
@@ -176,6 +186,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         }
         return;
       }
+
+      // 正在生成中 或 草稿已就绪（医生可能在看卡片内容）时，不因轮询丢失而清空字段
+      if (generatingContextKeyRef.current || fieldDraftStickyRef.current) return;
 
       if (latestFieldSnapshotKeyRef.current) {
         latestFieldSnapshotKeyRef.current = '';
@@ -219,9 +232,22 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   }, [editContextKey]);
 
   useEffect(() => {
+    setIsManuallyCollapsed(false);
     setSuggestionBatch(0);
     setCopyStatus('idle');
     setCopiedSuggestionId('');
+
+    if (fieldContextKey) {
+      const drafts = useFieldAssistStore.getState().drafts;
+      const restoredDraft = drafts.find((d) => d.contextKey === fieldContextKey);
+      if (restoredDraft) {
+        setFieldDraft(restoredDraft);
+        setFieldDraftStatus('ready');
+        setFieldStatusText('');
+        return;
+      }
+    }
+
     setFieldStatusText('');
     setFieldDraft(null);
     setFieldDraftStatus('idle');
@@ -229,12 +255,19 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
 
   useEffect(() => {
     if (fieldContext) {
-      const isWaitingForAutoGenerate =
-        fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft);
-      if (isWaitingForAutoGenerate || fieldDraftStatus === 'generating' || fieldDraftStatus === 'writing') {
+      // 用户手动收起后，不自动展开，直到新字段上下文到来
+      if (isManuallyCollapsed) {
         void collapseAssistantWindow();
         return;
       }
+      const isWaitingForAutoGenerate =
+        fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft);
+      if (isWaitingForAutoGenerate || fieldDraftStatus === 'generating') {
+        // 仅在等待自动生成和生成中时收缩为气泡
+        void collapseAssistantWindow();
+        return;
+      }
+      // ready / writing / written / error 都保持卡片展示
       void showAssistBubbleWindow();
       return;
     }
@@ -243,16 +276,19 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       return;
     }
     void collapseAssistantWindow();
-  }, [editContext, fieldContext, fieldDraft, fieldDraftStatus]);
+  }, [editContext, fieldContext, fieldDraft, fieldDraftStatus, isManuallyCollapsed]);
 
   useEffect(() => {
     if (!fieldContext || !shouldAutoGenerateField(fieldContext, fieldDraft)) return;
     const requestKey = `${fieldContextKey}:auto`;
     if (autoGenerateRequestKeysRef.current.has(requestKey)) return;
+    // 防竞态：如果已有另一个上下文正在生成，先等其取消
+    if (generatingContextKeyRef.current && generatingContextKeyRef.current !== fieldContextKey) return;
 
     let cancelled = false;
     let requestStarted = false;
     autoGenerateRequestKeysRef.current.add(requestKey);
+    generatingContextKeyRef.current = fieldContextKey;
     setFieldDraftStatus('generating');
     setFieldStatusText('正在生成');
 
@@ -278,6 +314,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       window.clearTimeout(timer);
       if (!requestStarted) {
         autoGenerateRequestKeysRef.current.delete(requestKey);
+      }
+      if (generatingContextKeyRef.current === fieldContextKey) {
+        generatingContextKeyRef.current = '';
       }
     };
   }, [addStoredFieldDraft, fieldContext, fieldContextKey, fieldDraft]);
@@ -309,25 +348,23 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
 
   const handleExpand = () => {
     if (fieldContext) {
-      const doc = getDocByCode(fieldContext.docCode);
-      if (doc) {
-        if (!currentPatient || currentPatient.id !== fieldContext.patientId) {
-          selectPatient({
-            id: fieldContext.patientId,
-            name: fieldContext.patientName,
-            gender: '',
-            age: '',
-            bedNo: '',
-            deptName: '',
-            admissionDate: '',
-            admissionDays: 0,
-            doctor: '林志远',
-            diagnosis: '',
-          });
-        }
-        selectDoc(doc);
-        navigate(`/doc/${doc.code}`);
+      if (!currentPatient || currentPatient.id !== fieldContext.patientId) {
+        selectPatient({
+          id: fieldContext.patientId,
+          name: fieldContext.patientName,
+          gender: '',
+          age: '',
+          bedNo: '',
+          deptName: '',
+          admissionDate: '',
+          admissionDays: 0,
+          doctor: '林志远',
+          diagnosis: '',
+        });
       }
+      const doc = getDocByCode(fieldContext.docCode);
+      if (doc) selectDoc(doc);
+      navigate(`/doc/${fieldContext.docCode}`);
       expand(detectedContext);
       void expandAssistantWindow();
       onExpand?.(detectedContext);
@@ -356,6 +393,12 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     handleExpand();
+  };
+
+  const handleCollapseToBubble = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setIsManuallyCollapsed(true);
+    void collapseAssistantWindow();
   };
 
   const handleWriteback = async (event: MouseEvent<HTMLButtonElement>) => {
@@ -555,7 +598,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     const isFieldBusy = fieldDraftStatus === 'generating' || fieldDraftStatus === 'writing';
     const canApplyField = Boolean(currentFieldDraft) && fieldDraftStatus === 'ready';
 
-    if (isFieldBusy || (fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft))) {
+    if (isFieldBusy || (fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft)) || isManuallyCollapsed) {
       return (
         <div
           role="button"
@@ -563,26 +606,43 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
           data-tauri-drag-region
           onDoubleClick={handleExpand}
           onKeyDown={handleShellKeyDown}
-          className="relative flex h-full w-full items-center gap-2 overflow-hidden border border-emerald-500 bg-white px-2.5 py-2 text-left shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-1"
+          className="relative flex h-full w-full items-center justify-between gap-2 overflow-hidden border border-emerald-500 bg-white px-2.5 py-2 text-left shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-1"
           style={{ cursor: 'move' }}
         >
-          <div
-            data-tauri-drag-region
-            className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-600"
-          >
-            <EditOutlined className="text-base animate-pulse" />
-            <span
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div
               data-tauri-drag-region
-              className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 shadow-sm"
-            />
+              className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-600"
+            >
+              <EditOutlined className={isFieldBusy ? "text-base animate-pen-writing" : "text-base"} />
+              <span
+                data-tauri-drag-region
+                className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 shadow-sm"
+              />
+            </div>
+            <div data-tauri-drag-region className="min-w-0 flex-1">
+              <div data-tauri-drag-region className="truncate text-[11px] font-bold text-emerald-700">
+                {fieldContext.fieldLabel}
+              </div>
+              <div data-tauri-drag-region className="mt-0.5 truncate text-[9px] font-medium text-slate-500">
+                {isManuallyCollapsed ? (fieldStatusText || fieldContext.docName) : (fieldDraftStatus === 'writing' ? '正在回填当前字段' : '正在书写当前字段')}
+              </div>
+            </div>
           </div>
-          <div data-tauri-drag-region className="min-w-0 flex-1">
-            <div data-tauri-drag-region className="truncate text-[11px] font-bold text-emerald-700">
-              {fieldContext.fieldLabel}
-            </div>
-            <div data-tauri-drag-region className="mt-0.5 truncate text-[9px] font-medium text-slate-500">
-              {fieldDraftStatus === 'writing' ? '正在回填当前字段' : '正在书写当前字段'}
-            </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {isDetected && detectedContext && detectedDocName && !isWorking ? (
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={handleRegenerateDraft}
+                className="h-7 px-2 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium"
+                title={draftStatus === 'ready' || draftStatus === 'error' ? '重新生成出院记录' : '生成出院记录'}
+                aria-label="生成出院记录"
+              >
+                <FileTextOutlined className="mr-1 text-xs" />
+                生成全文
+              </button>
+            ) : null}
           </div>
         </div>
       );
@@ -608,16 +668,41 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
                 {fieldContext.selectedText || fieldContext.prefix || fieldStatusText || fieldContext.docName}
               </div>
             </div>
-            <button
-              type="button"
-              data-tauri-drag-region="false"
-              onClick={handleExpand}
-              className="w-7 h-7 shrink-0 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100"
-              title="打开字段详情"
-              aria-label="打开字段详情"
-            >
-              <ArrowRightOutlined className="text-xs" />
-            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              {isDetected && detectedContext && detectedDocName && !isWorking ? (
+                <button
+                  type="button"
+                  data-tauri-drag-region="false"
+                  onClick={handleRegenerateDraft}
+                  className="h-7 px-2 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium"
+                  title={draftStatus === 'ready' || draftStatus === 'error' ? '重新生成出院记录' : '生成出院记录'}
+                  aria-label="生成出院记录"
+                >
+                  <FileTextOutlined className="mr-1 text-xs" />
+                  生成全文
+                </button>
+              ) : null}
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={handleCollapseToBubble}
+                className="w-7 h-7 flex items-center justify-center bg-white border border-emerald-200 text-slate-500 hover:bg-slate-50"
+                title="收起为气泡"
+                aria-label="收起为气泡"
+              >
+                <MinusOutlined className="text-xs" />
+              </button>
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={handleExpand}
+                className="w-7 h-7 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+                title="打开字段详情"
+                aria-label="打开字段详情"
+              >
+                <ArrowRightOutlined className="text-xs" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -679,22 +764,31 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
           </>
         ) : (
           <>
-            <div className="flex-1 min-h-0 px-3 py-2 flex items-center gap-2">
-              <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600">
-                {isFieldBusy ? <EditOutlined className="text-sm animate-pulse" /> : <FileTextOutlined className="text-sm" />}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-bold text-slate-800 truncate">
-                  {fieldDraftStatus === 'ready' || fieldDraftStatus === 'written'
-                    ? (fieldDraft?.generatedText || '').slice(0, 36) || '字段草稿已生成'
-                    : fieldStatusText || '等待当前字段'}
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 flex flex-col gap-2">
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md bg-emerald-50 text-emerald-600">
+                  {isFieldBusy ? <EditOutlined className="text-sm animate-pen-writing" /> : <FileTextOutlined className="text-sm" />}
                 </div>
-                <div className="mt-0.5 text-[9px] text-slate-500 truncate">
-                  {fieldContext.patientName} · {fieldContext.docName}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-bold text-slate-800 truncate">
+                    {fieldContext.fieldLabel}
+                  </div>
+                  <div className="mt-0.5 text-[9px] text-slate-500 truncate">
+                    {fieldContext.patientName} · {fieldContext.docName}
+                  </div>
                 </div>
               </div>
+              {(fieldDraftStatus === 'ready' || fieldDraftStatus === 'written') && fieldDraft?.generatedText ? (
+                <div className="text-[11px] leading-[1.6] text-slate-700 whitespace-pre-wrap break-all">
+                  {fieldDraft.generatedText}
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-500">
+                  {fieldStatusText || '等待当前字段'}
+                </div>
+              )}
             </div>
-            <div className="px-2.5 py-2 border-t border-slate-100 flex items-center justify-between gap-2">
+            <div className="px-2.5 py-2 border-t border-slate-100 flex items-center justify-between gap-2 shrink-0">
               <button
                 type="button"
                 data-tauri-drag-region="false"

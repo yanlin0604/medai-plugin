@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
 import {
-  ExpandAltOutlined,
   HistoryOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -185,6 +185,8 @@ function renderMetaCell(
 }
 
 export default function DischargeFlow({ doc }: ParadigmProps) {
+  const [searchParams] = useSearchParams();
+  const readOnlyEntry = searchParams.get('mode') === 'read';
   const { currentPatient } = usePatientStore();
   const patient = currentPatient!;
   const patientBrief = useMemo<PatientBrief>(
@@ -207,7 +209,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   const [reloadToken, setReloadToken] = useState(0);
   const [runtimeRegenerating, setRuntimeRegenerating] = useState(false);
   const [regeneratingSectionKey, setRegeneratingSectionKey] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('edit');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
   const [sectionResetKeys, setSectionResetKeys] = useState<Record<string, number>>({});
   const [activeSectionKey, setActiveSectionKey] = useState<string | null>(null);
   const [evidenceBundle, setEvidenceBundle] = useState<RuntimeEvidenceBundleDto | null>(null);
@@ -422,7 +424,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   const finalContent = submitSnapshot.content;
 
   useEffect(() => {
-    if (!hydratedRef.current || locked) return;
+    if (readOnlyEntry || !hydratedRef.current || locked) return;
     const t = window.setTimeout(() => {
       const values: Record<string, FieldValue> = Object.fromEntries(sections.map((section) => [section.key, section.text]));
       values.dischargeDiagnoses = acceptedDiagnoses;
@@ -761,11 +763,11 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
       doc={doc}
       showParadigmBadge={false}
       showPatientId={false}
-      actions={renderActionButton(
-        <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
-        openHistory,
-        '历史版本与修改记录',
-      )}
+        actions={!readOnlyEntry ? renderActionButton(
+          <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
+          openHistory,
+          '历史版本与修改记录',
+        ) : null}
     >
       <div className="h-full flex flex-col overflow-hidden bg-white">
         <div className="flex-1 overflow-y-auto">
@@ -806,13 +808,8 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
               patient={patientBrief}
               sections={bodySections}
               metaRows={metaRows}
-              actions={(
+              actions={!readOnlyEntry ? (
                 <div className="flex flex-wrap justify-end gap-1.5">
-                  {renderActionButton(
-                    <><ReloadOutlined />对话</>,
-                    () => setPreviewMode('edit'),
-                    '进入出院记录对话',
-                  )}
                   {renderActionButton(
                     <><ReloadOutlined className={runtimeRegenerating ? 'animate-spin' : undefined} />重新生成全部</>,
                     () => void regenerateAllSections(),
@@ -820,7 +817,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
                     regenerationDisabled,
                   )}
                 </div>
-              )}
+              ) : null}
             />
           ) : (
             <div className="min-h-full">
@@ -838,13 +835,10 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
                         '重新请求后台字段生成并覆盖当前正文',
                         regenerationDisabled,
                       )}
-                      {renderActionButton(
-                        <><ExpandAltOutlined />通读全文</>,
-                        () => {
-                          resetEvidenceWorkspace();
-                          setPreviewMode('read');
-                        },
-                      )}
+                      {!readOnlyEntry && renderActionButton(<span>通读全文</span>, () => {
+                        resetEvidenceWorkspace();
+                        setPreviewMode('read');
+                      })}
                     </div>
                   )}
                   locked={locked}
@@ -875,19 +869,21 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
           )}
         </div>
 
-        <WritebackBar
-          label="提交出院记录"
-          onWriteback={handleSubmit}
-          locked={locked}
-          disabled={runtimeLoading || runtimeValuesLoading || Boolean(runtimeError) || !sections.length || runtimeRegenerating || Boolean(regeneratingSectionKey)}
-          busy={submitting}
-          busyText={submitText}
-          progress={submitProgress}
-          onUnlock={() => {
-            setLocked(false);
-            message.info('已解除锁定，可重新编辑后再次提交。');
-          }}
-        />
+        {!readOnlyEntry && (
+          <WritebackBar
+            label="提交出院记录"
+            onWriteback={handleSubmit}
+            locked={locked}
+            disabled={runtimeLoading || runtimeValuesLoading || Boolean(runtimeError) || !sections.length || runtimeRegenerating || Boolean(regeneratingSectionKey)}
+            busy={submitting}
+            busyText={submitText}
+            progress={submitProgress}
+            onUnlock={() => {
+              setLocked(false);
+              message.info('已解除锁定，可重新编辑后再次提交。');
+            }}
+          />
+        )}
 
         <VersionHistoryDrawer
           open={historyOpen}

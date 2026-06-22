@@ -6,6 +6,7 @@ import { getFieldAssistContextKey } from './types';
 export async function generateFieldDraft(
   context: FieldAssistContext,
   instruction?: string,
+  transcriptText?: string,
 ): Promise<FieldAssistDraft> {
   const response: RuntimeFieldCompletionResponse = await pluginRuntimeApi.completeField({
     patientId: context.patientId,
@@ -17,6 +18,8 @@ export async function generateFieldDraft(
     currentText: context.fieldValue,
     selectedText: context.selectedText,
     mode: context.selectedText ? 'rewrite_selection' : context.fieldValue.trim() ? 'append' : 'generate',
+    instruction,
+    transcriptText,
   });
 
   return {

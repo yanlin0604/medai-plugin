@@ -61,6 +61,19 @@ export function getFieldAssistContextKey(
   return `${context.patientId}:${context.docCode}:${context.fieldKey}:${context.sessionId}`;
 }
 
+export function getFieldAssistSnapshotKey(context: FieldAssistContext) {
+  return [
+    getFieldAssistContextKey(context),
+    context.fieldValue,
+    context.selectedText,
+    context.prefix,
+    context.selectionStart,
+    context.selectionEnd,
+    context.trigger,
+    context.writebackUrl,
+  ].join('|');
+}
+
 export function getFieldIdentityKey(
   context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey'>,
 ) {

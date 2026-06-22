@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { activateEmrContext } from '../../services/emrContext/activateEmrContext';
 import { watchEmrContext } from '../../services/emrContext/watchEmrContext';
 import { getBubbleContextKey, useBubbleStore } from '../../stores/useBubbleStore';
@@ -7,6 +7,7 @@ import { usePatientStore } from '../../stores/usePatientStore';
 
 export default function ExpandedEmrContextBridge() {
   const navigate = useNavigate();
+  const location = useLocation();
   const setDetectedContext = useBubbleStore((state) => state.setDetectedContext);
   const markActivated = useBubbleStore((state) => state.markActivated);
   const selectPatient = usePatientStore((state) => state.selectPatient);
@@ -29,11 +30,12 @@ export default function ExpandedEmrContextBridge() {
 
       lastContextKeyRef.current = contextKey;
       markActivated(contextKey);
+      if (location.pathname === `/doc/${activation.docCode}`) return;
       navigate(`/doc/${activation.docCode}`);
     });
 
     return cleanup;
-  }, [markActivated, navigate, selectDoc, selectPatient, setDetectedContext]);
+  }, [location.pathname, markActivated, navigate, selectDoc, selectPatient, setDetectedContext]);
 
   return null;
 }

@@ -197,6 +197,8 @@ export interface RuntimeFieldCompletionRequest {
   selectedEvidenceIds?: string[];
   selectedText?: string;
   mode?: RuntimeFieldCompletionMode;
+  instruction?: string;
+  transcriptText?: string;
 }
 
 export interface RuntimeFieldCompletionResponse {

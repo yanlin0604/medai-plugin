@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
-import { ExpandAltOutlined, HistoryOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons';
+import { ExpandAltOutlined, HistoryOutlined, TeamOutlined } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
 import DocumentPaper, { type DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
@@ -193,12 +194,14 @@ function buildMetaRows(config: SummaryConfig, patient: SummaryPatient): Document
 }
 
 export default function SummaryDocumentFlow({ doc, config }: Props) {
+  const [searchParams] = useSearchParams();
+  const readOnlyEntry = searchParams.get('mode') === 'read';
   const [idx, setIdx] = useState(0);
   const patient = config.patients[idx] ?? config.patients[0];
   const baseSections = useMemo(() => buildSections(doc.code, doc.name, patient), [doc.code, doc.name, patient]);
   const [sections, setSections] = useState<ClinicalSection[]>(baseSections);
   const [resetKeys, setResetKeys] = useState<Record<string, number>>({});
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
   const {
     locked,
     setLocked,
@@ -231,11 +234,11 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
       setLocked(false);
     }
     setResetKeys({});
-    setPreviewMode('edit');
-  }, [baseSections, doc.code, patient.admissionNo, setLocked]);
+    setPreviewMode(readOnlyEntry ? 'read' : 'edit');
+  }, [baseSections, doc.code, patient.admissionNo, readOnlyEntry, setLocked]);
 
   useEffect(() => {
-    if (locked) return;
+    if (readOnlyEntry || locked) return;
     const t = window.setTimeout(() => {
       const values: Record<string, FieldValue> = Object.fromEntries(sections.map((section) => [section.key, section.text]));
       saveDraft({
@@ -249,7 +252,7 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
       });
     }, 800);
     return () => window.clearTimeout(t);
-  }, [doc.code, locked, patient.admissionNo, sections]);
+  }, [doc.code, locked, patient.admissionNo, readOnlyEntry, sections]);
 
   const updateSection = (sectionKey: string, text: string) => {
     setSections((prev) => prev.map((section) => (section.key === sectionKey ? { ...section, text } : section)));
@@ -320,7 +323,7 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
       doc={doc}
       showParadigmBadge={false}
       showPatientId={false}
-      actions={renderActionButton(
+      actions={!readOnlyEntry ? renderActionButton(
         <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
         () => {
           if (!versionCount) {
@@ -330,7 +333,7 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
           openHistory();
         },
         '历史版本与修改记录',
-      )}
+      ) : null}
     >
       <div className="h-full flex flex-col overflow-hidden bg-white">
         {config.multiPatient && (
@@ -374,11 +377,6 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
                 patient={patient}
                 sections={sections}
                 metaRows={buildMetaRows(config, patient)}
-                actions={renderActionButton(
-                  <><ReloadOutlined />对话</>,
-                  () => setPreviewMode('edit'),
-                  `进入${doc.name}对话`,
-                )}
               />
             </div>
           ) : (
@@ -387,7 +385,7 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
                 patient={patient}
                 sections={sections}
                 metaRows={buildMetaRows(config, patient)}
-                actions={renderActionButton(<><ExpandAltOutlined />通读全文</>, () => setPreviewMode('read'))}
+                actions={!readOnlyEntry ? renderActionButton(<><ExpandAltOutlined />通读全文</>, () => setPreviewMode('read')) : null}
                 locked={locked}
                 resetKeys={resetKeys}
                 onChange={updateSection}
@@ -397,19 +395,21 @@ export default function SummaryDocumentFlow({ doc, config }: Props) {
           )}
         </div>
 
-        <WritebackBar
-          label={buildSubmitLabel(doc.name)}
-          onWriteback={handleSubmit}
-          locked={locked}
-          disabled={mismatch}
-          busy={submitting}
-          busyText={submitText}
-          progress={submitProgress}
-          onUnlock={() => {
-            setLocked(false);
-            message.info('已解除锁定，可重新编辑后再次提交。');
-          }}
-        />
+        {!readOnlyEntry && (
+          <WritebackBar
+            label={buildSubmitLabel(doc.name)}
+            onWriteback={handleSubmit}
+            locked={locked}
+            disabled={mismatch}
+            busy={submitting}
+            busyText={submitText}
+            progress={submitProgress}
+            onUnlock={() => {
+              setLocked(false);
+              message.info('已解除锁定，可重新编辑后再次提交。');
+            }}
+          />
+        )}
 
         <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={patient.admissionNo} />
       </div>

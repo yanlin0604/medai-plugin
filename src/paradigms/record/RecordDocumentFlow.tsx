@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
 import {
   ExpandAltOutlined,
   HistoryOutlined,
-  ReloadOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
@@ -100,7 +103,10 @@ function buildMetaRows(config: RecordConfig): DocumentPaperMetaCell[][] {
 }
 
 export default function RecordDocumentFlow({ doc, config }: Props) {
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('read');
+  const [searchParams] = useSearchParams();
+  const readOnlyEntry = searchParams.get('mode') === 'read';
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
+  const [voicePanelOpen, setVoicePanelOpen] = useState(true);
   const [diagnoses, setDiagnoses] = useState<IcdItem[]>([]);
   const diagnosisText = useMemo(() => diagnoses.map((item) => `${item.name} ${item.code}`).join('；'), [diagnoses]);
   const baseSections = useMemo(() => buildSections(doc.code, doc.name, config, diagnosisText), [config, diagnosisText, doc.code, doc.name]);
@@ -140,8 +146,8 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
       setLocked(false);
     }
     setResetKeys({});
-    setPreviewMode('edit');
-  }, [baseSections, config.patient.admissionNo, doc.code, setLocked]);
+    setPreviewMode(readOnlyEntry ? 'read' : 'edit');
+  }, [baseSections, config.dictationInit, config.patient.admissionNo, doc.code, readOnlyEntry, setLocked]);
 
   useEffect(() => {
     setSections((prev) => prev.map((section) => (
@@ -150,7 +156,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
   }, [diagnosisText]);
 
   useEffect(() => {
-    if (locked) return;
+    if (readOnlyEntry || locked) return;
     const t = window.setTimeout(() => {
       const values: Record<string, FieldValue> = Object.fromEntries(sections.map((section) => [section.key, section.text]));
       values.relatedDiagnoses = diagnoses;
@@ -165,7 +171,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
       });
     }, 800);
     return () => window.clearTimeout(t);
-  }, [config.patient.admissionNo, diagnoses, doc.code, locked, sections]);
+  }, [config.patient.admissionNo, diagnoses, dictation, doc.code, locked, readOnlyEntry, sections]);
 
   const updateSection = (sectionKey: string, text: string) => {
     setSections((prev) => prev.map((section) => (section.key === sectionKey ? { ...section, text } : section)));
@@ -238,7 +244,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
       doc={doc}
       showParadigmBadge={false}
       showPatientId={false}
-      actions={renderActionButton(
+      actions={!readOnlyEntry ? renderActionButton(
         <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
         () => {
           if (!versionCount) {
@@ -248,7 +254,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
           openHistory();
         },
         '历史版本与修改记录',
-      )}
+      ) : null}
     >
       <div className="h-full flex overflow-hidden bg-white">
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -260,11 +266,6 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
                 patient={config.patient}
                 sections={sections}
                 metaRows={buildMetaRows(config)}
-                actions={renderActionButton(
-                  <><ReloadOutlined />对话</>,
-                  () => setPreviewMode('edit'),
-                  `进入${doc.name}对话`,
-                )}
               />
             ) : (
               <DocumentChatWorkspace
@@ -272,7 +273,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
                   patient={config.patient}
                   sections={sections}
                   metaRows={buildMetaRows(config)}
-                  actions={renderActionButton(<><ExpandAltOutlined />通读全文</>, () => setPreviewMode('read'))}
+                  actions={!readOnlyEntry ? renderActionButton(<><ExpandAltOutlined />通读全文</>, () => setPreviewMode('read')) : null}
                   locked={locked}
                   resetKeys={resetKeys}
                   onChange={updateSection}
@@ -281,20 +282,71 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
                 />
             )}
           </div>
-          <WritebackBar
-            label={buildSubmitLabel(doc.name)}
-            onWriteback={handleSubmit}
-            locked={locked}
-            disabled={mismatch}
-            busy={submitting}
-            busyText={submitText}
-            progress={submitProgress}
-            onUnlock={() => {
-              setLocked(false);
-              message.info('已解除锁定，可重新编辑后再次提交。');
-            }}
-          />
+          {!readOnlyEntry && (
+            <WritebackBar
+              label={buildSubmitLabel(doc.name)}
+              onWriteback={handleSubmit}
+              locked={locked}
+              disabled={mismatch}
+              busy={submitting}
+              busyText={submitText}
+              progress={submitProgress}
+              onUnlock={() => {
+                setLocked(false);
+                message.info('已解除锁定，可重新编辑后再次提交。');
+              }}
+            />
+          )}
         </main>
+
+        {!readOnlyEntry && <aside
+          className={`${voicePanelOpen ? 'w-[360px]' : 'w-[52px]'} shrink-0 border-l border-slate-200 bg-white shadow-[-10px_0_30px_rgba(15,23,42,0.03)] transition-[width] duration-200 ease-out`}
+        >
+          {voicePanelOpen ? (
+            <>
+              <div className="flex items-center gap-2 border-b border-[#1E3A8A]/10 bg-[#F0F5FF] px-4 py-3 text-[13px] font-bold text-[#1E3A8A]">
+                <span className="min-w-0 flex-1 truncate">{config.topCardText}</span>
+                <button
+                  type="button"
+                  onClick={() => setVoicePanelOpen(false)}
+                  title="收起语音面板"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#BFDBFE] bg-white/70 text-[#1E3A8A] hover:bg-white"
+                >
+                  <MenuFoldOutlined />
+                </button>
+              </div>
+              <div className="h-[calc(100%-52px)] overflow-y-auto p-4 space-y-4">
+                {config.showTimelinePanel !== false && (
+                  <ObjectiveTimeline title={config.timelineTitle} nodes={config.timeline} />
+                )}
+                <DictationConsole
+                  title={config.dictationTitle}
+                  value={dictation}
+                  onChange={setDictation}
+                  mockTranscript={config.dictationMock}
+                />
+                <button
+                  onClick={appendDictationToDraft}
+                  disabled={locked}
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-bold text-[#1E3A8A] hover:bg-[#DBEAFE] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PlusOutlined />
+                  并入口述段落
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setVoicePanelOpen(true)}
+              title="展开语音面板"
+              className="flex h-full w-full flex-col items-center gap-2 bg-[#F8FAFC] px-2 py-4 text-[#1E3A8A] hover:bg-[#F0F5FF]"
+            >
+              <MenuUnfoldOutlined />
+              <span className="text-[12px] font-bold [writing-mode:vertical-rl]">语音</span>
+            </button>
+          )}
+        </aside>}
 
         <VersionHistoryDrawer open={historyOpen} onClose={closeHistory} docCode={doc.code} patientId={config.patient.admissionNo} />
       </div>

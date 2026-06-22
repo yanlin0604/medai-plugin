@@ -237,8 +237,10 @@ export default function AppLayout() {
     if (p) {
       selectPatient(p);
       message.success(`已读取病历系统当前患者：${p.name}（住院号 ${p.id}）`);
+      return true;
     } else {
       message.warning('病历系统当前无活动患者，请先在病历系统中选定患者');
+      return false;
     }
   };
 
@@ -267,17 +269,18 @@ export default function AppLayout() {
   const loginDoctorName = session?.doctorName ?? currentPatient?.doctor ?? '未识别医生';
   const loginDeptName = session?.deptName ?? currentPatient?.deptName ?? '病历系统';
 
-  // 点击文书：未关联患者先引导读取，已关联则进入对应范式工作区
+  // 点击文书：未关联患者先引导读取，已关联则进入字段助手工作台
   const handleSelectDoc = (doc: DocDefinition) => {
     if (!currentPatient) {
       Modal.confirm({
         title: '需要关联患者',
         icon: <ExclamationCircleOutlined className="text-amber-500" />,
-        content: `书写「${doc.name}」需要病历系统存在活动患者。是否读取当前活动患者并开始？`,
-        okText: '读取并开始书写',
+        content: `使用「${doc.name}」字段助手需要病历系统存在活动患者。是否读取当前活动患者并进入？`,
+        okText: '读取并进入',
         cancelText: '取消',
         onOk: async () => {
-          await handleReadActivePatient();
+          const linked = await handleReadActivePatient();
+          if (!linked) return;
           selectDoc(doc);
           navigate(`/doc/${doc.code}`);
         },
@@ -426,7 +429,7 @@ export default function AppLayout() {
               <div className="mb-2 flex items-center justify-between px-0.5">
                 <div>
                   <div className="text-[12px] font-bold text-slate-800">病历文书</div>
-                  <div className="text-[10px] text-slate-400">选择文书进入书写工作区</div>
+                  <div className="text-[10px] text-slate-400">选择文书进入字段助手</div>
                 </div>
                 <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">
                   {runtimeDocs.length} 项
@@ -446,7 +449,7 @@ export default function AppLayout() {
                   <div className="text-[13px] font-bold text-slate-800 group-hover:text-[#1E3A8A] truncate transition-colors">
                     {doc.name}
                   </div>
-                  <div className="mt-0.5 text-[10px] font-medium text-slate-400">点击开始书写</div>
+                  <div className="mt-0.5 text-[10px] font-medium text-slate-400">进入字段助手</div>
                 </div>
               </button>
               ))}
