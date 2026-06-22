@@ -348,8 +348,9 @@ export async function resolveRuntimeValues(
 ): Promise<RuntimeDocValues> {
   try {
     return await requestRuntime<RuntimeDocValueBundleDto>(
-      http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
-        params: { patientIdHis, skipGeneration },
+      http.post(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
+        patientIdHis,
+        skipGeneration,
       }),
     );
   } catch {
@@ -362,18 +363,6 @@ export async function resolveRuntimeValues(
       resolvedAt: new Date().toISOString(),
     };
   }
-}
-
-export async function resolveRuntimeFieldValue(
-  docCode: string,
-  patientIdHis: string,
-  fieldKey: string,
-): Promise<RuntimeDocValues> {
-  return requestRuntime<RuntimeDocValueBundleDto>(
-    http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/fields/${encodePath(fieldKey)}/value`, {
-      params: { patientIdHis },
-    }),
-  );
 }
 
 export async function getEvidence(request: RuntimeEvidenceQueryRequest): Promise<RuntimeEvidenceBundleDto> {
@@ -451,7 +440,6 @@ export const pluginRuntimeApi = {
   getRuntimeTemplate,
   getRuntimeDocTemplate,
   resolveRuntimeValues,
-  resolveRuntimeFieldValue,
   getEvidence,
   completeField,
   auditFieldWriteback,

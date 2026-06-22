@@ -4,7 +4,6 @@ const { mockPluginRuntimeApi } = vi.hoisted(() => ({
   mockPluginRuntimeApi: {
     getRuntimeTemplate: vi.fn(),
     resolveRuntimeValues: vi.fn(),
-    resolveRuntimeFieldValue: vi.fn(),
   },
 }));
 
@@ -35,7 +34,6 @@ import {
   clearDischargeRuntimeCache,
   isDischargeMetaSection,
   loadDischargeRuntime,
-  loadDischargeRuntimeField,
 } from './dischargeRuntime';
 import type {
   RuntimeDocFieldDto,
@@ -93,7 +91,6 @@ describe('dischargeRuntime', () => {
   beforeEach(() => {
     mockPluginRuntimeApi.getRuntimeTemplate.mockReset();
     mockPluginRuntimeApi.resolveRuntimeValues.mockReset();
-    mockPluginRuntimeApi.resolveRuntimeFieldValue.mockReset();
     clearDischargeRuntimeCache();
   });
 
@@ -267,41 +264,6 @@ describe('dischargeRuntime', () => {
     });
   });
 
-  it('loads and maps one runtime field without resolving the whole document again', async () => {
-    const runtimeTemplate = template([
-      field({
-        fieldKey: 'treatmentCourse',
-        fieldLabel: '诊疗经过',
-        sectionName: '诊疗经过',
-        fieldOrder: 20,
-        sourceType: 'emr',
-        inputType: 'text',
-        writebackFieldKey: 'bs.treatment_course',
-        renderRule: { metaSlot: 'body', editable: true },
-      }),
-    ]);
-    mockPluginRuntimeApi.resolveRuntimeFieldValue.mockResolvedValue(values({
-      values: {
-        treatmentCourse: {
-          fieldKey: 'treatmentCourse',
-          value: '单字段重新生成内容。',
-          sourceType: 'emr',
-          warnings: ['单字段证据不足'],
-        },
-      },
-    }));
-
-    const fieldState = await loadDischargeRuntimeField('DOC888', 'ZY001', 'treatmentCourse', runtimeTemplate);
-
-    expect(fieldState.section).toMatchObject({
-      key: 'treatmentCourse',
-      title: '诊疗经过',
-      text: '单字段重新生成内容。',
-    });
-    expect(fieldState.readOnlyHint).toBe('单字段证据不足');
-    expect(mockPluginRuntimeApi.resolveRuntimeFieldValue).toHaveBeenCalledWith('DOC888', 'ZY001', 'treatmentCourse');
-    expect(mockPluginRuntimeApi.resolveRuntimeValues).not.toHaveBeenCalled();
-  });
 
   it('maps a single runtime field from an already loaded value bundle', () => {
     const fieldState = buildDischargeRuntimeField(

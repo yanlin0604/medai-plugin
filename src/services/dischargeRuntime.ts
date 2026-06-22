@@ -104,15 +104,6 @@ export async function loadDischargeRuntimeValues(
   return runtime;
 }
 
-export async function loadDischargeRuntimeField(
-  docCode: string,
-  patientIdHis: string,
-  fieldKey: string,
-  template: RuntimeDocTemplateDto,
-): Promise<DischargeRuntimeFieldState> {
-  const values = await pluginRuntimeApi.resolveRuntimeFieldValue(docCode, patientIdHis, fieldKey);
-  return buildDischargeRuntimeField(template, values, fieldKey);
-}
 
 export function buildDischargeRuntime(
   template: RuntimeDocTemplateDto,
