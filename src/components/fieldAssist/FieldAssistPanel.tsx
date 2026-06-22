@@ -77,12 +77,32 @@ export function renderTextWithCitations(text: string, evidenceSummary?: RuntimeE
                   : evidence.sourceSystem;
                 
                 const content = (
-                  <div className="max-w-[280px] text-[11px] leading-relaxed">
-                    <div className="font-bold mb-1 text-slate-800">{evidence.title || '证据详情'}</div>
-                    {displaySourceSystem && (
-                      <div className="text-slate-500 mb-1">来源系统：{displaySourceSystem}</div>
-                    )}
-                    <div className="text-slate-600 whitespace-pre-wrap max-h-[240px] overflow-y-auto pr-1.5 custom-scrollbar">{evidence.summary}</div>
+                  <div className="w-[360px] max-w-[85vw] flex flex-col text-[12px] leading-relaxed max-h-[60vh]">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2 shrink-0">
+                      <div className="font-bold text-slate-800 flex-1 truncate mr-2" title={evidence.title}>{evidence.title || '证据来源'}</div>
+                      {displaySourceSystem && (
+                        <div className="text-[11px] text-slate-400 shrink-0">{displaySourceSystem}</div>
+                      )}
+                    </div>
+                    
+                    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar pr-2 pb-1" onWheel={(e) => e.stopPropagation()}>
+                      {evidence.summary && (
+                        <div className="rounded-md bg-blue-50/80 p-2.5 text-blue-900 font-medium whitespace-pre-wrap border border-blue-100/50 shadow-sm leading-[1.6]">
+                          {evidence.summary}
+                        </div>
+                      )}
+                      
+                      {evidence.originalText && evidence.originalText.trim() !== (evidence.summary || '').trim() && (
+                        <details className="mt-3 text-[11px] text-slate-500 pb-1">
+                          <summary className="cursor-pointer hover:text-slate-700 select-none font-medium mb-1.5 outline-none transition-colors">
+                            展开完整上下文
+                          </summary>
+                          <div className="whitespace-pre-wrap pl-2.5 border-l-2 border-slate-200 mt-2 py-0.5">
+                            {evidence.originalText}
+                          </div>
+                        </details>
+                      )}
+                    </div>
                   </div>
                 );
                 return (

@@ -182,6 +182,7 @@ export interface RuntimeEvidenceSummaryDto {
   occurredAt?: string;
   title?: string;
   summary?: string;
+  originalText?: string;
   abnormalFlag?: string;
   confidence?: string;
 }
