@@ -12,8 +12,9 @@ import {
   SendOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import { message } from 'antd';
+import { message, Popover, Tag } from 'antd';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
+import type { RuntimeEvidenceSummaryDto } from '../../services/pluginRuntimeTypes';
 import { usePatientStore } from '../../stores/usePatientStore';
 import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../services/fieldAssist/contextBridge';
 import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
@@ -35,6 +36,66 @@ function getDraftTitle(draft: FieldAssistDraft) {
   if (draft.instruction?.includes('语音原文')) return '语音原文';
   if (draft.source === 'suggestion') return '候选回填';
   return '字段生成';
+}
+
+export function renderTextWithCitations(text: string, evidenceSummary?: RuntimeEvidenceSummaryDto[]) {
+  if (!text) return null;
+  const parts = text.split(/(\[[a-zA-Z0-9\-_,，\s]+\])/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (/^\[[a-zA-Z0-9\-_,，\s]+\]$/.test(part)) {
+          const match = part.match(/[a-zA-Z0-9\-_]+/g);
+          if (!match || !evidenceSummary?.length) return <span key={i}>{part}</span>;
+          
+          return (
+            <span key={i} className="inline-flex items-center">
+              {match.map((idStr, j) => {
+                let evidence: RuntimeEvidenceSummaryDto | undefined;
+                let displayNum = idStr;
+                
+                if (/^\d+$/.test(idStr)) {
+                  const idx = parseInt(idStr, 10) - 1;
+                  evidence = evidenceSummary[idx];
+                } else {
+                  const idx = evidenceSummary.findIndex(e => e.evidenceId === idStr);
+                  if (idx !== -1) {
+                    evidence = evidenceSummary[idx];
+                    displayNum = String(idx + 1);
+                  } else {
+                    const partialIdx = evidenceSummary.findIndex(e => e.evidenceId?.includes(idStr));
+                    if (partialIdx !== -1) {
+                      evidence = evidenceSummary[partialIdx];
+                      displayNum = String(partialIdx + 1);
+                    }
+                  }
+                }
+                
+                if (!evidence) return <span key={`${i}-${j}`}>[{idStr}]</span>;
+                const content = (
+                  <div className="max-w-[280px] text-[11px] leading-relaxed">
+                    <div className="font-bold mb-1 text-slate-800">{evidence.title || '证据详情'}</div>
+                    {evidence.sourceSystem && (
+                      <div className="text-slate-500 mb-1">来源系统：{evidence.sourceSystem}</div>
+                    )}
+                    <div className="text-slate-600 whitespace-pre-wrap">{evidence.summary}</div>
+                  </div>
+                );
+                return (
+                  <Popover key={`${i}-${j}`} content={content} trigger="click" overlayInnerStyle={{ padding: '8px 12px' }}>
+                    <Tag color="blue" className="mx-[1px] px-1 py-0 cursor-pointer hover:bg-blue-100 border-blue-200 leading-tight" title="点击查看出处">
+                      {displayNum}
+                    </Tag>
+                  </Popover>
+                );
+              })}
+            </span>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
 }
 
 export default function FieldAssistPanel() {
@@ -311,7 +372,7 @@ export default function FieldAssistPanel() {
                   </div>
                 ) : null}
                 <p className="m-0 whitespace-pre-wrap text-sm leading-6 text-slate-800">
-                  {draft.generatedText || draft.response.generatedText}
+                  {renderTextWithCitations(draft.generatedText || draft.response.generatedText || '', draft.response.evidenceSummary)}
                 </p>
                 {(draft.response.evidenceSummary ?? []).length > 0 ? (
                   <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-[11px] leading-5 text-[#1E3A8A]">
