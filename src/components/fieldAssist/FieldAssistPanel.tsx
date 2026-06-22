@@ -265,7 +265,6 @@ export default function FieldAssistPanel() {
         response: draft.response,
         doctorName: '林志远 主治医师',
       });
-      message.success('已回填当前字段');
     } catch (error) {
       message.error(error instanceof Error ? error.message : '回填失败');
     } finally {

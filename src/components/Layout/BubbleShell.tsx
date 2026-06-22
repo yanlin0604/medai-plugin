@@ -536,7 +536,6 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     })
       .then(() => {
         setFieldDraftStatus('written');
-        setFieldStatusText('已回填当前字段');
       })
       .catch((error) => {
         setFieldDraftStatus('error');
@@ -559,7 +558,6 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     })
       .then(() => {
         setFieldDraftStatus('written');
-        setFieldStatusText('已回填当前字段');
       })
       .catch((error) => {
         setFieldDraftStatus('error');
