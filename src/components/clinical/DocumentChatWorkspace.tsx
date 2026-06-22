@@ -182,21 +182,32 @@ export default function DocumentChatWorkspace({
             const rewrite = pendingRewrite?.sectionKey === section.key ? pendingRewrite : null;
 
             return (
-              <article key={`${section.key}-${resetKeys?.[section.key] ?? 0}`} className="space-y-2">
-                <div className="flex justify-end">
-                  <div className="max-w-[78%] rounded-lg bg-[#1E3A8A] px-3 py-2 text-xs font-semibold leading-relaxed text-white shadow-sm">
-                    处理「{section.title}」
-                  </div>
-                </div>
-
-                {!disabled ? (
-                  <div className="ml-10 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-[11px] font-bold text-slate-600">
-                        本次回复：{section.title}
+              <article
+                key={`${section.key}-${resetKeys?.[section.key] ?? 0}`}
+                className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
+              >
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md bg-[#F0F5FF] px-2 py-1 text-[11px] font-extrabold text-[#1E3A8A]">
+                        概括总结
                       </span>
+                      {section.required ? (
+                        <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
+                          必填
+                        </span>
+                      ) : null}
+                      {edited ? (
+                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">
+                          已修改
+                        </span>
+                      ) : null}
                       {suffix}
                     </div>
+                    <h4 className="mt-2 truncate text-sm font-extrabold text-slate-900">{section.title}</h4>
+                  </div>
+
+                  {!disabled ? (
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                       {onRegenerateSection ? (
                         <button
@@ -204,7 +215,7 @@ export default function DocumentChatWorkspace({
                           onClick={() => onRegenerateSection(section.key)}
                           disabled={regenerating || optimizing}
                           className="inline-flex h-7 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          title="重新生成这次回复"
+                          title="重新生成当前概括总结"
                         >
                           {regenerating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}
                           重新生成
@@ -216,7 +227,7 @@ export default function DocumentChatWorkspace({
                           onClick={() => void runOptimize(section)}
                           disabled={regenerating || optimizing}
                           className="inline-flex h-7 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-[11px] font-bold text-[#1E3A8A] hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          title="补全当前回复"
+                          title="补全当前概括总结"
                         >
                           {optimizing ? <Loading3QuartersOutlined className="animate-spin" /> : <ThunderboltOutlined />}
                           补全
@@ -228,64 +239,52 @@ export default function DocumentChatWorkspace({
                           onClick={() => onReset(section.key)}
                           disabled={regenerating || optimizing}
                           className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 text-[11px] font-bold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          title="撤销医生对这次回复的修改"
+                          title="撤销医生对当前概括总结的修改"
                         >
                           <UndoOutlined />
                           重置
                         </button>
                       ) : null}
                     </div>
-                  </div>
-                ) : null}
-
-                <div className="mr-8 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="min-w-0 truncate text-[12px] font-extrabold text-slate-800">
-                      AI 回复 · {section.title}
-                    </div>
-                    {section.required ? (
-                      <span className="shrink-0 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
-                        必填
-                      </span>
-                    ) : null}
-                  </div>
-                  <textarea
-                    value={text}
-                    disabled={disabled}
-                    onFocus={() => onFocusSection?.(section.key)}
-                    onChange={(event) => onChange(section.key, event.target.value)}
-                    className="min-h-[112px] w-full resize-y rounded-md border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800 outline-none transition-colors placeholder:text-slate-300 focus:border-[#1E3A8A] focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
-                    placeholder={`填写${section.title}`}
-                  />
-
-                  {rewrite ? (
-                    <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] leading-relaxed">
-                      <div className="font-bold text-[#1E3A8A]">补全建议</div>
-                      <div className="mt-1 space-y-1 text-slate-600">
-                        <div>修改前：{rewrite.before}</div>
-                        <div className="font-semibold text-slate-800">修改后：{rewrite.after}</div>
-                      </div>
-                      <div className="mt-2 flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={rejectRewrite}
-                          className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
-                        >
-                          <CloseOutlined />
-                          拒绝
-                        </button>
-                        <button
-                          type="button"
-                          onClick={acceptRewrite}
-                          className="inline-flex h-7 items-center gap-1 rounded-md bg-[#1E3A8A] px-2 text-[11px] font-bold text-white hover:bg-[#172554]"
-                        >
-                          <CheckOutlined />
-                          采纳
-                        </button>
-                      </div>
-                    </div>
                   ) : null}
                 </div>
+
+                <textarea
+                  value={text}
+                  disabled={disabled}
+                  onFocus={() => onFocusSection?.(section.key)}
+                  onChange={(event) => onChange(section.key, event.target.value)}
+                  className="min-h-[112px] w-full resize-y rounded-lg border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800 outline-none transition-colors placeholder:text-slate-300 focus:border-[#1E3A8A] focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
+                  placeholder={`填写${section.title}`}
+                />
+
+                {rewrite ? (
+                  <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] leading-relaxed">
+                    <div className="font-bold text-[#1E3A8A]">补全建议</div>
+                    <div className="mt-1 space-y-1 text-slate-600">
+                      <div>修改前：{rewrite.before}</div>
+                      <div className="font-semibold text-slate-800">修改后：{rewrite.after}</div>
+                    </div>
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={rejectRewrite}
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                      >
+                        <CloseOutlined />
+                        拒绝
+                      </button>
+                      <button
+                        type="button"
+                        onClick={acceptRewrite}
+                        className="inline-flex h-7 items-center gap-1 rounded-md bg-[#1E3A8A] px-2 text-[11px] font-bold text-white hover:bg-[#172554]"
+                      >
+                        <CheckOutlined />
+                        采纳
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </article>
             );
           })}
