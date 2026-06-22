@@ -211,7 +211,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
     Promise.all([
       pluginRuntimeApi.getRuntimeDocTemplate(doc.code),
-      pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, true),
+      pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, false),
     ]).then(([nextTemplate, values]) => {
       if (cancelled) return;
       setTemplate(nextTemplate);
@@ -277,6 +277,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
       latestFieldSnapshotKeyRef.current = nextSnapshotKey;
       setFieldContext(usableContext);
+      if (bodySessions.some((session) => session.field.key === usableContext.fieldKey)) {
+        setVoiceText('');
+        setVoicePanelOpen(false);
+        setActiveFieldKey(usableContext.fieldKey);
+        scrollToField(usableContext.fieldKey);
+      }
     };
 
     void pollFieldContext();
@@ -288,7 +294,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [doc.code, patient.id]);
+  }, [bodySessions, doc.code, patient.id]);
 
   const updateSession = (fieldKey: string, updater: (session: FieldSession) => FieldSession) => {
     setSessions((current) => current.map((session) => (
@@ -412,7 +418,6 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         mode: 'fill',
         doctorName: patient.doctor,
       });
-      message.success(`已回填${session.field.label}`);
     } catch (applyError) {
       message.error(applyError instanceof Error ? applyError.message : '字段回填失败');
     } finally {
@@ -486,7 +491,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                       </div>
                       <div className="mt-0.5 text-[10px] font-medium text-slate-400">
                         {hasDraft ? `最近生成 ${generatedAt}` : `来源 ${session.field.source}`}
-                        {fieldContext?.fieldKey === session.field.key ? ' · CS 当前字段' : ''}
+                        {fieldContext?.fieldKey === session.field.key ? ' HIS当前书写字段' : ''}
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
