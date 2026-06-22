@@ -543,9 +543,8 @@ export default function SectionEditor({
                 e.preventDefault();
                 acceptSuggest(it);
               }}
-              className={`px-2.5 py-1.5 cursor-pointer break-words ${
-                i === sug.index ? 'bg-[#F0F5FF] text-[#1E3A8A] font-semibold' : 'text-slate-600 hover:bg-slate-50'
-              }`}
+              className={`px-2.5 py-1.5 cursor-pointer break-words ${i === sug.index ? 'bg-[#F0F5FF] text-[#1E3A8A] font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                }`}
             >
               {it}
             </div>

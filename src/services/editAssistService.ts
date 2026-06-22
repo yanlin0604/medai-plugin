@@ -189,9 +189,8 @@ export function buildEditAssistSuggestions(
   batchIndex = 0,
 ): EditAssistSuggestion[] {
   const token = getEditAssistToken(context);
-  if (token.length < MIN_TOKEN_LENGTH) return [];
 
-  const terms = buildTermSuggestions(token);
+  const terms = token.length >= MIN_TOKEN_LENGTH ? buildTermSuggestions(token) : [];
   const phrases = context.selectedText.trim()
     ? buildRewriteSuggestions(context.fieldKey, batchIndex)
     : buildPhraseSuggestions(context.fieldKey, token, batchIndex);
