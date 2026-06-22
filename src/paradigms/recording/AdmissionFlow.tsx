@@ -21,6 +21,7 @@ import { usePatientStore } from '../../stores/usePatientStore';
 import { admissionPatient } from '../../services/samples/admission';
 import { pluginRuntimeApi, toIcdItem } from '../../services/pluginRuntime';
 import { renderDocument } from '../../services/clinicalService';
+import { stripCitations } from '../../services/documentFlow';
 import { saveDraft, loadDraft } from '../../services/draftService';
 import type {
   DocFieldDef,
@@ -181,7 +182,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
         // 调用后端接口获取模板和字段值
         const [runtimeTemplate, runtimeValues] = await Promise.all([
           pluginRuntimeApi.getRuntimeTemplate(doc.code),
-          pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.admissionNo, false),
+          pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.admissionNo, true),
         ]);
 
         if (!alive) return;
@@ -298,7 +299,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   }, [fieldsForWriteback]);
 
   const finalContent = useMemo(
-    () => visibleSections.map((section) => `【${section.section}】${section.text}`).join('\n'),
+    () => visibleSections.map((section) => `【${section.section}】${stripCitations(section.text)}`).join('\n'),
     [visibleSections],
   );
 
@@ -308,7 +309,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
         fieldsForWriteback.map((field) => {
           const sectionOverride =
             sectionFieldCounts.get(field.section) === 1 ? sectionEdits[field.section] : undefined;
-          return [field.key, renderWritebackValue(field, values[field.key], sectionOverride)];
+          return [field.key, stripCitations(renderWritebackValue(field, values[field.key], sectionOverride))];
         }),
       ),
     [fieldsForWriteback, sectionEdits, sectionFieldCounts, values],

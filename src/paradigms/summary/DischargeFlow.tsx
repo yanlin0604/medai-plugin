@@ -29,7 +29,7 @@ import {
   loadDischargeRuntimeValues,
   type DischargeRuntimeState,
 } from '../../services/dischargeRuntime';
-import { buildSubmitSnapshot } from '../../services/documentFlow';
+import { buildSubmitSnapshot, stripCitations } from '../../services/documentFlow';
 import { backendRuntimeVersionAdapter } from '../../services/versionService';
 import type { ClinicalSection, FieldValue, IcdItem, PatientBrief } from '../../services/types';
 import type {

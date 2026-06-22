@@ -92,7 +92,7 @@ export default function FormDocumentFlow({ docCode, docName }: FormDocumentFlowP
         setLoading(true);
         const [runtimeTemplate, runtimeValues] = await Promise.all([
           pluginRuntimeApi.getRuntimeTemplate(docCode),
-          pluginRuntimeApi.resolveRuntimeValues(docCode, patientId, false),
+          pluginRuntimeApi.resolveRuntimeValues(docCode, patientId, true),
         ]);
 
         if (!alive) return;

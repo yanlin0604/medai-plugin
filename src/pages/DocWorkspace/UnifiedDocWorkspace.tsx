@@ -211,7 +211,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
     Promise.all([
       pluginRuntimeApi.getRuntimeDocTemplate(doc.code),
-      pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, false),
+      pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, true),
     ]).then(([nextTemplate, values]) => {
       if (cancelled) return;
       setTemplate(nextTemplate);

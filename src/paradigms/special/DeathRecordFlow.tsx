@@ -17,7 +17,7 @@ import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer
 import WritebackBar from '../../components/clinical/WritebackBar';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { useHotkey } from '../../hooks/useHotkey';
-import { buildSubmitLabel, buildSubmitSnapshot } from '../../services/documentFlow';
+import { buildSubmitLabel, buildSubmitSnapshot, stripCitations } from '../../services/documentFlow';
 import { loadDraft, saveDraft } from '../../services/draftService';
 import type { ClinicalSection, FieldValue } from '../../services/types';
 import type { DeathRecordConfig } from './deathData';

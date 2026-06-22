@@ -19,7 +19,7 @@ import MeltdownAlert from '../../components/clinical/MeltdownAlert';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { useHotkey } from '../../hooks/useHotkey';
 import { saveDraft, loadDraft } from '../../services/draftService';
-import { buildSubmitLabel, buildSubmitSnapshot } from '../../services/documentFlow';
+import { buildSubmitLabel, buildSubmitSnapshot, stripCitations } from '../../services/documentFlow';
 import type { ClinicalSection, FieldValue, IcdItem } from '../../services/types';
 import type { RecordConfig } from './recordData';
 

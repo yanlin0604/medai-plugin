@@ -12,9 +12,20 @@ interface BuildSubmitSnapshotOptions {
   includeEmptySections?: boolean;
 }
 
+const CITATION_MARKER_PATTERN = /\s*[\[【][a-zA-Z0-9\-_,，\s]+[\]】]\s*/g;
+
+export function stripCitations(text: string): string {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(CITATION_MARKER_PATTERN, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function resolveSectionText(section: ClinicalSection, sectionEdits?: Record<string, string>): string {
   const edited = sectionEdits?.[section.key] ?? sectionEdits?.[section.title];
-  return (edited ?? section.text).trim();
+  return stripCitations((edited ?? section.text).trim());
 }
 
 /** 将段落列表渲染为统一正文，供屏幕预览、草稿保存和版本快照共用。 */

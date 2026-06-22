@@ -6,7 +6,7 @@ import type {
 } from './pluginRuntimeTypes';
 
 const WRITEBACK_MODES: RuntimeEvidenceWritebackMode[] = ['fill', 'append', 'overwrite'];
-const CITATION_MARKER_PATTERN = /\s*\[[a-zA-Z0-9\-_,，\s]+\]\s*/g;
+const CITATION_MARKER_PATTERN = /\s*[\[【][a-zA-Z0-9\-_,，\s]+[\]】]\s*/g;
 
 export function isRuntimeEvidenceWritebackMode(value: unknown): value is RuntimeEvidenceWritebackMode {
   return typeof value === 'string' && WRITEBACK_MODES.includes(value as RuntimeEvidenceWritebackMode);
