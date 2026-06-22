@@ -72,13 +72,17 @@ export function renderTextWithCitations(text: string, evidenceSummary?: RuntimeE
                 }
                 
                 if (!evidence) return <span key={`${i}-${j}`}>[{idStr}]</span>;
+                const displaySourceSystem = evidence.sourceSystem?.toLowerCase() === 'cs-demo' 
+                  ? '病历系统' 
+                  : evidence.sourceSystem;
+                
                 const content = (
                   <div className="max-w-[280px] text-[11px] leading-relaxed">
                     <div className="font-bold mb-1 text-slate-800">{evidence.title || '证据详情'}</div>
-                    {evidence.sourceSystem && (
-                      <div className="text-slate-500 mb-1">来源系统：{evidence.sourceSystem}</div>
+                    {displaySourceSystem && (
+                      <div className="text-slate-500 mb-1">来源系统：{displaySourceSystem}</div>
                     )}
-                    <div className="text-slate-600 whitespace-pre-wrap">{evidence.summary}</div>
+                    <div className="text-slate-600 whitespace-pre-wrap max-h-[240px] overflow-y-auto pr-1.5 custom-scrollbar">{evidence.summary}</div>
                   </div>
                 );
                 return (
