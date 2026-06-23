@@ -149,7 +149,7 @@ export const DOC_REGISTRY: DocDefinition[] = [
 
   // ---------- 按需书写病程（绿） ----------
   {
-    code: 'DOC004', id: 'doc-004', name: '上级医师查房记录', py: 'sjyscfjl',
+    code: 'DOC004', id: 'doc-004', name: '查房记录', py: 'sjyscfjl',
     paradigm: 'recording', group: 'onDemand', icon: 'TeamOutlined',
     prototype: 'doc_004_senior_round.html',
     dataSources: ['EMR', '录音'], inputMode: '语音+手动',

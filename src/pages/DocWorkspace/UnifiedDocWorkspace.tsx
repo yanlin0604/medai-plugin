@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AudioOutlined,
-  CheckCircleOutlined,
   CloseOutlined,
   FileTextOutlined,
   Loading3QuartersOutlined,
@@ -13,10 +12,14 @@ import { message } from 'antd';
 import ParadigmShell from '../../paradigms/ParadigmShell';
 import type { DocDefinition } from '../../config/docRegistry';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
-import type { DocFieldDef, DocTemplate } from '../../services/types';
+import type { DocFieldDef, DocTemplate, FieldValue } from '../../services/types';
 import type { FieldAssistDraft } from '../../services/fieldAssist/types';
 import { generateFieldDraft } from '../../services/fieldAssist/generation';
 import { applyFieldDraft } from '../../services/fieldAssist/writeback';
+import { submitDocument } from '../../services/emsBridge';
+import { saveDraft } from '../../services/draftService';
+import { stripCitations } from '../../services/documentFlow';
+import { localVersionAdapter } from '../../services/versionService';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
 import type { Patient } from '../../stores/usePatientStore';
 import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../services/fieldAssist/contextBridge';
@@ -152,6 +155,7 @@ function formatTime(iso?: string) {
 const STANDARD_META_FIELD_KEYS = new Set(['admissionDate', 'dischargeDate', 'hospitalDays']);
 const STANDARD_META_FIELD_LABELS = new Set(['入院日期', '出院日期', '住院天数']);
 const TOP_META_SLOTS = new Set(['patient', 'date']);
+const WHOLE_WRITEBACK_SUMMARY = '全文字段工作台一键回填';
 
 function isTopWorkbenchField(field: DocFieldDef): boolean {
   if (field.metaSlot && TOP_META_SLOTS.has(field.metaSlot)) return true;
@@ -172,6 +176,24 @@ function compactTopMetaItems(topSessions: FieldSession[]) {
     });
 }
 
+function buildWholeDocumentSnapshot(sessions: FieldSession[]) {
+  const effectiveSessions = sessions.map((session) => ({
+    ...session,
+    value: stripCitations(session.value.trim()),
+  }));
+  const writableSessions = effectiveSessions.filter((session) => session.value);
+
+  return {
+    fields: Object.fromEntries(writableSessions.map((session) => [session.field.key, session.value])),
+    fieldLabels: Object.fromEntries(writableSessions.map((session) => [session.field.key, session.field.label])),
+    fieldOrder: writableSessions.map((session) => session.field.key),
+    content: writableSessions
+      .map((session) => `【${session.field.label}】${session.value}`)
+      .join('\n'),
+    draftValues: Object.fromEntries(effectiveSessions.map((session) => [session.field.key, session.value])) as Record<string, FieldValue>,
+  };
+}
+
 export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const addDraft = useFieldAssistStore((state) => state.addDraft);
   const drafts = useFieldAssistStore((state) => state.drafts);
@@ -182,6 +204,8 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const [voiceText, setVoiceText] = useState('');
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [wholeGenerating, setWholeGenerating] = useState(false);
+  const [wholeWriting, setWholeWriting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const latestFieldSnapshotKeyRef = useRef('');
@@ -329,6 +353,90 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     }
   };
 
+  const handleGenerateWholeDocument = async () => {
+    const targets = bodySessions.filter((session) => !session.generating);
+    if (!targets.length || wholeGenerating || wholeWriting) return;
+
+    setWholeGenerating(true);
+    message.loading({ content: `正在生成${doc.name}全文`, key: 'whole-document' });
+    try {
+      const generatedValues = await pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, false);
+      setSessions((current) => current.map((session) => {
+        const nextValue = generatedValues.values?.[session.field.key];
+        if (nextValue === undefined) return session;
+        return {
+          ...session,
+          value: valueToText(nextValue),
+        };
+      }));
+      message.success({ content: `${doc.name}全文已生成`, key: 'whole-document', duration: 1.5 });
+    } catch (generateError) {
+      message.error({
+        content: generateError instanceof Error ? generateError.message : '全文生成失败',
+        key: 'whole-document',
+      });
+    } finally {
+      setWholeGenerating(false);
+    }
+  };
+
+  const handleWritebackWholeDocument = async () => {
+    if (wholeGenerating || wholeWriting) return;
+    const snapshot = buildWholeDocumentSnapshot(sessions);
+    if (!snapshot.content.trim()) {
+      message.warning('请先生成或填写病历内容，再执行一键回填。');
+      return;
+    }
+
+    setWholeWriting(true);
+    message.loading({ content: `正在回填${doc.name}全文`, key: 'whole-writeback' });
+    try {
+      const result = await submitDocument({
+        docCode: doc.code,
+        docName: doc.name,
+        patientId: patient.id,
+        fields: snapshot.fields,
+        fieldLabels: snapshot.fieldLabels,
+        fieldOrder: snapshot.fieldOrder,
+        content: snapshot.content,
+      });
+      if (!result.ok) {
+        message.error({ content: result.message, key: 'whole-writeback' });
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      saveDraft({
+        docCode: doc.code,
+        patientId: patient.id,
+        values: snapshot.draftValues,
+        content: snapshot.content,
+        step: 1,
+        status: 'submitted',
+        updatedAt: timestamp,
+      });
+      await localVersionAdapter.createVersion({
+        docCode: doc.code,
+        patientId: patient.id,
+        content: snapshot.content,
+        fields: snapshot.fields,
+        fieldLabels: snapshot.fieldLabels,
+        fieldOrder: snapshot.fieldOrder,
+        editor: patient.doctor,
+        timestamp,
+        changeSummary: WHOLE_WRITEBACK_SUMMARY,
+      });
+      message.success({ content: result.message, key: 'whole-writeback', duration: 2 });
+    } catch (writebackError) {
+      message.error({
+        content: writebackError instanceof Error ? writebackError.message : '全文回填失败',
+        key: 'whole-writeback',
+      });
+    } finally {
+      setWholeWriting(false);
+    }
+  };
+
   const handleVoiceSend = () => {
     if (!activeSession) {
       message.warning('请先选择一个正文编辑字段。');
@@ -456,6 +564,37 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
           </div>
         </section>
 
+        <section className="border-b border-slate-200 bg-white px-4 py-2">
+          <div className="mx-auto flex max-w-[980px] items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12px] font-extrabold text-slate-800">整篇病历</div>
+              <div className="mt-0.5 truncate text-[10px] font-medium text-slate-400">
+                生成全部正文段落后，可一次性回填到病历系统。
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={handleGenerateWholeDocument}
+                disabled={wholeGenerating || wholeWriting || !bodySessions.length}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-[12px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {wholeGenerating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}
+                生成整篇
+              </button>
+              <button
+                type="button"
+                onClick={handleWritebackWholeDocument}
+                disabled={wholeGenerating || wholeWriting || !sessions.some((session) => session.value.trim())}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#1E3A8A] px-3 text-[12px] font-bold text-white hover:bg-[#172554] disabled:opacity-50"
+              >
+                {wholeWriting ? <Loading3QuartersOutlined className="animate-spin" /> : <UploadOutlined />}
+                一键回填
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section className="min-h-0 flex-1 overflow-y-auto px-4 py-3 pb-3">
           <div className="mx-auto flex max-w-[980px] flex-col gap-4">
             {bodySessions.map((session) => {
@@ -490,7 +629,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                         ) : null}
                       </div>
                       <div className="mt-0.5 text-[10px] font-medium text-slate-400">
-                        {hasDraft ? `最近生成 ${generatedAt}` : `来源 ${session.field.source}`}
+                        {generatedAt ? `最近生成 ${generatedAt}` : ''}
                         {fieldContext?.fieldKey === session.field.key ? ' HIS当前书写字段' : ''}
                       </div>
                     </div>

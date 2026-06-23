@@ -272,6 +272,12 @@ export default function AppLayout() {
 
   // 点击文书：未关联患者先引导读取，已关联则进入字段助手工作台
   const handleSelectDoc = (doc: DocDefinition) => {
+    if (doc.code === 'DOC004') {
+      selectDoc(doc);
+      navigate('/round');
+      return;
+    }
+
     if (!currentPatient) {
       Modal.confirm({
         title: '需要关联患者',
@@ -463,7 +469,9 @@ export default function AppLayout() {
                   <div className="text-[13px] font-bold text-slate-800 group-hover:text-[#1E3A8A] truncate transition-colors">
                     {doc.name}
                   </div>
-                  <div className="mt-0.5 text-[10px] font-medium text-slate-400">进入字段助手</div>
+                  <div className="mt-0.5 text-[10px] font-medium text-slate-400">
+                    {doc.code === 'DOC004' ? '进入查房模式' : '进入字段助手'}
+                  </div>
                 </div>
               </button>
               ))}
