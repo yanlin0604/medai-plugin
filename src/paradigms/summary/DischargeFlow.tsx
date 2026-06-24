@@ -184,6 +184,19 @@ function renderMetaCell(
   );
 }
 
+function readSavedSectionText(
+  values: Record<string, FieldValue>,
+  section: ClinicalSection,
+): string | undefined {
+  const value = values[section.key] ?? values[section.title];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function shouldRestoreSavedText(savedText: string | undefined, runtimeText: string): savedText is string {
+  if (savedText === undefined) return false;
+  return savedText.trim().length > 0 || runtimeText.trim().length === 0;
+}
+
 export default function DischargeFlow({ doc }: ParadigmProps) {
   const [searchParams] = useSearchParams();
   const readOnlyEntry = searchParams.get('mode') === 'read';
@@ -250,12 +263,13 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
   ) => {
     const saved = options.restoreDraft ? loadDraft(doc.code, patient.id) : null;
     const restoredSections = saved
-      ? runtime.sections.map((section) => ({
-          ...section,
-          text: (saved.values[section.key] as string)
-            ?? (saved.values[section.title] as string)
-            ?? section.text,
-        }))
+      ? runtime.sections.map((section) => {
+          const savedText = readSavedSectionText(saved.values, section);
+          return {
+            ...section,
+            text: shouldRestoreSavedText(savedText, section.text) ? savedText : section.text,
+          };
+        })
       : runtime.sections;
 
     setRuntimeState(runtime);
@@ -276,9 +290,8 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     setSections((currentSections) => {
       const currentByKey = new Map(currentSections.map((section) => [section.key, section]));
       const nextSections = runtime.sections.map((section) => {
-        const savedText = (savedValues[section.key] as string | undefined)
-          ?? (savedValues[section.title] as string | undefined);
-        if (savedText !== undefined) {
+        const savedText = readSavedSectionText(savedValues, section);
+        if (shouldRestoreSavedText(savedText, section.text)) {
           return { ...section, text: savedText };
         }
 

@@ -17,7 +17,7 @@ import type { FieldAssistDraft } from '../../services/fieldAssist/types';
 import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
 import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import { submitDocument } from '../../services/emsBridge';
-import { saveDraft } from '../../services/draftService';
+import { loadDraft, saveDraft } from '../../services/draftService';
 import { stripCitations } from '../../services/documentFlow';
 import { localVersionAdapter } from '../../services/versionService';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
@@ -101,6 +101,45 @@ function buildInitialSessions(template: DocTemplate, values: Record<string, unkn
   }));
 }
 
+function readSavedFieldValue(values: Record<string, FieldValue>, field: DocFieldDef): string | undefined {
+  const value = values[field.key] ?? values[field.label] ?? values[field.section];
+  const text = valueToText(value);
+  return text || undefined;
+}
+
+function parseDraftContentSections(content: string): Record<string, string> {
+  const sections: Record<string, string> = {};
+  const pattern = /【([^】]+)】([\s\S]*?)(?=【[^】]+】|$)/g;
+  let match = pattern.exec(content);
+  while (match) {
+    const title = match[1]?.trim();
+    const text = match[2]?.trim();
+    if (title && text) sections[title] = text;
+    match = pattern.exec(content);
+  }
+  return sections;
+}
+
+function mergeSavedDraftIntoSessions(
+  sessions: FieldSession[],
+  values: Record<string, FieldValue> | undefined,
+  content?: string,
+): FieldSession[] {
+  if (!values && !content) return sessions;
+  const contentSections = content ? parseDraftContentSections(content) : {};
+
+  return sessions.map((session) => {
+    const savedValue = values ? readSavedFieldValue(values, session.field) : undefined;
+    const contentValue = contentSections[session.field.label] ?? contentSections[session.field.section];
+    const nextValue = savedValue ?? contentValue;
+    if (!nextValue) return session;
+    return {
+      ...session,
+      value: nextValue,
+    };
+  });
+}
+
 function mergeLatestDraftsIntoSessions(
   sessions: FieldSession[],
   drafts: FieldAssistDraft[],
@@ -172,6 +211,22 @@ const STANDARD_META_FIELD_KEYS = new Set(['admissionDate', 'dischargeDate', 'hos
 const STANDARD_META_FIELD_LABELS = new Set(['入院日期', '出院日期', '住院天数']);
 const TOP_META_SLOTS = new Set(['patient', 'date']);
 const WHOLE_WRITEBACK_SUMMARY = '全文字段工作台一键回填';
+const WHOLE_REQUIRED_FIELD_KEYS = new Set([
+  'admissionCondition',
+  'admissionDiagnosis',
+  'treatmentCourse',
+  'dischargeDiagnosis',
+  'dischargeCondition',
+  'dischargeOrders',
+]);
+const WHOLE_REQUIRED_FIELD_LABELS = new Set([
+  '入院情况',
+  '入院诊断',
+  '诊疗经过',
+  '出院诊断',
+  '出院情况',
+  '出院医嘱',
+]);
 
 function isTopWorkbenchField(field: DocFieldDef): boolean {
   if (field.metaSlot && TOP_META_SLOTS.has(field.metaSlot)) return true;
@@ -206,8 +261,19 @@ function buildWholeDocumentSnapshot(sessions: FieldSession[]) {
     content: writableSessions
       .map((session) => `【${session.field.label}】${session.value}`)
       .join('\n'),
-    draftValues: Object.fromEntries(effectiveSessions.map((session) => [session.field.key, session.value])) as Record<string, FieldValue>,
+    draftValues: Object.fromEntries(writableSessions.map((session) => [session.field.key, session.value])) as Record<string, FieldValue>,
   };
+}
+
+function getMissingWholeRequiredFields(sessions: FieldSession[]): string[] {
+  return sessions
+    .filter((session) => (
+      session.field.required
+      || WHOLE_REQUIRED_FIELD_KEYS.has(session.field.key)
+      || WHOLE_REQUIRED_FIELD_LABELS.has(session.field.label)
+      || WHOLE_REQUIRED_FIELD_LABELS.has(session.field.section)
+    ) && !session.value.trim())
+    .map((session) => session.field.label);
 }
 
 export default function UnifiedDocWorkspace({ doc, patient }: Props) {
@@ -261,8 +327,13 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     ]).then(([nextTemplate, values]) => {
       if (cancelled) return;
       setTemplate(nextTemplate);
+      const saved = loadDraft(doc.code, patient.id);
       const nextSessions = mergeLatestDraftsIntoSessions(
-        buildInitialSessions(nextTemplate, values.values ?? {}),
+        mergeSavedDraftIntoSessions(
+          buildInitialSessions(nextTemplate, values.values ?? {}),
+          saved?.values,
+          saved?.content,
+        ),
         useFieldAssistStore.getState().drafts,
         patient.id,
         doc.code,
@@ -392,6 +463,19 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
           value: valueToText(nextValue),
         };
       }));
+      const generatedSessions = bodySessions.map((session) => ({
+        ...session,
+        value: valueToText(generatedValues.values?.[session.field.key] ?? session.value),
+      }));
+      const missingFields = getMissingWholeRequiredFields(generatedSessions);
+      if (missingFields.length) {
+        message.warning({
+          content: `全文生成未完成，缺少：${missingFields.join('、')}`,
+          key: 'whole-document',
+          duration: 3,
+        });
+        return;
+      }
       message.success({ content: `${doc.name}全文已生成`, key: 'whole-document', duration: 1.5 });
     } catch (generateError) {
       message.error({
@@ -406,10 +490,15 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const handleWritebackWholeDocument = async () => {
     if (wholeGenerating || wholeWriting) return;
     const snapshot = buildWholeDocumentSnapshot(sessions);
-    if (!snapshot.content.trim()) {
-      message.warning('请先生成或填写病历内容，再执行一键回填。');
-      return;
-    }
+    // if (!snapshot.content.trim()) {
+    //   message.warning('请先生成或填写病历内容，再执行一键回填。');
+    //   return;
+    // }
+    // const missingFields = getMissingWholeRequiredFields(bodySessions);
+    // if (missingFields.length) {
+    //   message.warning(`请先生成或填写：${missingFields.join('、')}，再执行一键回填。`);
+    //   return;
+    // }
 
     setWholeWriting(true);
     message.loading({ content: `正在回填${doc.name}全文`, key: 'whole-writeback' });
@@ -682,10 +771,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       message.warning(`请先在 CS 端聚焦「${session.field.label}」字段，再执行回填。`);
       return;
     }
-    if (!session.draft && !session.value.trim()) {
-      message.warning(`请先生成或填写「${session.field.label}」内容，再执行回填。`);
-      return;
-    }
+    // if (!session.draft && !session.value.trim()) {
+    //   message.warning(`请先生成或填写「${session.field.label}」内容，再执行回填。`);
+    //   return;
+    // }
 
     updateSession(fieldKey, (item) => ({ ...item, applying: true }));
     const effectiveDraft = session.draft

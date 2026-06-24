@@ -75,6 +75,130 @@ describe('bubbleDischargeWriteback', () => {
     expect(draft.draftValues.admissionCondition).toBe(draft.payload.fields.admissionCondition);
   });
 
+  it('does not persist empty runtime sections into workspace draft values', async () => {
+    const draft = await buildBubbleDischargeDraft(patient, '出院记录', {
+      loadRuntime: async () => runtime({
+        sections: [
+          ...sections,
+          {
+            key: 'followUpPlan',
+            title: '随访计划',
+            fieldKey: 'followUpPlan',
+            text: '',
+            editable: true,
+            source: 'manual',
+          },
+        ],
+      }),
+    });
+
+    expect(draft.payload.fields.followUpPlan).toBe('');
+    expect(draft.draftValues.followUpPlan).toBeUndefined();
+  });
+
+  it('keeps missing required discharge sections as warnings without blocking writeback', async () => {
+    const draft = await buildBubbleDischargeDraft(patient, '出院记录', {
+      loadRuntime: async () => runtime({
+        sections: [
+          ...sections,
+          {
+            key: 'dischargeCondition',
+            title: '出院情况',
+            fieldKey: 'dischargeCondition',
+            text: '',
+            editable: true,
+            source: 'ai',
+          },
+        ],
+      }),
+    });
+
+    expect(draft.missingFields).toEqual(['出院情况']);
+    expect(draft.payload.fields.dischargeCondition).toBe('');
+  });
+
+  it('does not block bubble draft generation when only meta date fields are empty', async () => {
+    const draft = await buildBubbleDischargeDraft(patient, '出院记录', {
+      loadRuntime: async () => runtime({
+        metaFieldKeys: ['admissionDate', 'dischargeDate', 'hospitalDays'],
+        sections: [
+          {
+            key: 'admissionDate',
+            title: '入院日期',
+            fieldKey: 'admissionDate',
+            text: '',
+            editable: true,
+            source: 'his',
+            required: true,
+          },
+          {
+            key: 'dischargeDate',
+            title: '出院日期',
+            fieldKey: 'dischargeDate',
+            text: '',
+            editable: true,
+            source: 'his',
+            required: true,
+          },
+          {
+            key: 'hospitalDays',
+            title: '住院天数',
+            fieldKey: 'hospitalDays',
+            text: '',
+            editable: false,
+            source: 'manual',
+            required: true,
+          },
+          ...sections,
+          {
+            key: 'admissionDiagnosis',
+            title: '入院诊断',
+            fieldKey: 'admissionDiagnosis',
+            text: '冠状动脉粥样硬化性心脏病。',
+            editable: true,
+            source: 'ai',
+          },
+          {
+            key: 'treatmentCourse',
+            title: '诊疗经过',
+            fieldKey: 'treatmentCourse',
+            text: '住院期间完善检查并予以对症治疗。',
+            editable: true,
+            source: 'ai',
+          },
+          {
+            key: 'dischargeDiagnosis',
+            title: '出院诊断',
+            fieldKey: 'dischargeDiagnosis',
+            text: '冠状动脉粥样硬化性心脏病。',
+            editable: true,
+            source: 'ai',
+          },
+          {
+            key: 'dischargeCondition',
+            title: '出院情况',
+            fieldKey: 'dischargeCondition',
+            text: '患者病情好转。',
+            editable: true,
+            source: 'ai',
+          },
+          {
+            key: 'dischargeOrders',
+            title: '出院医嘱',
+            fieldKey: 'dischargeOrders',
+            text: '规律服药，门诊随访。',
+            editable: true,
+            source: 'ai',
+          },
+        ],
+      }),
+    });
+
+    expect(draft.draftValues.admissionDate).toBeUndefined();
+    expect(draft.draftValues.dischargeOrders).toBe('规律服药，门诊随访。');
+    expect(draft.missingFields).toEqual([]);
+  });
+
   it('fails clearly when runtime field generation fails', async () => {
     await expect(buildBubbleDischargeDraft(patient, '出院记录', {
       loadRuntime: async () => {

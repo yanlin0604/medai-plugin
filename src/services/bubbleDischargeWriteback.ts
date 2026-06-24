@@ -22,9 +22,28 @@ const SHELL_FIELD_LABELS: Record<string, string> = {
   physicianSignature: '医师签名',
 };
 
+const BUBBLE_REQUIRED_SECTION_KEYS = new Set([
+  'admissionCondition',
+  'admissionDiagnosis',
+  'treatmentCourse',
+  'dischargeDiagnosis',
+  'dischargeCondition',
+  'dischargeOrders',
+]);
+const BUBBLE_REQUIRED_SECTION_TITLES = new Set([
+  '入院情况',
+  '入院诊断',
+  '诊疗经过',
+  '出院诊断',
+  '出院情况',
+  '出院医嘱',
+]);
+const BUBBLE_META_SECTION_KEYS = new Set(['admissionDate', 'dischargeDate', 'hospitalDays']);
+
 export interface BubbleDischargeDraft {
   payload: DocumentPayload;
   draftValues: Record<string, FieldValue>;
+  missingFields: string[];
 }
 
 interface BuildBubbleDischargeDraftDeps {
@@ -79,6 +98,19 @@ function addDemoBsShellFields(
   };
 }
 
+function getMissingRequiredSectionTitles(runtime: DischargeRuntimeState): string[] {
+  const missingSections = runtime.sections.filter(
+    (section) => !runtime.metaFieldKeys.includes(section.key)
+      && !BUBBLE_META_SECTION_KEYS.has(section.key)
+      && (
+        section.required
+        || BUBBLE_REQUIRED_SECTION_KEYS.has(section.key)
+        || BUBBLE_REQUIRED_SECTION_TITLES.has(section.title)
+      ) && !section.text.trim(),
+  );
+  return missingSections.map((section) => section.title);
+}
+
 function buildRuntimeDraft(
   patient: Patient,
   docName: string,
@@ -91,7 +123,9 @@ function buildRuntimeDraft(
   });
   const shellFields = addDemoBsShellFields(patient, snapshot);
   const draftValues: Record<string, FieldValue> = Object.fromEntries(
-    runtime.sections.map((section) => [section.key, section.text]),
+    runtime.sections
+      .filter((section) => section.text.trim())
+      .map((section) => [section.key, section.text]),
   );
   draftValues.dischargeDiagnoses = runtime.icdCandidates;
 
@@ -104,6 +138,7 @@ function buildRuntimeDraft(
       content: snapshot.content,
     },
     draftValues,
+    missingFields: getMissingRequiredSectionTitles(runtime),
   };
 }
 

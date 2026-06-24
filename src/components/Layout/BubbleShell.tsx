@@ -532,7 +532,11 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         }
         setPreparedDraft(draft);
         setProgress(100);
-        setStatusText('出院记录已生成，请回填');
+        setStatusText(
+          draft.missingFields.length
+            ? `出院记录已生成，缺少：${draft.missingFields.join('、')}，可先回填`
+            : '出院记录已生成，请回填',
+        );
         setDraftStatus('ready');
       })
       .catch((error) => {
