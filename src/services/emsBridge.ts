@@ -12,6 +12,7 @@ import type { Patient, DocumentPayload, SubmitResult, PatientConsistency } from 
 import { invoke } from '@tauri-apps/api/core';
 import { WRITEBACK_MODE_LABEL, resolveWorkspaceUrl } from './writebackConfig';
 import { getCurrentEmrContext } from './emrContext/demoBsDetector';
+import { buildPatientFromEmrContext } from './emrContext/activateEmrContext';
 
 interface WritebackStats {
   total: number;
@@ -39,8 +40,11 @@ const SAMPLE_ACTIVE_PATIENT: Patient = {
 
 /** 读取宿主病历系统当前活动患者；无活动患者返回 null */
 export async function getActivePatient(): Promise<Patient | null> {
+  const context = await getCurrentEmrContext();
+  if (context) return buildPatientFromEmrContext(context);
+
   // TODO: const p = await invoke<Patient>('his_get_active_patient')
-  return SAMPLE_ACTIVE_PATIENT;
+  return isTauriRuntime() ? null : SAMPLE_ACTIVE_PATIENT;
 }
 
 /** 宿主病历系统连接状态（医生工号 / 科室随登录态返回） */

@@ -7,18 +7,22 @@ export interface EmrContextActivation {
   docCode: string;
 }
 
+function optionalText(value: string | undefined) {
+  return value?.trim() ?? '';
+}
+
 export function buildPatientFromEmrContext(context: EmrContext): Patient {
   return {
     id: context.patientId,
     name: context.patientName,
-    gender: '男',
-    age: '65岁',
-    bedNo: '1201',
-    deptName: '心血管内科',
-    admissionDate: '2026-06-01',
-    admissionDays: 4,
-    doctor: '林志远',
-    diagnosis: '冠状动脉粥样硬化性心脏病',
+    gender: optionalText(context.gender),
+    age: optionalText(context.age),
+    bedNo: optionalText(context.bedNo),
+    deptName: optionalText(context.deptName),
+    admissionDate: optionalText(context.admissionDate),
+    admissionDays: Number.isFinite(context.admissionDays) ? Number(context.admissionDays) : 0,
+    doctor: optionalText(context.doctor),
+    diagnosis: optionalText(context.diagnosis),
   };
 }
 

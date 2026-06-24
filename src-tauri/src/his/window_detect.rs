@@ -16,6 +16,14 @@ pub struct EmrContext {
     pub source: String,
     pub patient_id: String,
     pub patient_name: String,
+    pub gender: Option<String>,
+    pub age: Option<String>,
+    pub bed_no: Option<String>,
+    pub dept_name: Option<String>,
+    pub admission_date: Option<String>,
+    pub admission_days: Option<u32>,
+    pub doctor: Option<String>,
+    pub diagnosis: Option<String>,
     pub doc_code: String,
     pub doc_name: String,
     pub url: Option<String>,
@@ -363,6 +371,16 @@ fn parse_context_target(target: &str) -> Option<EmrContext> {
             .unwrap_or_else(|| "demo-bs".to_string()),
         patient_id: required(&params, "patientId")?,
         patient_name: required(&params, "patientName")?,
+        gender: optional(&params, "gender"),
+        age: optional(&params, "age"),
+        bed_no: optional(&params, "bedNo"),
+        dept_name: optional(&params, "deptName"),
+        admission_date: optional(&params, "admissionDate"),
+        admission_days: params
+            .get("admissionDays")
+            .and_then(|value| value.parse::<u32>().ok()),
+        doctor: optional(&params, "doctor"),
+        diagnosis: optional(&params, "diagnosis"),
         doc_code: required(&params, "docCode")?,
         doc_name: required(&params, "docName")?,
         url: params.get("url").cloned(),
@@ -454,6 +472,13 @@ fn parse_field_context_body(body: &str) -> Option<FieldAssistContext> {
 }
 
 fn required(params: &HashMap<String, String>, key: &str) -> Option<String> {
+    params
+        .get(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn optional(params: &HashMap<String, String>, key: &str) -> Option<String> {
     params
         .get(key)
         .map(|value| value.trim().to_string())

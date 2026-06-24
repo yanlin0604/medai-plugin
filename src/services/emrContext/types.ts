@@ -12,6 +12,14 @@ export interface EmrContext {
   source: EmrContextSource;
   patientId: string;
   patientName: string;
+  gender?: string;
+  age?: string;
+  bedNo?: string;
+  deptName?: string;
+  admissionDate?: string;
+  admissionDays?: number;
+  doctor?: string;
+  diagnosis?: string;
   docCode: string;
   docName: string;
   url?: string;
