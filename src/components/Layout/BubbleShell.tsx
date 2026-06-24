@@ -2,8 +2,10 @@ import type { KeyboardEvent, MouseEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  AudioOutlined,
   ArrowRightOutlined,
   CheckCircleOutlined,
+  CloseOutlined,
   CopyOutlined,
   EditOutlined,
   FileTextOutlined,
@@ -13,6 +15,7 @@ import {
   SearchOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
+import { message } from 'antd';
 import appIcon from '../../../src-tauri/icons/app-icon-64.png';
 import { getDocByCode } from '../../config/docRegistry';
 import { collapseAssistantWindow, expandAssistantWindow, showAssistBubbleWindow } from '../../services/windowMode';
@@ -54,6 +57,15 @@ type BubbleDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written'
 type CopyStatus = 'idle' | 'copied' | 'error';
 type FieldDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written' | 'error';
 
+interface AsrServerMessage {
+  text?: string;
+  is_final?: boolean;
+}
+
+type AudioContextWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 const GENERATION_STEPS = [
   '拉取入院记录',
   '整理诊疗经过',
@@ -62,6 +74,13 @@ const GENERATION_STEPS = [
 ];
 const FIELD_CONTEXT_POLL_MS = 800;
 const FIELD_AUTO_GENERATE_DELAY_MS = 450;
+const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
+const ASR_MODE = '2';
+
+function buildAsrWsUrl(baseUrl: string, mode: string) {
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}mode=${encodeURIComponent(mode)}`;
+}
 
 function getFieldContextSnapshotKey(context: FieldAssistContext) {
   return getFieldAssistSnapshotKey(context);
@@ -111,6 +130,16 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const [suggestionBatch, setSuggestionBatch] = useState(0);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
   const [copiedSuggestionId, setCopiedSuggestionId] = useState('');
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceText, setVoiceText] = useState('');
+  const voiceContextKeyRef = useRef('');
+  const finalVoiceTextRef = useRef('');
+  const asrWsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const generatedPatient = useMemo(
     () => (detectedContext ? buildPatientFromEmrContext(detectedContext) : null),
     [contextKey],
@@ -283,6 +312,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setSuggestionBatch(0);
     setCopyStatus('idle');
     setCopiedSuggestionId('');
+    closeVoicePanel();
+    setVoiceText('');
 
     if (fieldContextKey) {
       const drafts = useFieldAssistStore.getState().drafts;
@@ -299,6 +330,10 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setFieldDraft(null);
     setFieldDraftStatus('idle');
   }, [detectedContext, fieldContext, fieldContextKey]);
+
+  useEffect(() => () => {
+    stopVoiceRecording(false);
+  }, []);
 
   useEffect(() => {
     if (fieldContext) {
@@ -446,6 +481,204 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     event.stopPropagation();
     setIsManuallyCollapsed(true);
     void collapseAssistantWindow();
+  };
+
+  const stopVoiceRecording = (sendFlush = true) => {
+    const processor = audioProcessorRef.current;
+    audioProcessorRef.current = null;
+    if (processor) {
+      processor.onaudioprocess = null;
+      processor.disconnect();
+    }
+
+    const source = audioSourceRef.current;
+    audioSourceRef.current = null;
+    source?.disconnect();
+
+    const stream = mediaStreamRef.current;
+    mediaStreamRef.current = null;
+    stream?.getTracks().forEach((track) => track.stop());
+
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext && audioContext.state !== 'closed') {
+      void audioContext.close();
+    }
+
+    const ws = asrWsRef.current;
+    asrWsRef.current = null;
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      if (ws.readyState === WebSocket.OPEN) {
+        if (sendFlush) ws.send('flush');
+        ws.close();
+      } else if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    }
+
+    setVoiceRecording(false);
+  };
+
+  const closeVoicePanel = () => {
+    stopVoiceRecording();
+    setVoicePanelOpen(false);
+    voiceContextKeyRef.current = '';
+    finalVoiceTextRef.current = '';
+  };
+
+  const clearVoiceDraft = () => {
+    finalVoiceTextRef.current = '';
+    setVoiceText('');
+  };
+
+  const writeVoiceTranscript = (contextKey: string, nextText: string) => {
+    if (voiceContextKeyRef.current !== contextKey) return;
+    setVoiceText(nextText);
+  };
+
+  const handleAsrMessage = (data: AsrServerMessage) => {
+    const contextKey = voiceContextKeyRef.current;
+    if (!contextKey) return;
+
+    if (!data.text && data.is_final) {
+      writeVoiceTranscript(contextKey, finalVoiceTextRef.current);
+      return;
+    }
+    if (!data.text) return;
+
+    const nextText = `${finalVoiceTextRef.current}${data.text}`;
+    writeVoiceTranscript(contextKey, nextText);
+
+    if (data.is_final !== false) {
+      finalVoiceTextRef.current = nextText;
+    }
+  };
+
+  const handleVoiceTextChange = (nextText: string) => {
+    finalVoiceTextRef.current = nextText;
+    setVoiceText(nextText);
+  };
+
+  const handleToggleVoiceRecording = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!fieldContext) {
+      message.warning('请先在 HIS 中聚焦一个字段。');
+      return;
+    }
+
+    if (voiceRecording) {
+      stopVoiceRecording();
+      return;
+    }
+
+    if (!ASR_WS_URL) {
+      message.error('请先在 .env 中配置 VITE_ASR_WS_URL。');
+      return;
+    }
+
+    const requestContextKey = fieldContextKey;
+    stopVoiceRecording(false);
+    voiceContextKeyRef.current = requestContextKey;
+    finalVoiceTextRef.current = voiceText.trim() ? voiceText : '';
+    setVoicePanelOpen(true);
+    setVoiceRecording(true);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+      if (voiceContextKeyRef.current !== requestContextKey) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      mediaStreamRef.current = stream;
+      const ws = new WebSocket(buildAsrWsUrl(ASR_WS_URL, ASR_MODE));
+      asrWsRef.current = ws;
+
+      ws.onopen = () => {
+        if (voiceContextKeyRef.current !== requestContextKey) {
+          ws.close();
+          return;
+        }
+
+        const AudioContextCtor = window.AudioContext ?? (window as AudioContextWindow).webkitAudioContext;
+        if (!AudioContextCtor) {
+          message.error('当前浏览器不支持语音采集。');
+          closeVoicePanel();
+          return;
+        }
+
+        const audioContext = new AudioContextCtor({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(stream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        audioContextRef.current = audioContext;
+        audioSourceRef.current = source;
+        audioProcessorRef.current = processor;
+
+        processor.onaudioprocess = (audioEvent) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+
+          const inputData = audioEvent.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(inputData.length);
+          for (let index = 0; index < inputData.length; index += 1) {
+            const sample = Math.max(-1, Math.min(1, inputData[index]));
+            pcm16[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+          }
+          ws.send(pcm16.buffer);
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+      };
+
+      ws.onmessage = (messageEvent) => {
+        if (typeof messageEvent.data !== 'string') return;
+        try {
+          handleAsrMessage(JSON.parse(messageEvent.data) as AsrServerMessage);
+        } catch {
+          // Ignore non-JSON diagnostic frames from the ASR service.
+        }
+      };
+
+      ws.onerror = () => {
+        message.error('语音识别连接异常，请检查 ASR 服务。');
+      };
+
+      ws.onclose = () => {
+        if (asrWsRef.current === ws) asrWsRef.current = null;
+        setVoiceRecording(false);
+      };
+    } catch (error) {
+      stopVoiceRecording(false);
+      message.error(error instanceof Error ? error.message : '无法获取麦克风权限。');
+    }
+  };
+
+  const handleApplyVoiceDraft = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!fieldContext || !voiceText.trim() || fieldDraftStatus === 'writing') return;
+
+    const draft = buildSuggestionDraft(fieldContext, voiceText.trim(), '语音转写回填');
+    setFieldDraftStatus('writing');
+    setFieldStatusText('正在回填语音草稿');
+    void applyFieldDraft({
+      context: fieldContext,
+      response: draft.response,
+      finalText: voiceText.trim(),
+      doctorName: '林志远 主治医师',
+    })
+      .then(() => {
+        setFieldDraftStatus('written');
+        closeVoicePanel();
+      })
+      .catch((error) => {
+        setFieldDraftStatus('error');
+        setFieldStatusText(error instanceof Error ? error.message : '语音草稿回填失败');
+      });
   };
 
   const applyBubbleDischargeDraft = async (
@@ -673,6 +906,57 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         ? '正在生成'
         : '正在书写';
     const fieldActionText = `${fieldActionLabel}${fieldContext.fieldLabel}字段`;
+    const voiceDraftPanel = voicePanelOpen ? (
+      <div className="border-t border-blue-100 bg-blue-50/70 px-2.5 py-2">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <div className="min-w-0 truncate text-[10px] font-bold text-[#1E3A8A]">
+            {voiceRecording ? '正在听写' : '语音草稿'}：{fieldContext.fieldLabel}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={handleToggleVoiceRecording}
+              className="inline-flex h-6 items-center gap-1 rounded border border-blue-100 bg-white px-1.5 text-[10px] font-bold text-[#1E3A8A] hover:bg-blue-50"
+            >
+              <AudioOutlined className={voiceRecording ? 'animate-pulse' : undefined} />
+              {voiceRecording ? '停止' : '继续'}
+            </button>
+            {voiceText ? (
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  clearVoiceDraft();
+                }}
+                className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-bold text-slate-500 hover:bg-white hover:text-slate-700"
+              >
+                <CloseOutlined />
+                清空
+              </button>
+            ) : null}
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              onClick={handleApplyVoiceDraft}
+              disabled={!voiceText.trim() || fieldDraftStatus === 'writing'}
+              className="inline-flex h-6 items-center gap-1 rounded bg-emerald-600 px-2 text-[10px] font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <UploadOutlined />
+              回填
+            </button>
+          </div>
+        </div>
+        <textarea
+          data-tauri-drag-region="false"
+          value={voiceText}
+          onChange={(event) => handleVoiceTextChange(event.target.value)}
+          className="h-14 w-full resize-none rounded border border-blue-100 bg-white px-2 py-1.5 text-[11px] leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#1E3A8A]"
+          placeholder={voiceRecording ? '正在听写，转写内容会显示在这里...' : '语音转写内容会显示在这里'}
+        />
+      </div>
+    ) : null;
 
     if (isFieldBusy || (fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft)) || isManuallyCollapsed) {
       const collapsedTitle = isWorking
@@ -829,6 +1113,23 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               <button
                 type="button"
                 data-tauri-drag-region="false"
+                onClick={handleToggleVoiceRecording}
+                disabled={isWorking}
+                className={[
+                  'h-7 px-2 flex items-center justify-center border text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-50',
+                  voiceRecording
+                    ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
+                    : 'bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-50',
+                ].join(' ')}
+                title={voiceRecording ? '停止语音转写' : '语音输入'}
+                aria-label={voiceRecording ? '停止语音转写' : '语音输入'}
+              >
+                <AudioOutlined className={voiceRecording ? 'mr-1 text-xs animate-pulse' : 'mr-1 text-xs'} />
+                {voiceRecording ? '语音中' : '语音'}
+              </button>
+              <button
+                type="button"
+                data-tauri-drag-region="false"
                 onClick={handleCollapseToBubble}
                 className="w-7 h-7 flex items-center justify-center bg-white border border-emerald-200 text-slate-500 hover:bg-slate-50"
                 title="收起为气泡"
@@ -905,6 +1206,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
                 </button>
               ) : null}
             </div>
+            {voiceDraftPanel}
           </>
         ) : (
           <>
@@ -956,6 +1258,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
                 回填
               </button>
             </div>
+            {voiceDraftPanel}
           </>
         )}
       </div>
