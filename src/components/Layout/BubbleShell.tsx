@@ -104,6 +104,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const latestDraftContextKeyRef = useRef('');
   const draftProgressTimerRef = useRef<number | null>(null);
   const autoGenerateRequestKeysRef = useRef<Set<string>>(new Set());
+  const detectedContextRef = useRef<BubbleEmrContext | null>(null);
   const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false);
   const generatingContextKeyRef = useRef('');
   const fieldDraftStickyRef = useRef(false);
@@ -143,6 +144,23 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     latestFieldContextKeyRef.current = fieldContextKey;
   }, [fieldContextKey]);
 
+  useEffect(() => {
+    detectedContextRef.current = detectedContext;
+  }, [detectedContext]);
+
+  const clearFieldAssistState = () => {
+    latestFieldSnapshotKeyRef.current = '';
+    latestFieldContextKeyRef.current = '';
+    generatingContextKeyRef.current = '';
+    fieldDraftStickyRef.current = false;
+    autoGenerateRequestKeysRef.current.clear();
+    setFieldContext(null);
+    setFieldDraft(null);
+    setFieldDraftStatus('idle');
+    setFieldStatusText('');
+    setStoredFieldContext(null);
+  };
+
   // 追踪草稿是否处于可展示状态（ready/written/error），用于防止轮询误清 context
   useEffect(() => {
     fieldDraftStickyRef.current =
@@ -169,6 +187,18 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       if (disposed) return;
       const usableField = isUsableFieldAssistContext(field) ? field : null;
       if (usableField) {
+        const activeDetectedContext = detectedContextRef.current;
+        if (
+          activeDetectedContext
+          && (
+            usableField.patientId !== activeDetectedContext.patientId
+            || usableField.docCode !== activeDetectedContext.docCode
+          )
+        ) {
+          clearFieldAssistState();
+          return;
+        }
+
         const nextSnapshotKey = getFieldContextSnapshotKey(usableField);
         if (nextSnapshotKey !== latestFieldSnapshotKeyRef.current) {
           // 如果正在生成中且字段身份相同（只是 prefix/selection 等微变），跳过更新防止生成被取消
@@ -230,6 +260,19 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   }, [setStoredFieldContext]);
 
   useEffect(() => {
+    if (
+      fieldContext
+      && detectedContext
+      && (
+        fieldContext.patientId !== detectedContext.patientId
+        || fieldContext.docCode !== detectedContext.docCode
+      )
+    ) {
+      clearFieldAssistState();
+      setIsManuallyCollapsed(false);
+      return;
+    }
+
     setSuggestionBatch(0);
     setCopyStatus('idle');
     setCopiedSuggestionId('');
@@ -255,7 +298,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setFieldStatusText('');
     setFieldDraft(null);
     setFieldDraftStatus('idle');
-  }, [fieldContextKey]);
+  }, [detectedContext, fieldContext, fieldContextKey]);
 
   useEffect(() => {
     if (fieldContext) {
@@ -405,9 +448,12 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     void collapseAssistantWindow();
   };
 
-  const handleWriteback = async (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (!detectedContext || !generatedPatient || !preparedDraft || draftStatus === 'writing') return;
+  const applyBubbleDischargeDraft = async (
+    draft: BubbleDischargeDraft,
+    patient = generatedPatient,
+    docName = detectedContext?.docName,
+  ) => {
+    if (!patient || !docName) return;
 
     setDraftStatus('writing');
     setStatusText('正在回写病历系统');
@@ -416,10 +462,10 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     let result;
     try {
       result = await submitBubbleDischargeDraft(
-        generatedPatient,
-        detectedContext.docName,
+        patient,
+        docName,
         '林志远 主治医师',
-        { preparedDraft },
+        { preparedDraft: draft },
       );
     } catch (error) {
       const messageText = error instanceof Error ? error.message : '回写失败，点开处理';
@@ -443,10 +489,18 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setStatusText('回写失败，点开处理');
   };
 
+  const handleWriteback = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!detectedContext || !generatedPatient || !preparedDraft || draftStatus === 'writing') return;
+    await applyBubbleDischargeDraft(preparedDraft);
+  };
+
   const handleRegenerateDraft = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (!detectedContext || !detectedDocName || !generatedPatient || isWorking) return;
 
+    setIsManuallyCollapsed(true);
+    void collapseAssistantWindow();
     setDraftStatus('generating');
     setPreparedDraft(null);
     setProgress(8);
@@ -478,7 +532,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         }
         setPreparedDraft(draft);
         setProgress(100);
-        setStatusText('出院记录已生成');
+        setStatusText('出院记录已生成，请回填');
         setDraftStatus('ready');
       })
       .catch((error) => {
@@ -587,6 +641,16 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const canWriteback = Boolean(detectedContext && generatedPatient && preparedDraft)
     && (draftStatus === 'ready' || draftStatus === 'error');
   const isWorking = draftStatus === 'generating' || draftStatus === 'writing';
+  const hasPreparedDraft = Boolean(detectedContext && generatedPatient && preparedDraft)
+    && (draftStatus === 'ready' || draftStatus === 'error' || draftStatus === 'written');
+  const canGenerateDraft = isDetected && Boolean(detectedContext && detectedDocName) && !isWorking;
+  const draftStatusLabel =
+    draftStatus === 'written' ? '已回写'
+      : draftStatus === 'ready' ? '可回写'
+        : draftStatus === 'writing' ? '回写中'
+          : draftStatus === 'generating' ? '生成中'
+            : draftStatus === 'error' ? '处理失败'
+              : '待书写';
 
   if (fieldContext) {
     const hasSuggestionIntent = fieldIntent === 'term' || fieldIntent === 'rewrite';
@@ -599,8 +663,21 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       : [];
     const isFieldBusy = fieldDraftStatus === 'generating' || fieldDraftStatus === 'writing';
     const canApplyField = Boolean(currentFieldDraft) && fieldDraftStatus === 'ready';
+    const fieldActionLabel = fieldDraftStatus === 'writing'
+      ? '正在回填'
+      : fieldDraftStatus === 'generating'
+        ? '正在生成'
+        : '正在书写';
+    const fieldActionText = `${fieldActionLabel}${fieldContext.fieldLabel}字段`;
 
     if (isFieldBusy || (fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft)) || isManuallyCollapsed) {
+      const collapsedTitle = isWorking
+        ? `${detectedContext?.patientName ?? fieldContext.patientName} · ${draftStatusLabel}`
+        : `${fieldContext.patientName} · ${fieldActionLabel}`;
+      const collapsedSubtitle = isWorking
+        ? (statusText || detectedContext?.docName || fieldContext.docName)
+        : fieldActionText;
+
       return (
         <div
           role="button"
@@ -616,7 +693,11 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               data-tauri-drag-region
               className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-600"
             >
-              <EditOutlined className={isFieldBusy ? "text-base animate-pen-writing" : "text-base"} />
+              {isWorking ? (
+                <Loading3QuartersOutlined className="text-base animate-spin" />
+              ) : (
+                <EditOutlined className={isFieldBusy ? "text-base animate-pen-writing" : "text-base"} />
+              )}
               <span
                 data-tauri-drag-region
                 className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 shadow-sm"
@@ -624,28 +705,84 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
             </div>
             <div data-tauri-drag-region className="min-w-0 flex-1">
               <div data-tauri-drag-region className="truncate text-[11px] font-bold text-emerald-700">
-                {fieldContext.fieldLabel}
+                {collapsedTitle}
               </div>
               <div data-tauri-drag-region className="mt-0.5 truncate text-[9px] font-medium text-slate-500">
-                {isManuallyCollapsed ? (fieldStatusText || fieldContext.docName) : (fieldDraftStatus === 'writing' ? '正在回填当前字段' : '正在书写当前字段')}
+                {collapsedSubtitle}
               </div>
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {isDetected && detectedContext && detectedDocName && !isWorking ? (
+            {isWorking ? (
+              <button
+                type="button"
+                data-tauri-drag-region="false"
+                onClick={handleExpand}
+                className="flex h-8 w-8 items-center justify-center bg-emerald-600 text-white hover:bg-emerald-700"
+                title="查看处理状态"
+                aria-label="查看处理状态"
+              >
+                <ArrowRightOutlined className="text-xs" />
+              </button>
+            ) : hasPreparedDraft ? (
+              <>
+                <button
+                  type="button"
+                  data-tauri-drag-region="false"
+                  onClick={handleRegenerateDraft}
+                  className="flex h-8 w-8 items-center justify-center border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                  title="重新生成出院记录"
+                  aria-label="重新生成出院记录"
+                >
+                  <ReloadOutlined className="text-xs" />
+                </button>
+                {canWriteback ? (
+                  <button
+                    type="button"
+                    data-tauri-drag-region="false"
+                    onClick={handleWriteback}
+                    className="flex h-8 w-8 items-center justify-center bg-emerald-600 text-white hover:bg-emerald-700"
+                    title="回填出院记录"
+                    aria-label="回填出院记录"
+                  >
+                    <UploadOutlined className="text-xs" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    data-tauri-drag-region="false"
+                    onClick={handleExpand}
+                    className="flex h-8 w-8 items-center justify-center bg-emerald-600 text-white hover:bg-emerald-700"
+                    title="进入出院记录"
+                    aria-label="进入出院记录"
+                  >
+                    <ArrowRightOutlined className="text-xs" />
+                  </button>
+                )}
+              </>
+            ) : canGenerateDraft ? (
               <button
                 type="button"
                 data-tauri-drag-region="false"
                 onClick={handleRegenerateDraft}
-                className="h-7 px-2 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium"
-                title={draftStatus === 'ready' || draftStatus === 'error' ? '重新生成出院记录' : '生成出院记录'}
-                aria-label="生成出院记录"
+                className="flex h-8 min-w-[76px] items-center justify-center gap-1 border border-emerald-200 bg-white px-2 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50"
+                title="生成全文"
+                aria-label="生成全文"
               >
-                <FileTextOutlined className="mr-1 text-xs" />
+                <FileTextOutlined className="text-xs" />
                 生成全文
               </button>
             ) : null}
           </div>
+          {isWorking ? (
+            <div data-tauri-drag-region className="absolute inset-x-0 bottom-0 h-0.5 bg-emerald-100">
+              <div
+                data-tauri-drag-region
+                className="h-full bg-emerald-500 transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -667,18 +804,19 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
                 {fieldContext.fieldLabel} · {fieldIntent === 'rewrite' ? '改写选区' : fieldIntent === 'term' ? '术语/续写' : '字段生成'}
               </div>
               <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
-                {fieldContext.selectedText || fieldContext.prefix || fieldStatusText || fieldContext.docName}
+                {fieldContext.selectedText || fieldContext.prefix || fieldStatusText || fieldActionText}
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {isDetected && detectedContext && detectedDocName && !isWorking ? (
+              {isDetected && detectedContext && detectedDocName ? (
                 <button
                   type="button"
                   data-tauri-drag-region="false"
                   onClick={handleRegenerateDraft}
-                  className="h-7 px-2 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium"
-                  title={draftStatus === 'ready' || draftStatus === 'error' ? '重新生成出院记录' : '生成出院记录'}
-                  aria-label="生成出院记录"
+                  disabled={isWorking}
+                  className="h-7 px-2 flex items-center justify-center bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 text-[11px] font-medium"
+                  title="生成全文"
+                  aria-label="生成全文"
                 >
                   <FileTextOutlined className="mr-1 text-xs" />
                   生成全文
@@ -964,7 +1102,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
           <>
             <div data-tauri-drag-region className="flex items-center justify-between gap-2">
               <div data-tauri-drag-region className="text-[11px] font-bold text-emerald-700 truncate">
-                {detectedContext.patientName} · {draftStatus === 'written' ? '已回写' : draftStatus === 'ready' ? '可回写' : draftStatus === 'generating' ? '生成中' : '待书写'}
+                {detectedContext.patientName} · {draftStatusLabel}
               </div>
               {/* <div data-tauri-drag-region className="text-[9px] tabular-nums font-bold text-emerald-600">
                 {Math.round(progress)}%
