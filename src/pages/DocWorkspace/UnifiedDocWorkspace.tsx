@@ -14,7 +14,7 @@ import type { DocDefinition } from '../../config/docRegistry';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import type { DocFieldDef, DocTemplate, FieldValue } from '../../services/types';
 import type { FieldAssistDraft } from '../../services/fieldAssist/types';
-import { generateFieldDraft } from '../../services/fieldAssist/generation';
+import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
 import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import { submitDocument } from '../../services/emsBridge';
 import { saveDraft } from '../../services/draftService';
@@ -40,6 +40,15 @@ interface FieldSession {
   applying: boolean;
 }
 
+interface AsrServerMessage {
+  text?: string;
+  is_final?: boolean;
+}
+
+type AudioContextWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 const EMPTY_SESSION_META = {
   source: 'assistant-workbench',
   selectedText: '',
@@ -53,6 +62,13 @@ const EMPTY_SESSION_META = {
   receivedAt: '',
 } as const;
 const FIELD_CONTEXT_POLL_MS = 1800;
+const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
+const ASR_MODE = '2';
+
+function buildAsrWsUrl(baseUrl: string, mode: string) {
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}mode=${encodeURIComponent(mode)}`;
+}
 
 function valueToText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -209,7 +225,13 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const latestFieldSnapshotKeyRef = useRef('');
-  const voiceTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const asrWsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const voiceFieldKeyRef = useRef('');
+  const finalVoiceTextRef = useRef('');
   const fieldCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const topSessions = useMemo(
     () => sessions.filter((session) => isTopWorkbenchField(session.field)),
@@ -266,10 +288,6 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setSessions((current) => mergeLatestDraftsIntoSessions(current, drafts, patient.id, doc.code));
   }, [doc.code, drafts, patient.id]);
 
-  useEffect(() => () => {
-    if (voiceTimerRef.current) window.clearTimeout(voiceTimerRef.current);
-  }, []);
-
   useEffect(() => {
     if (!bodySessions.length) {
       if (activeFieldKey) setActiveFieldKey('');
@@ -302,6 +320,9 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       latestFieldSnapshotKeyRef.current = nextSnapshotKey;
       setFieldContext(usableContext);
       if (bodySessions.some((session) => session.field.key === usableContext.fieldKey)) {
+        stopAsrRecording();
+        voiceFieldKeyRef.current = '';
+        finalVoiceTextRef.current = '';
         setVoiceText('');
         setVoicePanelOpen(false);
         setActiveFieldKey(usableContext.fieldKey);
@@ -341,9 +362,11 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         value: draft.generatedText || draft.response.generatedText,
       }));
       if (fieldKey === activeFieldKey) {
+        stopAsrRecording();
+        voiceFieldKeyRef.current = '';
+        finalVoiceTextRef.current = '';
         setVoiceText('');
         setVoicePanelOpen(false);
-        setRecording(false);
       }
       message.success(`已生成${session.field.label}`);
     } catch (generateError) {
@@ -449,13 +472,77 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     void handleGenerate(activeSession.field.key, `根据语音转写生成${activeSession.field.label}`, voiceText.trim());
   };
 
-  const closeVoicePanel = () => {
-    if (voiceTimerRef.current) {
-      window.clearTimeout(voiceTimerRef.current);
-      voiceTimerRef.current = null;
+  const writeVoiceTranscript = (fieldKey: string, nextText: string) => {
+    setVoiceText(nextText);
+    updateSession(fieldKey, (item) => ({
+      ...item,
+      value: nextText,
+    }));
+  };
+
+  const handleAsrMessage = (data: AsrServerMessage) => {
+    const fieldKey = voiceFieldKeyRef.current;
+    if (!fieldKey) return;
+
+    if (!data.text && data.is_final) {
+      writeVoiceTranscript(fieldKey, finalVoiceTextRef.current);
+      return;
     }
+    if (!data.text) return;
+
+    const nextText = `${finalVoiceTextRef.current}${data.text}`;
+    writeVoiceTranscript(fieldKey, nextText);
+
+    if (data.is_final !== false) {
+      finalVoiceTextRef.current = nextText;
+    }
+  };
+
+  const stopAsrRecording = (sendFlush = true) => {
+    const processor = audioProcessorRef.current;
+    audioProcessorRef.current = null;
+    if (processor) {
+      processor.onaudioprocess = null;
+      processor.disconnect();
+    }
+
+    const source = audioSourceRef.current;
+    audioSourceRef.current = null;
+    source?.disconnect();
+
+    const stream = mediaStreamRef.current;
+    mediaStreamRef.current = null;
+    stream?.getTracks().forEach((track) => track.stop());
+
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext && audioContext.state !== 'closed') {
+      void audioContext.close();
+    }
+
+    const ws = asrWsRef.current;
+    asrWsRef.current = null;
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      if (ws.readyState === WebSocket.OPEN) {
+        if (sendFlush) ws.send('flush');
+        ws.close();
+      } else if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    }
+
     setRecording(false);
+  };
+
+  const closeVoicePanel = () => {
+    stopAsrRecording();
     setVoicePanelOpen(false);
+    voiceFieldKeyRef.current = '';
+    finalVoiceTextRef.current = '';
   };
 
   const scrollToField = (fieldKey: string) => {
@@ -470,6 +557,9 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
   const handleVoiceTextChange = (nextText: string) => {
     setVoiceText(nextText);
+    if (voiceFieldKeyRef.current) {
+      finalVoiceTextRef.current = nextText;
+    }
     if (!activeSession) return;
     updateSession(activeSession.field.key, (item) => ({
       ...item,
@@ -477,7 +567,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     }));
   };
 
-  const handleToggleRecording = () => {
+  const handleToggleRecording = async () => {
     if (!activeSession) {
       message.warning('请先选择一个正文编辑字段。');
       return;
@@ -488,44 +578,130 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       return;
     }
 
+    if (!ASR_WS_URL) {
+      message.error('请先在 .env 中配置 VITE_ASR_WS_URL。');
+      return;
+    }
+
     const targetFieldKey = activeSession.field.key;
-    const transcriptText = `请根据医生口述补充${activeSession.field.label}。`;
+    const initialText = voiceText.trim() ? voiceText : '';
+    stopAsrRecording(false);
+    voiceFieldKeyRef.current = targetFieldKey;
+    finalVoiceTextRef.current = initialText;
     setVoicePanelOpen(true);
     setRecording(true);
-    message.loading({ content: `正在采集「${activeSession.field.label}」语音...`, key: 'doc-workspace-voice' });
-    voiceTimerRef.current = window.setTimeout(() => {
-      setRecording(false);
-      setVoiceText(transcriptText);
-      updateSession(targetFieldKey, (item) => ({
-        ...item,
-        value: transcriptText,
-      }));
-      voiceTimerRef.current = null;
-      message.success({ content: '语音转文字已生成，请确认后生成字段。', key: 'doc-workspace-voice', duration: 1.5 });
-    }, 1200);
+    setVoiceText(initialText);
+    message.loading({ content: `正在连接语音识别服务，准备采集「${activeSession.field.label}」语音...`, key: 'doc-workspace-voice' });
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+      if (voiceFieldKeyRef.current !== targetFieldKey) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      mediaStreamRef.current = stream;
+      const ws = new WebSocket(buildAsrWsUrl(ASR_WS_URL, ASR_MODE));
+      asrWsRef.current = ws;
+
+      ws.onopen = () => {
+        if (voiceFieldKeyRef.current !== targetFieldKey) {
+          ws.close();
+          return;
+        }
+
+        const AudioContextCtor = window.AudioContext ?? (window as AudioContextWindow).webkitAudioContext;
+        if (!AudioContextCtor) {
+          message.error({ content: '当前浏览器不支持语音采集。', key: 'doc-workspace-voice' });
+          closeVoicePanel();
+          return;
+        }
+
+        const audioContext = new AudioContextCtor({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(stream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        audioContextRef.current = audioContext;
+        audioSourceRef.current = source;
+        audioProcessorRef.current = processor;
+
+        processor.onaudioprocess = (event) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+
+          const inputData = event.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(inputData.length);
+          for (let index = 0; index < inputData.length; index += 1) {
+            const sample = Math.max(-1, Math.min(1, inputData[index]));
+            pcm16[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+          }
+          ws.send(pcm16.buffer);
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+        message.success({ content: `正在语音转写「${activeSession.field.label}」`, key: 'doc-workspace-voice', duration: 1.5 });
+      };
+
+      ws.onmessage = (event) => {
+        if (typeof event.data !== 'string') return;
+        try {
+          handleAsrMessage(JSON.parse(event.data) as AsrServerMessage);
+        } catch {
+          // Ignore non-JSON diagnostic frames from the ASR service.
+        }
+      };
+
+      ws.onerror = () => {
+        message.error({ content: '语音识别连接异常，请检查 ASR 服务。', key: 'doc-workspace-voice' });
+      };
+
+      ws.onclose = () => {
+        if (asrWsRef.current === ws) asrWsRef.current = null;
+        setRecording(false);
+      };
+    } catch (voiceError) {
+      stopAsrRecording(false);
+      setVoicePanelOpen(false);
+      voiceFieldKeyRef.current = '';
+      finalVoiceTextRef.current = '';
+      message.error({
+        content: voiceError instanceof Error ? voiceError.message : '无法获取麦克风权限。',
+        key: 'doc-workspace-voice',
+      });
+    }
   };
+
+  useEffect(() => () => {
+    stopAsrRecording(false);
+  }, []);
 
   const handleApply = async (fieldKey: string) => {
     const session = sessions.find((item) => item.field.key === fieldKey);
     if (!session || session.applying) return;
-    if (!session.draft) {
-      message.warning(`请先生成「${session.field.label}」字段草稿，再执行回填。`);
-      return;
-    }
     if (!fieldContext || fieldContext.fieldKey !== fieldKey) {
       message.warning(`请先在 CS 端聚焦「${session.field.label}」字段，再执行回填。`);
       return;
     }
+    if (!session.draft && !session.value.trim()) {
+      message.warning(`请先生成或填写「${session.field.label}」内容，再执行回填。`);
+      return;
+    }
 
     updateSession(fieldKey, (item) => ({ ...item, applying: true }));
+    const effectiveDraft = session.draft
+      ?? buildSuggestionDraft(fieldContext, session.value, '当前字段文本回填');
     try {
       await applyFieldDraft({
         context: fieldContext,
-        response: session.draft.response,
+        response: effectiveDraft.response,
         finalText: session.value,
         mode: 'fill',
         doctorName: patient.doctor,
       });
+      if (!session.draft) {
+        addDraft(effectiveDraft);
+        updateSession(fieldKey, (item) => ({ ...item, draft: effectiveDraft }));
+      }
     } catch (applyError) {
       message.error(applyError instanceof Error ? applyError.message : '字段回填失败');
     } finally {
@@ -709,6 +885,18 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                         清空
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeSession) void handleApply(activeSession.field.key);
+                      }}
+                      disabled={!activeSession || !voiceText.trim() || activeSession.applying}
+                      className="inline-flex h-6 items-center gap-1 rounded-md bg-emerald-600 px-2 text-[10px] font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="回填到当前 HIS 字段"
+                    >
+                      {activeSession?.applying ? <Loading3QuartersOutlined className="animate-spin" /> : <UploadOutlined />}
+                      回填
+                    </button>
                     <button
                       type="button"
                       onClick={closeVoicePanel}
