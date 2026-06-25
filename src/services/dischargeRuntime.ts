@@ -5,6 +5,7 @@ import { pluginRuntimeApi, toIcdItem } from './pluginRuntime';
 import { loadDraft } from './draftService';
 import type {
   RuntimeDocFieldDto,
+  RuntimeFieldCalculationDto,
   RuntimeDocTemplateDto,
   RuntimeDocValueBundleDto,
   RuntimeFieldValueDto,
@@ -116,7 +117,7 @@ export function buildDischargeRuntime(
     fieldKey: f.fieldKey,
     fieldLabel: f.fieldLabel,
     renderRule: f.renderRule,
-    metaSlot: f.renderRule?.metaSlot
+    metaSlot: isDischargeMetaFieldKey(f.fieldKey) ? 'date' : undefined
   })));
   const fieldValues = values.values ?? {};
   const sections = applyDischargeFieldAutomation(
@@ -174,12 +175,12 @@ function toClinicalSection(field: RuntimeDocFieldDto, value?: RuntimeFieldValueD
     title: field.sectionName || field.fieldLabel,
     text: resolveFieldText(field, value),
     fieldKey: field.writebackFieldKey || field.fieldKey,
-    editable: daysField ? false : dateField ? true : field.renderRule?.editable ?? true,
+    editable: daysField ? false : dateField ? true : field.inputType !== 'static',
     inputType: dateField ? 'date' : field.inputType,
-    calculation: field.renderRule?.calculation ?? defaultDischargeCalculation(field.fieldKey),
+    calculation: toClinicalCalculation(field.renderRule?.calculate) ?? defaultDischargeCalculation(field.fieldKey),
     source: normalizeFieldSource(field.sourceType),
     required: Boolean(field.required),
-    evidenceEnabled: Boolean(field.renderRule?.evidence?.enabled),
+    evidenceEnabled: Boolean(field.renderRule?.evidence?.sources?.length),
   };
 }
 
@@ -221,9 +222,7 @@ function validateRuntimeConfig(template: RuntimeDocTemplateDto, values: RuntimeD
 const FORCED_META_FIELD_KEYS = new Set(['admissionDate', 'dischargeDate', 'hospitalDays']);
 
 function isMetaField(field: RuntimeDocFieldDto): boolean {
-  if (FORCED_META_FIELD_KEYS.has(field.fieldKey)) return true;
-  const slot = field.renderRule?.metaSlot;
-  return slot === 'patient' || slot === 'date';
+  return FORCED_META_FIELD_KEYS.has(field.fieldKey);
 }
 
 function resolveFieldText(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): string {
@@ -235,7 +234,7 @@ function resolveFieldText(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDt
   const resolved = runtimeValueToText(value?.value);
   if (resolved) return resolved;
 
-  if (field.renderRule?.defaultValueMode === 'today') return todayDate();
+  if (field.renderRule?.default?.mode === 'today') return todayDate();
   return field.staticText || field.defaultValue || '';
 }
 
@@ -252,6 +251,21 @@ function defaultDischargeCalculation(fieldKey: string): ClinicalFieldCalculation
     minDays: 1,
     suffix: '天',
   };
+}
+
+function toClinicalCalculation(calculation: RuntimeFieldCalculationDto | undefined): ClinicalFieldCalculation | undefined {
+  if (!calculation || calculation.type !== 'daysBetween') return undefined;
+  return {
+    type: calculation.type,
+    startField: calculation.start,
+    endField: calculation.end,
+    minDays: calculation.min,
+    suffix: calculation.suffix,
+  };
+}
+
+function isDischargeMetaFieldKey(fieldKey: string): boolean {
+  return FORCED_META_FIELD_KEYS.has(fieldKey);
 }
 
 export function applyDischargeFieldAutomation(sections: ClinicalSection[]): ClinicalSection[] {
@@ -367,7 +381,6 @@ function readOnlyHintOf(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto)
     value?.errorMessage,
     ...(value?.warnings ?? []),
     ...sourceStatusHints(value),
-    field.renderRule?.readOnlyHint,
   ].filter((item): item is string => Boolean(item?.trim())).filter(uniqueText).join('；');
 }
 

@@ -111,7 +111,7 @@ export interface DocFieldDef {
   staticText?: string;
   /** 是否支持语音口述输入（主诉/现病史等叙述段落：录音转写填入本字段，作为可选加速而非必经步骤） */
   dictatable?: boolean;
-  /** 顶部工作台信息槽位（如 patient/date），由后台 renderRule.metaSlot 下发 */
+  /** 顶部工作台信息槽位（如 patient/date），由具体文书适配器推导或样例数据提供 */
   metaSlot?: string;
 }
 
