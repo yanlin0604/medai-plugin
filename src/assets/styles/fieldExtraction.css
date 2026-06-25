@@ -1,0 +1,78 @@
+/**
+ * 字段提取 - AI 填充标记样式
+ */
+
+/* AI 填充字段标记 */
+.ai-filled {
+  background-color: rgba(253, 230, 138, 0.2) !important; /* 淡黄色背景 */
+  border-left: 3px solid #3b82f6 !important; /* 蓝色左边框 */
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+/* 聚焦时移除标记效果 */
+.ai-filled:focus {
+  background-color: transparent !important;
+  border-left-color: #d1d5db !important;
+}
+
+/* AI 填充提示（可选） */
+.ai-filled::after {
+  content: '✨ AI';
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: #6b7280;
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* 多行文本框的提示位置调整 */
+textarea.ai-filled::after {
+  top: 8px;
+  transform: none;
+}
+
+/* 置信度低时的样式（可选，如果需要根据置信度显示不同样式） */
+.ai-filled[data-confidence]:not([data-confidence="1"]) {
+  background-color: rgba(254, 202, 202, 0.2) !important; /* 淡红色背景 */
+}
+
+/* 高置信度样式（可选） */
+.ai-filled[data-confidence="1"],
+.ai-filled[data-confidence^="0.9"] {
+  background-color: rgba(187, 247, 208, 0.2) !important; /* 淡绿色背景 */
+}
+
+/* 移除输入框默认的自动填充样式 */
+.ai-filled:-webkit-autofill,
+.ai-filled:-webkit-autofill:hover,
+.ai-filled:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px rgba(253, 230, 138, 0.2) inset !important;
+  box-shadow: 0 0 0 1000px rgba(253, 230, 138, 0.2) inset !important;
+}
+
+/* AntD Input 组件兼容 */
+.ant-input.ai-filled,
+.ant-input-textarea .ai-filled {
+  background-color: rgba(253, 230, 138, 0.2) !important;
+  border-left: 3px solid #3b82f6 !important;
+}
+
+.ant-input.ai-filled:focus,
+.ant-input-textarea .ai-filled:focus {
+  background-color: transparent !important;
+  border-left-color: #d9d9d9 !important;
+}
+
+/* 禁用状态的 AI 填充字段 */
+.ai-filled:disabled,
+.ai-filled[disabled] {
+  background-color: rgba(253, 230, 138, 0.1) !important;
+  opacity: 0.7;
+}

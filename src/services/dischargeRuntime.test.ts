@@ -61,7 +61,7 @@ const field = (overrides: Partial<RuntimeDocFieldDto>): RuntimeDocFieldDto => ({
   required: true,
   dictatable: false,
   writebackFieldKey: 'bs.admission_date',
-  renderRule: { metaSlot: 'date', editable: false, readOnlyHint: 'HIS同步' },
+  renderRule: {},
   ...overrides,
 });
 
@@ -138,7 +138,7 @@ describe('dischargeRuntime', () => {
           sourceType: 'emr',
           inputType: 'text',
           writebackFieldKey: 'bs.treatment_course',
-          renderRule: { metaSlot: 'body', editable: true },
+          renderRule: {},
         }),
         field({ fieldOrder: 10 }),
       ]),
@@ -157,7 +157,7 @@ describe('dischargeRuntime', () => {
     expect(isDischargeMetaSection(runtime.sections[0], runtime.metaFieldKeys)).toBe(true);
     expect(runtime.sections[0]).toMatchObject({ inputType: 'date', editable: true });
     expect(runtime.metaRows[2][0]).toEqual({ label: '入院日期', value: '2026-06-01' });
-    expect(runtime.readOnlyHints.admissionDate).toBe('HIS同步');
+    expect(runtime.readOnlyHints.admissionDate).toBe('');
     expect(runtime.icdCandidates[0]).toMatchObject({ code: 'I25.101', confidence: 96 });
   });
 
@@ -222,7 +222,7 @@ describe('dischargeRuntime', () => {
           sourceType: 'ai',
           inputType: 'text',
           writebackFieldKey: 'bs.treatment_course',
-          renderRule: { metaSlot: 'body', editable: true },
+          renderRule: { evidence: { sources: ['HIS', 'LIS', 'PACS'], types: ['order', 'lab', 'imaging'], min: 1 } },
         }),
       ]),
       values({
@@ -299,7 +299,7 @@ describe('dischargeRuntime', () => {
           staticText: '待AI生成',
           defaultValue: '无特殊诊疗',
           writebackFieldKey: 'bs.treatment_course',
-          renderRule: { metaSlot: 'body', editable: true },
+          renderRule: {},
         }),
       ]),
       values({
@@ -330,7 +330,7 @@ describe('dischargeRuntime', () => {
           sourceType: 'ai',
           inputType: 'text',
           writebackFieldKey: 'bs.admission_condition',
-          renderRule: { metaSlot: 'body', editable: true },
+          renderRule: {},
         }),
       ]),
       values({
@@ -363,7 +363,7 @@ describe('dischargeRuntime', () => {
           sourceType: 'ai',
           inputType: 'text',
           writebackFieldKey: 'bs.treatment_course',
-          renderRule: { metaSlot: 'body', editable: true },
+          renderRule: {},
         }),
       ]),
       values({
@@ -393,7 +393,7 @@ describe('dischargeRuntime', () => {
           sourceType: 'ai',
           inputType: 'text',
           writebackFieldKey: 'bs.treatment_course',
-          renderRule: { metaSlot: 'body', editable: true },
+          renderRule: {},
         }),
       ]),
       values({

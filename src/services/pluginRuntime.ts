@@ -236,7 +236,6 @@ export function toDocFieldDef(field: RuntimeDocFieldDto): DocFieldDef {
     placeholder: field.placeholder,
     staticText: field.staticText,
     dictatable: field.dictatable,
-    metaSlot: field.renderRule?.metaSlot,
   };
 }
 

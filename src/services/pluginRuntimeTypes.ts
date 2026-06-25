@@ -68,49 +68,48 @@ export interface RuntimeDocFieldOptionDto {
 }
 
 export interface RuntimeFieldRenderRuleDto {
-  valueRef?: RuntimeFieldValueRefDto;
-  generation?: RuntimeFieldGenerationRuleDto;
-  editable?: boolean;
-  metaSlot?: string;
-  readOnlyHint?: string;
-  defaultValueMode?: string;
-  calculation?: RuntimeFieldCalculationDto;
-  todayDocMerge?: RuntimeTodayDocMergeRuleDto;
+  value?: RuntimeFieldValueRefDto;
+  default?: RuntimeFieldDefaultRuleDto;
+  calculate?: RuntimeFieldCalculationDto;
+  merge?: RuntimeFieldMergeRuleDto;
   evidence?: RuntimeFieldEvidenceRuleDto;
-}
-
-export interface RuntimeFieldGenerationRuleDto {
-  strategy?: 'direct' | 'calculate' | 'extract' | 'evidence_summary' | 'ai_summary' | 'hybrid' | string;
-  sources?: RuntimeGenerationSourceRefDto[];
-  promptKey?: string;
-  fallbackMode?: 'empty' | 'default' | 'concat' | 'evidence_concat' | string;
-  requireTimeline?: boolean;
-  auditEnabled?: boolean;
-  focusHints?: string[];
-}
-
-export interface RuntimeGenerationSourceRefDto {
-  sourceSystem?: string;
-  adapterKey?: string;
-  sourcePath?: string;
-  transform?: string;
-  required?: boolean;
-  evidenceTypes?: string[];
+  prompt?: RuntimeFieldPromptRuleDto;
 }
 
 export interface RuntimeFieldCalculationDto {
   type?: string;
-  startField?: string;
-  endField?: string;
-  minDays?: number;
+  start?: string;
+  end?: string;
+  min?: number;
   suffix?: string;
 }
 
-export interface RuntimeTodayDocMergeRuleDto {
-  enabled?: boolean;
-  fieldKeys?: string[];
-  excludeDocCodes?: string[];
+export interface RuntimeFieldDefaultRuleDto {
+  mode?: string;
+}
+
+export interface RuntimeFieldMergeRuleDto {
+  todayDocs?: boolean;
+  fields?: string[];
+  excludeDocs?: string[];
   maxChars?: number;
+}
+
+export interface RuntimeFieldValueRefDto {
+  adapterKey?: string;
+  path?: string;
+  transform?: string;
+}
+
+export interface RuntimeFieldPromptRuleDto {
+  goal?: string;
+  style?: string;
+  format?: string;
+  length?: string;
+  focus?: string[];
+  mustInclude?: string[];
+  mustAvoid?: string[];
+  instruction?: string;
 }
 
 export type RuntimeEvidenceWritebackMode = 'fill' | 'append' | 'overwrite';
@@ -125,14 +124,10 @@ export interface RuntimeEvidenceQueryRequest {
 }
 
 export interface RuntimeFieldEvidenceRuleDto {
-  enabled?: boolean;
-  sourceSystems?: string[];
-  evidenceTypes?: string[];
-  requireTimeline?: boolean;
-  generationMode?: string;
-  defaultWritebackMode?: RuntimeEvidenceWritebackMode;
-  minEvidenceCount?: number;
-  focusHints?: string[];
+  sources?: string[];
+  types?: string[];
+  timeline?: boolean;
+  min?: number;
 }
 
 export interface RuntimeEvidenceItemDto {
@@ -169,6 +164,7 @@ export interface RuntimeEvidenceBundleDto {
   docCode: string;
   fieldKey: string;
   rule?: RuntimeFieldEvidenceRuleDto;
+  prompt?: RuntimeFieldPromptRuleDto;
   evidenceItems: RuntimeEvidenceItemDto[];
   sourceStatuses: RuntimeEvidenceSourceStatusDto[];
   warnings: string[];
