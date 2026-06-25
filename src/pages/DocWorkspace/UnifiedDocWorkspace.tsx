@@ -15,7 +15,7 @@ import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import type { DocFieldDef, DocTemplate, FieldValue } from '../../services/types';
 import type { FieldAssistDraft } from '../../services/fieldAssist/types';
 import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
-import { applyFieldDraft } from '../../services/fieldAssist/writeback';
+import { applyFieldDraft, insertTextIntoFieldContext } from '../../services/fieldAssist/writeback';
 import { submitDocument } from '../../services/emsBridge';
 import { loadDraft, saveDraft } from '../../services/draftService';
 import { stripCitations } from '../../services/documentFlow';
@@ -297,7 +297,8 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const voiceFieldKeyRef = useRef('');
-  const finalVoiceTextRef = useRef('');
+  const finalVoiceDraftRef = useRef('');
+  const voiceBaseContextRef = useRef<FieldAssistContext | null>(null);
   const fieldCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const topSessions = useMemo(
     () => sessions.filter((session) => isTopWorkbenchField(session.field)),
@@ -393,7 +394,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       if (bodySessions.some((session) => session.field.key === usableContext.fieldKey)) {
         stopAsrRecording();
         voiceFieldKeyRef.current = '';
-        finalVoiceTextRef.current = '';
+        finalVoiceDraftRef.current = '';
         setVoiceText('');
         setVoicePanelOpen(false);
         setActiveFieldKey(usableContext.fieldKey);
@@ -435,7 +436,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       if (fieldKey === activeFieldKey) {
         stopAsrRecording();
         voiceFieldKeyRef.current = '';
-        finalVoiceTextRef.current = '';
+        finalVoiceDraftRef.current = '';
         setVoiceText('');
         setVoicePanelOpen(false);
       }
@@ -561,7 +562,11 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     void handleGenerate(activeSession.field.key, `根据语音转写生成${activeSession.field.label}`, voiceText.trim());
   };
 
-  const writeVoiceTranscript = (fieldKey: string, nextText: string) => {
+  const writeVoiceTranscript = (fieldKey: string, transcriptDraft: string) => {
+    const baseContext = voiceBaseContextRef.current;
+    const nextText = baseContext
+      ? insertTextIntoFieldContext(baseContext, transcriptDraft).text
+      : transcriptDraft;
     setVoiceText(nextText);
     updateSession(fieldKey, (item) => ({
       ...item,
@@ -574,16 +579,16 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     if (!fieldKey) return;
 
     if (!data.text && data.is_final) {
-      writeVoiceTranscript(fieldKey, finalVoiceTextRef.current);
+      writeVoiceTranscript(fieldKey, finalVoiceDraftRef.current);
       return;
     }
     if (!data.text) return;
 
-    const nextText = `${finalVoiceTextRef.current}${data.text}`;
-    writeVoiceTranscript(fieldKey, nextText);
+    const nextDraft = `${finalVoiceDraftRef.current}${data.text}`;
+    writeVoiceTranscript(fieldKey, nextDraft);
 
     if (data.is_final !== false) {
-      finalVoiceTextRef.current = nextText;
+      finalVoiceDraftRef.current = nextDraft;
     }
   };
 
@@ -631,7 +636,8 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     stopAsrRecording();
     setVoicePanelOpen(false);
     voiceFieldKeyRef.current = '';
-    finalVoiceTextRef.current = '';
+    finalVoiceDraftRef.current = '';
+    voiceBaseContextRef.current = null;
   };
 
   const scrollToField = (fieldKey: string) => {
@@ -646,10 +652,20 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
   const handleVoiceTextChange = (nextText: string) => {
     setVoiceText(nextText);
-    if (voiceFieldKeyRef.current) {
-      finalVoiceTextRef.current = nextText;
-    }
     if (!activeSession) return;
+    if (voiceFieldKeyRef.current) {
+      finalVoiceDraftRef.current = nextText;
+      const editContext = fieldContext?.fieldKey === activeSession.field.key
+        ? fieldContext
+        : buildContext(doc, patient, activeSession);
+      voiceBaseContextRef.current = {
+        ...editContext,
+        fieldValue: '',
+        selectedText: '',
+        selectionStart: 0,
+        selectionEnd: 0,
+      };
+    }
     updateSession(activeSession.field.key, (item) => ({
       ...item,
       value: nextText,
@@ -673,13 +689,16 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     }
 
     const targetFieldKey = activeSession.field.key;
-    const initialText = voiceText.trim() ? voiceText : '';
+    const activeContext = fieldContext?.fieldKey === targetFieldKey
+      ? fieldContext
+      : buildContext(doc, patient, activeSession);
     stopAsrRecording(false);
     voiceFieldKeyRef.current = targetFieldKey;
-    finalVoiceTextRef.current = initialText;
+    voiceBaseContextRef.current = activeContext;
+    finalVoiceDraftRef.current = '';
     setVoicePanelOpen(true);
     setRecording(true);
-    setVoiceText(initialText);
+    setVoiceText(activeContext.fieldValue);
     message.loading({ content: `正在连接语音识别服务，准备采集「${activeSession.field.label}」语音...`, key: 'doc-workspace-voice' });
 
     try {
@@ -752,7 +771,8 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       stopAsrRecording(false);
       setVoicePanelOpen(false);
       voiceFieldKeyRef.current = '';
-      finalVoiceTextRef.current = '';
+      finalVoiceDraftRef.current = '';
+      voiceBaseContextRef.current = null;
       message.error({
         content: voiceError instanceof Error ? voiceError.message : '无法获取麦克风权限。',
         key: 'doc-workspace-voice',
@@ -777,14 +797,22 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     // }
 
     updateSession(fieldKey, (item) => ({ ...item, applying: true }));
+    const applyContext = voiceBaseContextRef.current?.fieldKey === fieldKey
+      ? voiceBaseContextRef.current
+      : fieldContext;
+    const finalText = applyContext === voiceBaseContextRef.current && finalVoiceDraftRef.current.trim()
+      ? finalVoiceDraftRef.current.trim()
+      : session.value;
     const effectiveDraft = session.draft
       ?? buildSuggestionDraft(fieldContext, session.value, '当前字段文本回填');
     try {
       await applyFieldDraft({
-        context: fieldContext,
+        context: applyContext,
         response: effectiveDraft.response,
-        finalText: session.value,
-        mode: 'fill',
+        finalText,
+        mode: applyContext === voiceBaseContextRef.current
+          ? (applyContext.fieldValue.trim() ? 'replaceSelection' : 'overwrite')
+          : undefined,
         doctorName: patient.doctor,
       });
       if (!session.draft) {

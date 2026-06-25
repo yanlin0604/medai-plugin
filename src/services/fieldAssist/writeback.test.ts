@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RuntimeFieldCompletionResponse } from '../pluginRuntimeTypes';
 import type { FieldAssistContext } from './types';
-import { buildFieldWritebackPayload, resolveFieldWritebackMode } from './writeback';
+import { buildFieldWritebackPayload, insertTextIntoFieldContext, resolveFieldWritebackMode } from './writeback';
 
 function createContext(overrides: Partial<FieldAssistContext> = {}): FieldAssistContext {
   return {
@@ -48,6 +48,38 @@ describe('fieldAssist writeback', () => {
     expect(resolveFieldWritebackMode({ fieldValue: '已有内容', selectedText: '' })).toBe('append');
     expect(resolveFieldWritebackMode({ fieldValue: '已有内容', selectedText: '已有' })).toBe('replaceSelection');
     expect(resolveFieldWritebackMode({ fieldValue: '已有内容', selectedText: '' }, 'overwrite')).toBe('overwrite');
+  });
+
+  it('inserts dictated text at the current cursor or selection', () => {
+    expect(insertTextIntoFieldContext({
+      fieldValue: 'abcdef',
+      selectionStart: 2,
+      selectionEnd: 2,
+    }, 'XY')).toEqual({
+      text: 'abXYcdef',
+      selectionStart: 2,
+      selectionEnd: 4,
+    });
+
+    expect(insertTextIntoFieldContext({
+      fieldValue: 'abcdef',
+      selectionStart: 2,
+      selectionEnd: 4,
+    }, 'XY')).toEqual({
+      text: 'abXYef',
+      selectionStart: 2,
+      selectionEnd: 4,
+    });
+
+    expect(insertTextIntoFieldContext({
+      fieldValue: 'abc',
+      selectionStart: 99,
+      selectionEnd: -2,
+    }, 'XY')).toEqual({
+      text: 'XY',
+      selectionStart: 0,
+      selectionEnd: 2,
+    });
   });
 
   it('builds a field payload scoped to the current CS field session', () => {

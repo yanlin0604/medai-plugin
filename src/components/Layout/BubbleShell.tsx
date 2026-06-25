@@ -44,7 +44,7 @@ import {
 } from '../../services/fieldAssist/contextBridge';
 import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
 import { resolveFieldAssistIntent, shouldAutoGenerateField } from '../../services/fieldAssist/intentResolver';
-import { applyFieldDraft } from '../../services/fieldAssist/writeback';
+import { applyFieldDraft, insertTextIntoFieldContext } from '../../services/fieldAssist/writeback';
 import type { FieldAssistContext, FieldAssistDraft, FieldAssistIntent } from '../../services/fieldAssist/types';
 import { getFieldAssistContextKey, getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
 import { renderTextWithCitations } from '../fieldAssist/FieldAssistPanel';
@@ -134,7 +134,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const voiceContextKeyRef = useRef('');
-  const finalVoiceTextRef = useRef('');
+  const finalVoiceDraftRef = useRef('');
+  const voiceBaseContextRef = useRef<FieldAssistContext | null>(null);
   const asrWsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -527,17 +528,29 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     stopVoiceRecording();
     setVoicePanelOpen(false);
     voiceContextKeyRef.current = '';
-    finalVoiceTextRef.current = '';
+    finalVoiceDraftRef.current = '';
+    voiceBaseContextRef.current = null;
   };
 
   const clearVoiceDraft = () => {
-    finalVoiceTextRef.current = '';
+    finalVoiceDraftRef.current = '';
+    voiceBaseContextRef.current = fieldContext
+      ? {
+        ...fieldContext,
+        fieldValue: '',
+        selectedText: '',
+        selectionStart: 0,
+        selectionEnd: 0,
+      }
+      : null;
     setVoiceText('');
   };
 
-  const writeVoiceTranscript = (contextKey: string, nextText: string) => {
+  const writeVoiceTranscript = (contextKey: string, transcriptDraft: string) => {
     if (voiceContextKeyRef.current !== contextKey) return;
-    setVoiceText(nextText);
+    const baseContext = voiceBaseContextRef.current ?? fieldContext;
+    if (!baseContext) return;
+    setVoiceText(insertTextIntoFieldContext(baseContext, transcriptDraft).text);
   };
 
   const handleAsrMessage = (data: AsrServerMessage) => {
@@ -545,21 +558,30 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     if (!contextKey) return;
 
     if (!data.text && data.is_final) {
-      writeVoiceTranscript(contextKey, finalVoiceTextRef.current);
+      writeVoiceTranscript(contextKey, finalVoiceDraftRef.current);
       return;
     }
     if (!data.text) return;
 
-    const nextText = `${finalVoiceTextRef.current}${data.text}`;
-    writeVoiceTranscript(contextKey, nextText);
+    const nextDraft = `${finalVoiceDraftRef.current}${data.text}`;
+    writeVoiceTranscript(contextKey, nextDraft);
 
     if (data.is_final !== false) {
-      finalVoiceTextRef.current = nextText;
+      finalVoiceDraftRef.current = nextDraft;
     }
   };
 
   const handleVoiceTextChange = (nextText: string) => {
-    finalVoiceTextRef.current = nextText;
+    finalVoiceDraftRef.current = nextText;
+    voiceBaseContextRef.current = fieldContext
+      ? {
+        ...fieldContext,
+        fieldValue: '',
+        selectedText: '',
+        selectionStart: 0,
+        selectionEnd: 0,
+      }
+      : null;
     setVoiceText(nextText);
   };
 
@@ -583,7 +605,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     const requestContextKey = fieldContextKey;
     stopVoiceRecording(false);
     voiceContextKeyRef.current = requestContextKey;
-    finalVoiceTextRef.current = voiceText.trim() ? voiceText : '';
+    voiceBaseContextRef.current = fieldContext;
+    finalVoiceDraftRef.current = '';
+    setVoiceText(fieldContext.fieldValue);
     setVoicePanelOpen(true);
     setVoiceRecording(true);
 
@@ -661,14 +685,17 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const handleApplyVoiceDraft = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (!fieldContext || !voiceText.trim() || fieldDraftStatus === 'writing') return;
+    const baseContext = voiceBaseContextRef.current ?? fieldContext;
 
     const draft = buildSuggestionDraft(fieldContext, voiceText.trim(), '语音转写回填');
+    const finalText = finalVoiceDraftRef.current.trim() || voiceText.trim();
     setFieldDraftStatus('writing');
     setFieldStatusText('正在回填语音草稿');
     void applyFieldDraft({
-      context: fieldContext,
+      context: baseContext,
       response: draft.response,
-      finalText: voiceText.trim(),
+      finalText,
+      mode: baseContext.fieldValue.trim() ? 'replaceSelection' : 'overwrite',
       doctorName: '林志远 主治医师',
     })
       .then(() => {
