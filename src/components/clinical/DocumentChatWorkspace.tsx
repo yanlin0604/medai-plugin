@@ -40,9 +40,11 @@ interface Props {
   sectionToolbarActions?: Record<string, ReactNode>;
   sectionBottomNodes?: Record<string, ReactNode>;
   sectionBadgeLabel?: string;
+  hideHeader?: boolean;
+  hideBadges?: boolean;
   regeneratingSectionKey?: string | null;
   onChange: (sectionKey: string, text: string) => void;
-  onReset: (sectionKey: string) => void;
+  onReset?: (sectionKey: string) => void;
   onRegenerateSection?: (sectionKey: string) => void;
   onFocusSection?: (sectionKey: string) => void;
   optimize?: SectionOptimize;
@@ -82,6 +84,8 @@ export default function DocumentChatWorkspace({
   sectionToolbarActions,
   sectionBottomNodes,
   sectionBadgeLabel = '概括总结',
+  hideHeader,
+  hideBadges,
   regeneratingSectionKey,
   onChange,
   onReset,
@@ -147,33 +151,35 @@ export default function DocumentChatWorkspace({
   return (
     <div className="min-h-full bg-[#F8FAFC] px-4 py-4">
       <div className="mx-auto flex max-w-[980px] flex-col gap-3">
-        <section className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] font-bold text-[#1E3A8A]">文书对话</div>
-              <h3 className="mt-1 truncate text-base font-extrabold text-slate-900">{docName}</h3>
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                <span>{patient.name}</span>
-                <span>{patient.gender} {patient.age}</span>
-                <span>住院号 {patient.admissionNo}</span>
+        {!hideHeader && (
+          <section className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold text-[#1E3A8A]">文书对话</div>
+                <h3 className="mt-1 truncate text-base font-extrabold text-slate-900">{docName}</h3>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                  <span>{patient.name}</span>
+                  <span>{patient.gender} {patient.age}</span>
+                  <span>住院号 {patient.admissionNo}</span>
+                </div>
               </div>
+              {actions ? <div className="flex shrink-0 flex-wrap justify-end gap-1.5">{actions}</div> : null}
             </div>
-            {actions ? <div className="flex shrink-0 flex-wrap justify-end gap-1.5">{actions}</div> : null}
-          </div>
 
-          {metaCells.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {metaCells.map((cell) => (
-                <span
-                  key={`${cell.label}-${String(cell.value)}`}
-                  className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-500"
-                >
-                  {cell.label}：{cell.value}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </section>
+            {metaCells.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {metaCells.map((cell) => (
+                  <span
+                    key={`${cell.label}-${String(cell.value)}`}
+                    className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-500"
+                  >
+                    {cell.label}：{cell.value}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        )}
 
         {notice}
 
@@ -199,12 +205,12 @@ export default function DocumentChatWorkspace({
                       <span className="rounded-md bg-[#F0F5FF] px-2 py-1 text-[11px] font-extrabold text-[#1E3A8A]">
                         {sectionBadgeLabel}
                       </span>
-                      {section.required ? (
+                      {!hideBadges && section.required ? (
                         <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
                           必填
                         </span>
                       ) : null}
-                      {edited ? (
+                      {!hideBadges && edited ? (
                         <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">
                           已修改
                         </span>
@@ -216,8 +222,7 @@ export default function DocumentChatWorkspace({
 
                   {!disabled ? (
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                      {toolbarActions}
-                      {onRegenerateSection ? (
+                      {onRegenerateSection && section.source === 'ai' ? (
                         <button
                           type="button"
                           onClick={() => onRegenerateSection(section.key)}
@@ -229,6 +234,7 @@ export default function DocumentChatWorkspace({
                           重新生成
                         </button>
                       ) : null}
+                      {toolbarActions}
                       {canOptimize ? (
                         <button
                           type="button"
@@ -241,7 +247,7 @@ export default function DocumentChatWorkspace({
                           补全
                         </button>
                       ) : null}
-                      {edited ? (
+                      {edited && onReset ? (
                         <button
                           type="button"
                           onClick={() => onReset(section.key)}

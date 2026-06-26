@@ -3,24 +3,18 @@ import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
 import {
-  HistoryOutlined,
   CheckOutlined,
   CloseOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
-import type { DocumentPaperMetaCell } from '../../components/clinical/DocumentPaper';
 import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspace';
-import WritebackBar from '../../components/clinical/WritebackBar';
-import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
-import type { SectionRewriteStatus } from '../../components/clinical/SectionEditor';
 import AdmissionVoiceTray from '../../components/admissionVoice/AdmissionVoiceTray';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { usePatientStore } from '../../stores/usePatientStore';
-import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import { buildSubmitSnapshot } from '../../services/documentFlow';
 import { saveDraft, loadDraft } from '../../services/draftService';
 import { backendRuntimeVersionAdapter } from '../../services/versionService';
@@ -48,18 +42,19 @@ import type {
   IcdItem,
   PatientBrief,
 } from '../../services/types';
-import type {
-  RuntimeRewriteType,
-} from '../../services/pluginRuntimeTypes';
+import {
+  getLatestFieldAssistContext,
+  isUsableFieldAssistContext,
+} from '../../services/fieldAssist/contextBridge';
+import type { FieldAssistContext } from '../../services/fieldAssist/types';
+import { getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
+import { applyFieldDraft } from '../../services/fieldAssist/writeback';
+import { buildSuggestionDraft } from '../../services/fieldAssist/generation';
+import { UploadOutlined, Loading3QuartersOutlined } from '@ant-design/icons';
 
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const FIELD_EXTRACTION_WS_URL = String(import.meta.env.VITE_FIELD_EXTRACTION_WS_URL ?? '').trim();
 const ADMISSION_DOCUMENT_FIELD_SET = new Set<string>(ADMISSION_DOCUMENT_FIELD_KEYS);
-
-function toRuntimeRewriteType(mode: string): RuntimeRewriteType {
-  if (mode === 'polish' || mode === 'academic' || mode === 'expand' || mode === 'shorten') return mode;
-  return 'custom';
-}
 
 function candidateStatusLabel(status: AdmissionCandidate['status']): string {
   switch (status) {
@@ -127,6 +122,9 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const [regeneratingSectionKey, setRegeneratingSectionKey] = useState<string | null>(null);
   const [sectionResetKeys, setSectionResetKeys] = useState<Record<string, number>>({});
   const [activeVoiceSectionKey, setActiveVoiceSectionKey] = useState('');
+  const [applyingSectionKey, setApplyingSectionKey] = useState<string | null>(null);
+  const [fieldContext, setFieldContext] = useState<FieldAssistContext | null>(null);
+  const latestFieldSnapshotKeyRef = useRef('');
   const hydratedRef = useRef(false);
   const templateSectionTextsRef = useRef<Record<string, string>>({});
 
@@ -134,13 +132,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     locked,
     setLocked,
     mismatch,
-    historyOpen,
-    openHistory,
-    closeHistory,
-    versionCount,
     submitting,
-    submitText,
-    submitProgress,
     submit,
   } = useDocumentSubmit({
     docCode: doc.code,
@@ -256,6 +248,40 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     reloadToken,
   ]);
 
+  // ==================== 字段上下文轮询 ====================
+  useEffect(() => {
+    let disposed = false;
+    const pollFieldContext = async () => {
+      const nextContext = await getLatestFieldAssistContext();
+      if (disposed) return;
+
+      const usableContext = isUsableFieldAssistContext(nextContext) ? nextContext : null;
+      if (!usableContext || usableContext.docCode !== doc.code || usableContext.patientId !== patient.admissionNo) {
+        if (latestFieldSnapshotKeyRef.current) {
+          latestFieldSnapshotKeyRef.current = '';
+          setFieldContext(null);
+        }
+        return;
+      }
+
+      const nextSnapshotKey = getFieldAssistSnapshotKey(usableContext);
+      if (nextSnapshotKey === latestFieldSnapshotKeyRef.current) return;
+
+      latestFieldSnapshotKeyRef.current = nextSnapshotKey;
+      setFieldContext(usableContext);
+    };
+
+    void pollFieldContext();
+    const timer = window.setInterval(() => {
+      void pollFieldContext();
+    }, 1800);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [doc.code, patient.admissionNo]);
+
   // ==================== 段落编辑（对齐出院记录） ====================
   const updateSection = useCallback((sectionKey: string, text: string) => {
     setSections((prev) => applyAdmissionFieldAutomation(
@@ -281,32 +307,20 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   }, []);
 
   // ==================== meta / body 段落分离（对齐出院记录） ====================
-  const metaRows = useMemo<DocumentPaperMetaCell[][]>(
+  const metaCells = useMemo(
     () => [
-      [
-        { label: '姓名', value: patient.name },
-        { label: '性别', value: patient.gender },
-        { label: '年龄', value: patient.age },
-      ],
-      [
-        { label: '婚姻', value: currentPatient ? '已婚' : tempPatientInfo.maritalStatus ?? '未录入' },
-        { label: '职业', value: currentPatient ? '职员' : tempPatientInfo.occupation ?? '未录入' },
-        { label: '出生地', value: currentPatient ? '广东' : tempPatientInfo.birthPlace ?? '未录入' },
-      ],
-      [
-        { label: '入院日期', value: admissionDate },
-        { label: '入院科室', value: deptName },
-        { label: '记录医师', value: doctor },
-      ],
+      { label: '婚姻', value: currentPatient ? '已婚' : tempPatientInfo.maritalStatus ?? '未录入' },
+      { label: '职业', value: currentPatient ? '职员' : tempPatientInfo.occupation ?? '未录入' },
+      { label: '出生地', value: currentPatient ? '广东' : tempPatientInfo.birthPlace ?? '未录入' },
+      { label: '入院日期', value: admissionDate },
+      { label: '入院科室', value: deptName },
+      { label: '记录医师', value: doctor },
     ],
     [
       admissionDate,
       currentPatient,
       deptName,
       doctor,
-      patient.age,
-      patient.gender,
-      patient.name,
       tempPatientInfo.birthPlace,
       tempPatientInfo.maritalStatus,
       tempPatientInfo.occupation,
@@ -361,12 +375,33 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     return () => window.clearTimeout(t);
   }, [acceptedDiagnoses, doc.code, finalContent, locked, patient.admissionNo, sections]);
 
-  // ==================== 段落操作（对齐出院记录） ====================
-  const resetSection = (sectionKey: string) => {
-    const base = runtimeState?.sections.find((section) => section.key === sectionKey);
-    if (!base) return;
-    updateSection(sectionKey, base.text);
-    bumpSectionResetKey(sectionKey);
+  // ==================== 段落操作 ====================
+  const handleApplyField = async (sectionKey: string) => {
+    if (applyingSectionKey) return;
+    const currentSection = sections.find((s) => s.key === sectionKey);
+    if (!currentSection) return;
+
+    if (!fieldContext || fieldContext.fieldKey !== sectionKey) {
+      message.warning(`请先在 CS 端聚焦「${currentSection.title}」字段，再执行回填。`);
+      return;
+    }
+
+    setApplyingSectionKey(sectionKey);
+    try {
+      const effectiveDraft = buildSuggestionDraft(fieldContext, currentSection.text, '当前字段文本回填');
+      await applyFieldDraft({
+        context: fieldContext,
+        response: effectiveDraft.response,
+        finalText: currentSection.text,
+        mode: 'fill',
+        doctorName: `${doctor} 医师`,
+      });
+      message.success(`已回填${currentSection.title}`);
+    } catch (applyError) {
+      message.error(applyError instanceof Error ? applyError.message : '字段回填失败');
+    } finally {
+      setApplyingSectionKey(null);
+    }
   };
 
   const regenerateAllSections = useCallback(async () => {
@@ -482,28 +517,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     runtimeValuesLoading,
     sections,
   ]);
-
-  const rewriteSectionText = async (section: ClinicalSection, text: string, mode: string) => {
-    const result = await pluginRuntimeApi.rewriteText({
-      docCode: doc.code,
-      patientIdHis: patient.admissionNo,
-      sectionKey: section.key,
-      rewriteType: toRuntimeRewriteType(mode),
-      selectedText: text,
-    });
-    return {
-      requestId: result.requestId,
-      before: result.before,
-      after: result.after,
-    };
-  };
-
-  const updateRewriteStatus = async (
-    requestId: string | number,
-    status: SectionRewriteStatus,
-  ) => {
-    await pluginRuntimeApi.updateRewriteStatus(requestId, status);
-  };
 
   // ==================== 语音功能（入院记录独有） ====================
   const fieldsByKey = useMemo(() => {
@@ -743,22 +756,31 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     if (!locked) handleSubmit();
   });
 
+  const sectionToolbarActions = useMemo(() => {
+    const actions: Record<string, ReactNode> = {};
+    bodySections.forEach((section) => {
+      const isApplying = applyingSectionKey === section.key;
+      const canWriteback = fieldContext?.fieldKey === section.key;
+      actions[section.key] = (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            void handleApplyField(section.key);
+          }}
+          disabled={isApplying || locked}
+          className="inline-flex h-7 items-center gap-1 rounded-md bg-emerald-600 px-2 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+          title={canWriteback ? '回填到 CS 当前字段' : '点击查看回填条件'}
+        >
+          {isApplying ? <Loading3QuartersOutlined className="animate-spin" /> : <UploadOutlined />}
+          回填
+        </button>
+      );
+    });
+    return actions;
+  }, [bodySections, applyingSectionKey, fieldContext, locked, handleApplyField]);
+
   // ==================== UI 辅助 ====================
-  const renderActionButton = (children: ReactNode, onClick: () => void, title?: string, disabled = false) => (
-    <button
-      onClick={onClick}
-      title={title}
-      disabled={disabled}
-      className={[
-        'inline-flex items-center gap-1 text-[11px] font-semibold border rounded-md px-2 py-1 transition-colors',
-        disabled
-          ? 'cursor-not-allowed border-slate-200 text-slate-300'
-          : 'text-slate-500 hover:text-[#1E3A8A] border-slate-200 hover:border-[#1E3A8A]',
-      ].join(' ')}
-    >
-      {children}
-    </button>
-  );
 
   const regenerationDisabled = runtimeRegenerating
     || Boolean(regeneratingSectionKey)
@@ -773,14 +795,52 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
       doc={doc}
       showParadigmBadge={false}
       showPatientId={false}
-      actions={!readOnlyEntry ? renderActionButton(
-        <><HistoryOutlined />历史{versionCount ? `(${versionCount})` : ''}</>,
-        openHistory,
-        '历史版本与修改记录',
-      ) : null}
     >
-      <div className="h-full flex flex-col overflow-hidden bg-white">
-        <div className="flex-1 overflow-y-auto">
+      <div className="h-full flex flex-col overflow-hidden bg-[#F8FAFC]">
+        <section className="border-b border-slate-200 bg-white px-4 py-1.5 shrink-0">
+          <div className="mx-auto flex max-w-[980px] items-center gap-x-3 overflow-hidden whitespace-nowrap text-[11px] leading-5 text-slate-500">
+            <span className="shrink-0 font-semibold text-slate-700">{patient.name}</span>
+            <span className="shrink-0">{patient.gender} {patient.age}</span>
+            <span className="shrink-0">住院号 {patient.admissionNo}</span>
+            {patient.bed ? <span className="shrink-0">{patient.bed}床</span> : null}
+            {metaCells.map((item) => (
+              <span key={item.label} className="shrink-0">{item.label} {item.value}</span>
+            ))}
+          </div>
+        </section>
+
+        <section className="border-b border-slate-200 bg-white px-4 py-2 shrink-0">
+          <div className="mx-auto flex max-w-[980px] items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12px] font-extrabold text-slate-800">整篇病历</div>
+              <div className="mt-0.5 truncate text-[10px] font-medium text-slate-400">
+                生成全部正文段落后，可一次性回填到病历系统。
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void regenerateAllSections()}
+                disabled={regenerationDisabled}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-[12px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {runtimeRegenerating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}
+                生成整篇
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSubmit()}
+                disabled={runtimeLoading || runtimeValuesLoading || Boolean(runtimeError) || !sections.length || runtimeRegenerating || Boolean(regeneratingSectionKey) || mismatch || patientMode === 'new' || locked}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#1E3A8A] px-3 text-[12px] font-bold text-white hover:bg-[#172554] disabled:opacity-50"
+              >
+                {submitting ? <Loading3QuartersOutlined className="animate-spin" /> : <UploadOutlined />}
+                一键回填
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <MeltdownAlert visible={mismatch} text={`宿主病历系统活动患者已切换，与当前入院记录患者「${patient.name}」不一致！防串户锁已锁定，禁止提交。`} />
           {runtimeValuesLoading && (
             <div className="sticky top-0 z-20 border-b border-blue-100 bg-blue-50/95 px-4 py-2 text-xs font-semibold text-blue-700 backdrop-blur">
@@ -819,29 +879,18 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                   docName={templateTitle}
                   patient={patient}
                   sections={bodySections}
-                  metaRows={metaRows}
                   sectionBadgeLabel="病历段落"
+                  hideHeader={true}
+                  hideBadges={true}
                   sectionBottomNodes={sectionBottomNodes}
-                  actions={(
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      {renderActionButton(
-                        <><ReloadOutlined className={runtimeRegenerating ? 'animate-spin' : undefined} />重新生成全部</>,
-                        () => void regenerateAllSections(),
-                        '重新请求后台字段生成并覆盖当前正文',
-                        regenerationDisabled,
-                      )}
-                    </div>
-                  )}
+                  sectionToolbarActions={sectionToolbarActions}
                   locked={locked}
                   sectionEdits={editedSectionMap}
                   resetKeys={sectionResetKeys}
                   regeneratingSectionKey={regeneratingSectionKey}
                   onChange={updateSection}
-                  onReset={resetSection}
                   onRegenerateSection={(sectionKey) => void regenerateSection(sectionKey)}
                   onFocusSection={handleFocusSection}
-                  optimizeSection={rewriteSectionText}
-                  onRewriteStatusChange={updateRewriteStatus}
                 />
               </div>
 
@@ -870,30 +919,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
             </div>
           )}
         </div>
-
-        {!readOnlyEntry && (
-          <WritebackBar
-            label="提交入院记录"
-            onWriteback={handleSubmit}
-            locked={locked}
-            disabled={runtimeLoading || runtimeValuesLoading || Boolean(runtimeError) || !sections.length || runtimeRegenerating || Boolean(regeneratingSectionKey) || mismatch || patientMode === 'new'}
-            busy={submitting}
-            busyText={submitText}
-            progress={submitProgress}
-            onUnlock={() => {
-              setLocked(false);
-              message.info('已解除锁定，可重新编辑后再次提交。');
-            }}
-          />
-        )}
-
-        <VersionHistoryDrawer
-          open={historyOpen}
-          onClose={closeHistory}
-          docCode={doc.code}
-          patientId={patient.admissionNo}
-          versionAdapter={backendRuntimeVersionAdapter}
-        />
       </div>
     </ParadigmShell>
   );
