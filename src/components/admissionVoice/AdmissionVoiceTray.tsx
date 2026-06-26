@@ -29,8 +29,6 @@ interface Props {
   onStart: () => Promise<void>;
   onStop: () => void;
   onClearTranscripts: () => void;
-  onAcceptDocument: (fieldKey: string) => void;
-  onIgnoreDocument: (fieldKey: string) => void;
   onAcceptAllSafe: () => void;
   onAcceptPatient: (fieldKey: string) => void;
   onIgnorePatient: (fieldKey: string) => void;
@@ -52,8 +50,6 @@ export default function AdmissionVoiceTray({
   onStart,
   onStop,
   onClearTranscripts,
-  onAcceptDocument,
-  onIgnoreDocument,
   onAcceptAllSafe,
   onAcceptPatient,
   onIgnorePatient,
@@ -61,7 +57,6 @@ export default function AdmissionVoiceTray({
   const recording = status === 'recording';
   const connecting = status === 'connecting';
   const latestSegment = segments[segments.length - 1];
-  const documentCandidates = Object.values(candidates.documentFields);
   const patientCandidates = Object.values(candidates.patientFields);
 
   return (
@@ -135,7 +130,7 @@ export default function AdmissionVoiceTray({
           </div>
         ) : null}
 
-        <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+        <div className={`mt-3 grid gap-2 ${patientMode === 'new' && patientCandidates.length ? 'lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]' : 'grid-cols-1'}`}>
           <div className="min-h-[74px] rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
             <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-slate-400">
               <span>转写</span>
@@ -146,16 +141,8 @@ export default function AdmissionVoiceTray({
             </p>
           </div>
 
-          <div className="space-y-2">
-            <CompactCandidateList
-              title="字段候选"
-              emptyText="final 片段分析后出现字段候选"
-              candidates={documentCandidates}
-              disabled={disabled}
-              onAccept={onAcceptDocument}
-              onIgnore={onIgnoreDocument}
-            />
-            {patientMode === 'new' && patientCandidates.length ? (
+          {patientMode === 'new' && patientCandidates.length > 0 ? (
+            <div className="space-y-2">
               <CompactCandidateList
                 title="待建档信息"
                 emptyText=""
@@ -165,8 +152,8 @@ export default function AdmissionVoiceTray({
                 onAccept={onAcceptPatient}
                 onIgnore={onIgnorePatient}
               />
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
