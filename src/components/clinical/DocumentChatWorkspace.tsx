@@ -38,6 +38,7 @@ interface Props {
   resetKeys?: Record<string, number>;
   sectionSuffixes?: Record<string, ReactNode>;
   sectionToolbarActions?: Record<string, ReactNode>;
+  sectionBottomNodes?: Record<string, ReactNode>;
   sectionBadgeLabel?: string;
   regeneratingSectionKey?: string | null;
   onChange: (sectionKey: string, text: string) => void;
@@ -79,6 +80,7 @@ export default function DocumentChatWorkspace({
   resetKeys,
   sectionSuffixes,
   sectionToolbarActions,
+  sectionBottomNodes,
   sectionBadgeLabel = '概括总结',
   regeneratingSectionKey,
   onChange,
@@ -263,6 +265,12 @@ export default function DocumentChatWorkspace({
                   className="min-h-[112px] w-full resize-y rounded-lg border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800 outline-none transition-colors placeholder:text-slate-300 focus:border-[#1E3A8A] focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
                   placeholder={`填写${section.title}`}
                 />
+
+                {sectionBottomNodes?.[section.key] ? (
+                  <div className="mt-3">
+                    {sectionBottomNodes[section.key]}
+                  </div>
+                ) : null}
 
                 {rewrite ? (
                   <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] leading-relaxed">

@@ -62,6 +62,7 @@ function renderField(field: DocFieldDef, value: FieldValue | undefined): string 
       return field.options?.find((o) => o.value === v)?.render ?? '';
     }
     case 'text':
+    case 'textarea':
     case 'date':
       return ((value as string) ?? field.default ?? '').trim();
     case 'icd': {
@@ -87,12 +88,13 @@ export function renderDocument(
   const map = new Map<string, string[]>();
   for (const f of template.fields) {
     const text = renderField(f, values[f.key]);
-    if (!text) continue;
     if (!map.has(f.section)) {
       map.set(f.section, []);
       order.push(f.section);
     }
-    map.get(f.section)!.push(text);
+    if (text) {
+      map.get(f.section)!.push(text);
+    }
   }
   const sections: RenderedSection[] = order.map((s) => ({ section: s, text: map.get(s)!.join('') }));
   const content = sections.map((s) => `【${s.section}】${s.text}`).join('\n');
