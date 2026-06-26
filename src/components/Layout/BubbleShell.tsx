@@ -122,7 +122,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const voiceContextKeyRef = useRef('');
-  const finalVoiceTextRef = useRef('');
+  const finalVoiceDraftRef = useRef('');
+  const voiceBaseContextRef = useRef<FieldAssistContext | null>(null);
   const voiceSessionRef = useRef<BrowserAsrSession | null>(null);
   const generatedPatient = useMemo(
     () => (detectedContext ? buildPatientFromEmrContext(detectedContext) : null),
