@@ -594,18 +594,19 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     message.success(`已采纳${candidate.label}候选。`);
   }, [voiceSession, locked, mismatch, readOnlyEntry, applyDocumentVoiceCandidate]);
 
-  const handleAcceptAllSafeVoiceCandidates = () => {
+  useEffect(() => {
     const protectedKeys = new Set(protectedVoiceFieldKeys);
     const candidates = voiceSession.safeDocumentCandidates.filter((candidate) => !protectedKeys.has(candidate.key));
-    if (!candidates.length) {
-      message.info('暂无可一键采纳的无冲突候选。');
-      return;
+    if (candidates.length > 0) {
+      candidates.forEach(applyDocumentVoiceCandidate);
+      voiceSession.markDocumentsAccepted(candidates.map((candidate) => candidate.key));
     }
-
-    candidates.forEach(applyDocumentVoiceCandidate);
-    voiceSession.markDocumentsAccepted(candidates.map((candidate) => candidate.key));
-    message.success(`已采纳 ${candidates.length} 个无冲突候选。`);
-  };
+  }, [
+    voiceSession.safeDocumentCandidates,
+    protectedVoiceFieldKeys,
+    applyDocumentVoiceCandidate,
+    voiceSession,
+  ]);
 
   const handleAcceptPatientCandidate = (fieldKey: string) => {
     const candidate = voiceSession.candidates.patientFields[fieldKey];
@@ -903,7 +904,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                   partialText={voiceSession.partialText}
                   segments={voiceSession.segments}
                   candidates={voiceSession.candidates}
-                  safeDocumentCandidateCount={voiceSession.safeDocumentCandidates.length}
                   tempPatientInfo={tempPatientInfo}
                   asrError={voiceSession.asrError}
                   analysisError={voiceSession.analysisError}
@@ -911,7 +911,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                   onStart={voiceSession.start}
                   onStop={() => voiceSession.stop(true)}
                   onClearTranscripts={voiceSession.clearTranscripts}
-                  onAcceptAllSafe={handleAcceptAllSafeVoiceCandidates}
                   onAcceptPatient={handleAcceptPatientCandidate}
                   onIgnorePatient={voiceSession.ignorePatientCandidate}
                 />
