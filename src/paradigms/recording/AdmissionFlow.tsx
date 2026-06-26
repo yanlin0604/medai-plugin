@@ -6,7 +6,6 @@ import {
   AudioOutlined,
   ExpandAltOutlined,
   HistoryOutlined,
-  StopOutlined,
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
@@ -15,14 +14,22 @@ import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspa
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
+import AdmissionVoiceTray from '../../components/admissionVoice/AdmissionVoiceTray';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { usePatientStore } from '../../stores/usePatientStore';
-import { admissionPatient } from '../../services/samples/admission';
 import { pluginRuntimeApi, toIcdItem } from '../../services/pluginRuntime';
 import { renderDocument } from '../../services/clinicalService';
 import { stripCitations } from '../../services/documentFlow';
 import { saveDraft, loadDraft } from '../../services/draftService';
+import {
+  ADMISSION_DOCUMENT_FIELD_KEYS,
+  type AdmissionCandidate,
+  type TempPatientInfo,
+} from '../../services/admissionVoice/types';
+import { useAdmissionVoiceSession } from '../../services/admissionVoice/useAdmissionVoiceSession';
+import { resolveAdmissionPatientMode } from '../../services/admissionVoice/patientMode';
+import { applyTempPatientField } from '../../services/admissionVoice/tempPatient';
 import type {
   DocFieldDef,
   DocTemplate,
@@ -37,6 +44,9 @@ type PreviewMode = 'read' | 'edit';
 
 const SECTION_EDITS_KEY = '__sectionEdits';
 const HIDDEN_SECTIONS = new Set(['患者基本信息']);
+const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
+const FIELD_EXTRACTION_WS_URL = String(import.meta.env.VITE_FIELD_EXTRACTION_WS_URL ?? '').trim();
+const ADMISSION_DOCUMENT_FIELD_SET = new Set<string>(ADMISSION_DOCUMENT_FIELD_KEYS);
 
 /** 将后端 RuntimeDocTemplateDto 转换为前端 DocTemplate */
 function toDocTemplate(runtimeTemplate: RuntimeDocTemplateDto): DocTemplate {
@@ -123,10 +133,18 @@ function stripDraftMeta(values: Record<string, FieldValue>): Record<string, Fiel
   return next;
 }
 
+function fieldTextValue(value: FieldValue | undefined): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((item) => item.name).join('；');
+  return '';
+}
+
 export default function AdmissionFlow({ doc }: ParadigmProps) {
   const [searchParams] = useSearchParams();
   const readOnlyEntry = searchParams.get('mode') === 'read';
   const { currentPatient } = usePatientStore();
+  const patientMode = resolveAdmissionPatientMode(currentPatient);
+  const [tempPatientInfo, setTempPatientInfo] = useState<TempPatientInfo>({});
   const patient: PatientBrief = useMemo(
     () =>
       currentPatient
@@ -138,12 +156,19 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           admissionNo: currentPatient.id,
           diagnosis: currentPatient.diagnosis,
         }
-        : admissionPatient,
-    [currentPatient],
+        : {
+          name: tempPatientInfo.name ?? '待建档患者',
+          gender: tempPatientInfo.gender ?? '未录入',
+          age: tempPatientInfo.age ?? '未录入',
+          bed: '待分配',
+          admissionNo: `TEMP-${doc.code}`,
+          diagnosis: '待完善诊断',
+        },
+    [currentPatient, doc.code, tempPatientInfo.age, tempPatientInfo.gender, tempPatientInfo.name],
   );
 
-  const admissionDate = currentPatient?.admissionDate ?? '2026-06-01';
-  const deptName = currentPatient?.deptName ?? '心血管内科';
+  const admissionDate = currentPatient?.admissionDate ?? tempPatientInfo.admissionDate ?? '待建档';
+  const deptName = currentPatient?.deptName ?? tempPatientInfo.deptName ?? '待分配';
   const doctor = currentPatient?.doctor ?? '林志远';
   const diagnosis = patient.diagnosis ?? '待完善诊断';
 
@@ -152,7 +177,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const [sectionEdits, setSectionEdits] = useState<Record<string, string>>({});
   const [resetKeys, setResetKeys] = useState<Record<string, number>>({});
   const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
-  const [dictating, setDictating] = useState(false);
+  const [activeVoiceSectionKey, setActiveVoiceSectionKey] = useState('');
   const hydratedRef = useRef(false);
   const {
     locked,
@@ -199,7 +224,9 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           if (backendVal !== undefined && backendVal !== null) {
             initialValues[field.key] = backendVal as unknown as FieldValue;
           } else if (field.key === 'patientInfo') {
-            initialValues[field.key] = `姓名：${patient.name}，性别：${patient.gender}，年龄：${patient.age}，入院诊断：${diagnosis}。`;
+            initialValues[field.key] = patientMode === 'new'
+              ? '患者基本信息待建档，可先通过语音提取临时候选。'
+              : `姓名：${patient.name}，性别：${patient.gender}，年龄：${patient.age}，入院诊断：${diagnosis}。`;
           } else if (field.key === 'treatmentPlan') {
             initialValues[field.key] = field.default ?? buildTreatmentPlan(diagnosis);
           } else if (field.inputType === 'options' || field.inputType === 'text' || field.inputType === 'date') {
@@ -233,7 +260,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     return () => {
       alive = false;
     };
-  }, [diagnosis, doc.code, patient.admissionNo, patient.age, patient.gender, patient.name]);
+  }, [diagnosis, doc.code, patient.admissionNo, patient.age, patient.gender, patient.name, patientMode]);
 
   const rendered = useMemo(() => (template ? renderDocument(template, values) : null), [template, values]);
 
@@ -272,9 +299,9 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
         { label: '年龄', value: patient.age },
       ],
       [
-        { label: '婚姻', value: '已婚' },
-        { label: '职业', value: '职员' },
-        { label: '出生地', value: '广东' },
+        { label: '婚姻', value: currentPatient ? '已婚' : tempPatientInfo.maritalStatus ?? '未录入' },
+        { label: '职业', value: currentPatient ? '职员' : tempPatientInfo.occupation ?? '未录入' },
+        { label: '出生地', value: currentPatient ? '广东' : tempPatientInfo.birthPlace ?? '未录入' },
       ],
       [
         { label: '入院日期', value: admissionDate },
@@ -282,7 +309,18 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
         { label: '记录医师', value: doctor },
       ],
     ],
-    [admissionDate, deptName, doctor, patient.age, patient.gender, patient.name],
+    [
+      admissionDate,
+      currentPatient,
+      deptName,
+      doctor,
+      patient.age,
+      patient.gender,
+      patient.name,
+      tempPatientInfo.birthPlace,
+      tempPatientInfo.maritalStatus,
+      tempPatientInfo.occupation,
+    ],
   );
 
   const fieldsForWriteback = useMemo(
@@ -321,10 +359,126 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     [fieldsForWriteback],
   );
 
-  const dictatableFields = useMemo(
-    () => template?.fields.filter((field) => field.dictatable) ?? [],
-    [template],
+  const fieldsByKey = useMemo(
+    () => new Map(fieldsForWriteback.map((field) => [field.key, field])),
+    [fieldsForWriteback],
   );
+
+  const voiceableFields = useMemo(
+    () => fieldsForWriteback.filter((field) => field.dictatable),
+    [fieldsForWriteback],
+  );
+
+  const protectedVoiceFieldKeys = useMemo(
+    () =>
+      fieldsForWriteback
+        .filter((field) =>
+          ADMISSION_DOCUMENT_FIELD_SET.has(field.key)
+          && (sectionEdits[field.section] != null || fieldTextValue(values[field.key]).trim()),
+        )
+        .map((field) => field.key),
+    [fieldsForWriteback, sectionEdits, values],
+  );
+
+  const voicePreFilledFields = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(finalFields).filter(([, value]) => value.trim()),
+      ),
+    [finalFields],
+  );
+
+  const voiceSession = useAdmissionVoiceSession({
+    enabled: !readOnlyEntry && !locked && !mismatch,
+    docCode: doc.code,
+    patientMode,
+    patientId: null,
+    patientIdHis: patientMode === 'existing' ? patient.admissionNo : null,
+    asrWebSocketUrl: ASR_WS_URL,
+    fieldExtractionWebSocketUrl: FIELD_EXTRACTION_WS_URL,
+    preFilledFields: voicePreFilledFields,
+    protectedDocumentFieldKeys: protectedVoiceFieldKeys,
+    documentFieldLabels: fieldLabels,
+  });
+  const stopVoiceSession = voiceSession.stop;
+  const disconnectVoiceAnalysis = voiceSession.disconnectAnalysis;
+
+  const activeVoiceSectionLabel = useMemo(() => {
+    const activeField = fieldsByKey.get(activeVoiceSectionKey);
+    return activeField?.label ?? activeVoiceSectionKey;
+  }, [activeVoiceSectionKey, fieldsByKey]);
+
+  const sectionToolbarActions = useMemo(() => {
+    const result: Record<string, ReactNode> = {};
+
+    voiceableFields.forEach((field) => {
+      const isActive = activeVoiceSectionKey === field.key;
+      result[field.section] = (
+        <button
+          type="button"
+          onClick={() => {
+            setActiveVoiceSectionKey(field.key);
+            void voiceSession.start();
+          }}
+          title={`语音输入 ${field.label}`}
+          className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-bold transition-colors ${
+            isActive
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-slate-200 bg-white text-slate-500 hover:border-[#1E3A8A] hover:text-[#1E3A8A]'
+          }`}
+        >
+          <AudioOutlined />
+          语音
+        </button>
+      );
+    });
+
+    return result;
+  }, [activeVoiceSectionKey, voiceSession, voiceableFields]);
+
+  const sectionSuffixes = useMemo(() => {
+    const tagsBySection = new Map<string, ReactNode[]>();
+
+    const addTag = (section: string, tag: ReactNode) => {
+      tagsBySection.set(section, [...(tagsBySection.get(section) ?? []), tag]);
+    };
+
+    voiceableFields.forEach((field) => {
+      addTag(
+        field.section,
+        <span key="voice" className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">
+          可语音
+        </span>,
+      );
+    });
+    const aiFields = fieldsForWriteback.filter((field) => field.source === 'ai' || field.inputType === 'icd');
+    aiFields.forEach((field) => {
+      addTag(
+        field.section,
+        <span key="ai" className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-[#1E3A8A]">
+          可生成
+        </span>,
+      );
+    });
+    return Object.fromEntries(
+      Array.from(tagsBySection.entries()).map(([section, tags]) => [
+        section,
+        <span className="inline-flex flex-wrap items-center gap-1">{tags}</span>,
+      ]),
+    );
+  }, [fieldsForWriteback, voiceableFields]);
+
+  const handleFocusSection = (sectionKey: string) => {
+    const targetField = fieldsForWriteback.find((field) => field.section === sectionKey);
+    setActiveVoiceSectionKey(targetField?.key ?? sectionKey);
+  };
+
+  useEffect(() => {
+    if (readOnlyEntry || locked || mismatch) {
+      stopVoiceSession(false);
+      disconnectVoiceAnalysis();
+    }
+  }, [disconnectVoiceAnalysis, locked, mismatch, readOnlyEntry, stopVoiceSession]);
 
   useEffect(() => {
     if (readOnlyEntry || !hydratedRef.current || !template || locked) return;
@@ -358,35 +512,48 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     setResetKeys((prev) => ({ ...prev, [section]: (prev[section] ?? 0) + 1 }));
   };
 
-  const applyDictation = () => {
-    if (!dictatableFields.length) {
-      message.info('当前模板暂无可口述段落。');
-      return;
-    }
-    setValues((prev) => {
-      const next = { ...prev };
-      dictatableFields.forEach((field) => {
-        next[field.key] = field.staticText ?? '';
-      });
-      return next;
-    });
+  const applyDocumentVoiceCandidate = (candidate: AdmissionCandidate) => {
+    const field = fieldsByKey.get(candidate.key);
+    if (!field) return;
+
+    setValues((prev) => ({
+      ...prev,
+      [candidate.key]: candidate.value,
+    }));
     setSectionEdits((prev) => {
       const next = { ...prev };
-      dictatableFields.forEach((field) => {
-        delete next[field.section];
-      });
+      delete next[field.section];
       return next;
     });
-    setDictating(false);
-    message.success('已根据口述填入主诉、现病史，请核对。');
   };
 
-  const handleDictation = () => {
-    if (dictating) {
-      applyDictation();
+  const handleAcceptVoiceCandidate = (fieldKey: string) => {
+    const candidate = voiceSession.candidates.documentFields[fieldKey];
+    if (!candidate || locked || mismatch || readOnlyEntry) return;
+    applyDocumentVoiceCandidate(candidate);
+    voiceSession.markDocumentAccepted(fieldKey);
+    message.success(`已采纳${candidate.label}候选。`);
+  };
+
+  const handleAcceptAllSafeVoiceCandidates = () => {
+    const protectedKeys = new Set(protectedVoiceFieldKeys);
+    const candidates = voiceSession.safeDocumentCandidates.filter((candidate) => !protectedKeys.has(candidate.key));
+    if (!candidates.length) {
+      message.info('暂无可一键采纳的无冲突候选。');
       return;
     }
-    setDictating(true);
+
+    candidates.forEach(applyDocumentVoiceCandidate);
+    voiceSession.markDocumentsAccepted(candidates.map((candidate) => candidate.key));
+    message.success(`已采纳 ${candidates.length} 个无冲突候选。`);
+  };
+
+  const handleAcceptPatientCandidate = (fieldKey: string) => {
+    const candidate = voiceSession.candidates.patientFields[fieldKey];
+    if (!candidate || locked || mismatch || readOnlyEntry) return;
+    setTempPatientInfo((prev) => applyTempPatientField(prev, fieldKey, candidate.value));
+    voiceSession.markPatientAccepted(fieldKey);
+    message.success(`已采纳${candidate.label}临时信息。`);
   };
 
   const doSubmit = async () => {
@@ -406,6 +573,10 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
 
   const handleSubmit = () => {
     if (locked || submitting) return;
+    if (patientMode === 'new') {
+      message.error('新住院患者需先绑定 HIS 患者或完成建档，再提交正式入院记录。');
+      return;
+    }
     if (mismatch) {
       message.error('防串户锁定中，禁止提交。请先在病历系统中切回当前患者。');
       return;
@@ -466,43 +637,66 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
           <MeltdownAlert visible={mismatch} text={`宿主病历系统活动患者已切换，与当前入院记录患者「${patient.name}」不一致！防串户锁已锁定，禁止提交。`} />
 
           {previewMode === 'read' ? (
-            <DocumentPaper
+          <DocumentPaper
               docName="入院记录"
               patient={patient}
               sections={editableSections}
               metaRows={metaRows}
             />
           ) : (
-            <DocumentChatWorkspace
-              docName="入院记录"
-              patient={patient}
-              sections={editableSections}
-              metaRows={metaRows}
-              notice={dictating ? (
-                <div className="mx-auto max-w-[980px] rounded-md border border-[#BFDBFE] bg-[#F0F5FF] px-3 py-2 text-xs font-semibold text-[#1E3A8A]">
-                  正在聆听口述病史，说完点击“结束并填入”。
-                </div>
-              ) : null}
-              actions={(
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  {!locked && renderActionButton(
-                    dictating ? <><StopOutlined />结束并填入</> : <><AudioOutlined />口述病史</>,
-                    handleDictation,
-                    dictating ? '结束口述并填入主诉、现病史' : '开始口述病史',
+            <div className="flex min-h-full flex-col">
+              <div className="flex-1 pb-40">
+                <DocumentChatWorkspace
+                  docName="入院记录"
+                  patient={patient}
+                  sections={editableSections}
+                  metaRows={metaRows}
+                  sectionBadgeLabel="病历段落"
+                  sectionToolbarActions={sectionToolbarActions}
+                  sectionSuffixes={sectionSuffixes}
+                  actions={(
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {!readOnlyEntry && renderActionButton(
+                        <><ExpandAltOutlined />通读全文</>,
+                        () => setPreviewMode('read'),
+                      )}
+                    </div>
                   )}
-                  {!readOnlyEntry && renderActionButton(
-                    <><ExpandAltOutlined />通读全文</>,
-                    () => setPreviewMode('read'),
-                  )}
-                </div>
-              )}
-              locked={locked}
-              sectionEdits={sectionEdits}
-              resetKeys={resetKeys}
-              onChange={updateSection}
-              onReset={resetSection}
-              optimize={optimizeText}
-            />
+                  locked={locked}
+                  sectionEdits={sectionEdits}
+                  resetKeys={resetKeys}
+                  onChange={updateSection}
+                  onReset={resetSection}
+                  onFocusSection={handleFocusSection}
+                  optimize={optimizeText}
+                />
+              </div>
+
+              <div className="sticky bottom-0 z-30">
+                <AdmissionVoiceTray
+                  status={voiceSession.status}
+                  disabled={locked || mismatch || readOnlyEntry}
+                  patientMode={patientMode}
+                  activeSectionLabel={activeVoiceSectionLabel}
+                  partialText={voiceSession.partialText}
+                  segments={voiceSession.segments}
+                  candidates={voiceSession.candidates}
+                  safeDocumentCandidateCount={voiceSession.safeDocumentCandidates.length}
+                  tempPatientInfo={tempPatientInfo}
+                  asrError={voiceSession.asrError}
+                  analysisError={voiceSession.analysisError}
+                  analysisConnected={voiceSession.analysisConnected}
+                  onStart={voiceSession.start}
+                  onStop={() => voiceSession.stop(true)}
+                  onClearTranscripts={voiceSession.clearTranscripts}
+                  onAcceptDocument={handleAcceptVoiceCandidate}
+                  onIgnoreDocument={voiceSession.ignoreDocumentCandidate}
+                  onAcceptAllSafe={handleAcceptAllSafeVoiceCandidates}
+                  onAcceptPatient={handleAcceptPatientCandidate}
+                  onIgnorePatient={voiceSession.ignorePatientCandidate}
+                />
+              </div>
+            </div>
           )}
         </div>
 
@@ -514,6 +708,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
             busy={submitting}
             busyText={submitText}
             progress={submitProgress}
+            disabled={mismatch || patientMode === 'new'}
             onUnlock={() => {
               setLocked(false);
               message.info('已解除锁定，可重新编辑后再次提交。');

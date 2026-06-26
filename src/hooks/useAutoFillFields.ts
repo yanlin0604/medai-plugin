@@ -104,7 +104,7 @@ export function useAutoFillFields(options: UseAutoFillFieldsOptions) {
       });
     };
 
-    service.onFieldUpdate(handleFieldUpdate);
+    const unsubscribeFieldUpdate = service.onFieldUpdate(handleFieldUpdate);
 
     // 监听用户修改（移除 AI 标记）
     const handleInputChange = (event: Event) => {
@@ -121,6 +121,7 @@ export function useAutoFillFields(options: UseAutoFillFieldsOptions) {
     document.addEventListener('input', handleInputChange);
 
     return () => {
+      unsubscribeFieldUpdate();
       document.removeEventListener('input', handleInputChange);
     };
   }, [service, enabled, fieldSelectors, onBeforeFill, onAfterFill]);
