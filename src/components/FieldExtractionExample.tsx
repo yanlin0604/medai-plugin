@@ -4,7 +4,7 @@
  * 展示如何在入院记录表单中集成实时字段提取功能
  */
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FieldExtractionService } from '../services/fieldExtractionService';
 import { useAutoFillFields } from '../hooks/useAutoFillFields';
 import TranscriptDisplay, { TranscriptItem } from '../components/TranscriptDisplay';
@@ -27,12 +27,12 @@ export const FieldExtractionExample: React.FC<FieldExtractionExampleProps> = ({
   preFilledFields,
 }) => {
   const [service, setService] = useState<FieldExtractionService | null>(null);
-  const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
+  const [transcripts] = useState<TranscriptItem[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 使用字段自动填充 Hook
-  const { getFilledFields, clearAllAiMarks } = useAutoFillFields({
+  const { clearAllAiMarks } = useAutoFillFields({
     service,
     enabled: true,
     onBeforeFill: (fieldKey, value) => {
@@ -51,8 +51,8 @@ export const FieldExtractionExample: React.FC<FieldExtractionExampleProps> = ({
       docCode,
       patientId,
       preFilledFields,
-      asrWebSocketUrl: 'ws://localhost:8000/ws/asr',  // Python ASR WebSocket
-      javaWebSocketUrl: 'ws://localhost:8080/ws/field-extraction',  // Java 后台 WebSocket
+      patientMode: 'existing',
+      webSocketUrl: import.meta.env.VITE_FIELD_EXTRACTION_WS_URL,
     });
 
     // 注册错误回调

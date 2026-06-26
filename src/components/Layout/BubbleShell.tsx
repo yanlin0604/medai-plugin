@@ -47,6 +47,8 @@ import { resolveFieldAssistIntent, shouldAutoGenerateField } from '../../service
 import { applyFieldDraft, insertTextIntoFieldContext } from '../../services/fieldAssist/writeback';
 import type { FieldAssistContext, FieldAssistDraft, FieldAssistIntent } from '../../services/fieldAssist/types';
 import { getFieldAssistContextKey, getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
+import { BrowserAsrSession } from '../../services/asr/browserAsrSession';
+import type { AsrServerMessage } from '../../services/asr/types';
 import { renderTextWithCitations } from '../fieldAssist/FieldAssistPanel';
 
 interface BubbleShellProps {
@@ -56,15 +58,6 @@ interface BubbleShellProps {
 type BubbleDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written' | 'error';
 type CopyStatus = 'idle' | 'copied' | 'error';
 type FieldDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written' | 'error';
-
-interface AsrServerMessage {
-  text?: string;
-  is_final?: boolean;
-}
-
-type AudioContextWindow = Window & typeof globalThis & {
-  webkitAudioContext?: typeof AudioContext;
-};
 
 const GENERATION_STEPS = [
   '拉取入院记录',
@@ -76,11 +69,6 @@ const FIELD_CONTEXT_POLL_MS = 800;
 const FIELD_AUTO_GENERATE_DELAY_MS = 450;
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const ASR_MODE = '2';
-
-function buildAsrWsUrl(baseUrl: string, mode: string) {
-  const separator = baseUrl.includes('?') ? '&' : '?';
-  return `${baseUrl}${separator}mode=${encodeURIComponent(mode)}`;
-}
 
 function getFieldContextSnapshotKey(context: FieldAssistContext) {
   return getFieldAssistSnapshotKey(context);
@@ -134,13 +122,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const voiceContextKeyRef = useRef('');
-  const finalVoiceDraftRef = useRef('');
-  const voiceBaseContextRef = useRef<FieldAssistContext | null>(null);
-  const asrWsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const finalVoiceTextRef = useRef('');
+  const voiceSessionRef = useRef<BrowserAsrSession | null>(null);
   const generatedPatient = useMemo(
     () => (detectedContext ? buildPatientFromEmrContext(detectedContext) : null),
     [contextKey],
@@ -485,42 +468,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   };
 
   const stopVoiceRecording = (sendFlush = true) => {
-    const processor = audioProcessorRef.current;
-    audioProcessorRef.current = null;
-    if (processor) {
-      processor.onaudioprocess = null;
-      processor.disconnect();
-    }
-
-    const source = audioSourceRef.current;
-    audioSourceRef.current = null;
-    source?.disconnect();
-
-    const stream = mediaStreamRef.current;
-    mediaStreamRef.current = null;
-    stream?.getTracks().forEach((track) => track.stop());
-
-    const audioContext = audioContextRef.current;
-    audioContextRef.current = null;
-    if (audioContext && audioContext.state !== 'closed') {
-      void audioContext.close();
-    }
-
-    const ws = asrWsRef.current;
-    asrWsRef.current = null;
-    if (ws) {
-      ws.onopen = null;
-      ws.onmessage = null;
-      ws.onerror = null;
-      ws.onclose = null;
-      if (ws.readyState === WebSocket.OPEN) {
-        if (sendFlush) ws.send('flush');
-        ws.close();
-      } else if (ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-      }
-    }
-
+    voiceSessionRef.current?.stop({ sendFlush });
+    voiceSessionRef.current = null;
     setVoiceRecording(false);
   };
 
@@ -612,70 +561,24 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setVoiceRecording(true);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+      const session = new BrowserAsrSession({
+        websocketUrl: ASR_WS_URL,
+        mode: ASR_MODE,
+        onPartial: handleAsrMessage,
+        onFinal: handleAsrMessage,
+        onError: (error) => {
+          message.error(error.message);
+        },
+        onClose: () => {
+          if (voiceSessionRef.current === session) voiceSessionRef.current = null;
+          setVoiceRecording(false);
+        },
+      });
+      voiceSessionRef.current = session;
+      await session.start();
       if (voiceContextKeyRef.current !== requestContextKey) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
+        session.stop({ sendFlush: false });
       }
-
-      mediaStreamRef.current = stream;
-      const ws = new WebSocket(buildAsrWsUrl(ASR_WS_URL, ASR_MODE));
-      asrWsRef.current = ws;
-
-      ws.onopen = () => {
-        if (voiceContextKeyRef.current !== requestContextKey) {
-          ws.close();
-          return;
-        }
-
-        const AudioContextCtor = window.AudioContext ?? (window as AudioContextWindow).webkitAudioContext;
-        if (!AudioContextCtor) {
-          message.error('当前浏览器不支持语音采集。');
-          closeVoicePanel();
-          return;
-        }
-
-        const audioContext = new AudioContextCtor({ sampleRate: 16000 });
-        const source = audioContext.createMediaStreamSource(stream);
-        const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-        audioContextRef.current = audioContext;
-        audioSourceRef.current = source;
-        audioProcessorRef.current = processor;
-
-        processor.onaudioprocess = (audioEvent) => {
-          if (ws.readyState !== WebSocket.OPEN) return;
-
-          const inputData = audioEvent.inputBuffer.getChannelData(0);
-          const pcm16 = new Int16Array(inputData.length);
-          for (let index = 0; index < inputData.length; index += 1) {
-            const sample = Math.max(-1, Math.min(1, inputData[index]));
-            pcm16[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-          }
-          ws.send(pcm16.buffer);
-        };
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-      };
-
-      ws.onmessage = (messageEvent) => {
-        if (typeof messageEvent.data !== 'string') return;
-        try {
-          handleAsrMessage(JSON.parse(messageEvent.data) as AsrServerMessage);
-        } catch {
-          // Ignore non-JSON diagnostic frames from the ASR service.
-        }
-      };
-
-      ws.onerror = () => {
-        message.error('语音识别连接异常，请检查 ASR 服务。');
-      };
-
-      ws.onclose = () => {
-        if (asrWsRef.current === ws) asrWsRef.current = null;
-        setVoiceRecording(false);
-      };
     } catch (error) {
       stopVoiceRecording(false);
       message.error(error instanceof Error ? error.message : '无法获取麦克风权限。');

@@ -6,6 +6,9 @@ import type { DocDefinition } from '../../config/docRegistry';
 import { findDocInRegistry, getDocByCode } from '../../config/docRegistry';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import UnifiedDocWorkspace from './UnifiedDocWorkspace';
+import AdmissionFlow from '../../paradigms/recording/AdmissionFlow';
+
+const ADMISSION_DOC_CODES = new Set(['DOC001', 'D0C001']);
 
 export default function DocWorkspace() {
   const { code } = useParams<{ code: string }>();
@@ -38,6 +41,7 @@ export default function DocWorkspace() {
   const localDoc = code ? getDocByCode(code) ?? null : null;
   const storeDoc = selectedDoc && selectedDoc.code === code ? selectedDoc : null;
   const doc = localDoc ?? storeDoc ?? runtimeDoc;
+  const isAdmissionDoc = doc ? ADMISSION_DOC_CODES.has(doc.code) : false;
 
   useEffect(() => {
     if (!code || localDoc || storeDoc) return;
@@ -69,7 +73,7 @@ export default function DocWorkspace() {
     );
   }
 
-  if (!doc || !currentPatient) {
+  if (!doc || (!currentPatient && !isAdmissionDoc)) {
     return (
       <div className="h-full flex flex-col justify-center items-center p-6 text-center bg-[#F8FAFC]">
         <ThunderboltOutlined className="text-[#1E3A8A] text-2xl animate-bounce" />
@@ -85,5 +89,9 @@ export default function DocWorkspace() {
     );
   }
 
-  return <UnifiedDocWorkspace doc={doc} patient={currentPatient} />;
+  if (isAdmissionDoc) {
+    return <AdmissionFlow doc={doc} />;
+  }
+
+  return <UnifiedDocWorkspace doc={doc} patient={currentPatient!} />;
 }

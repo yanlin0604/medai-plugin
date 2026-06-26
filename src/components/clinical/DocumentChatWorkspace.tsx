@@ -37,6 +37,8 @@ interface Props {
   sectionEdits?: Record<string, string>;
   resetKeys?: Record<string, number>;
   sectionSuffixes?: Record<string, ReactNode>;
+  sectionToolbarActions?: Record<string, ReactNode>;
+  sectionBadgeLabel?: string;
   regeneratingSectionKey?: string | null;
   onChange: (sectionKey: string, text: string) => void;
   onReset: (sectionKey: string) => void;
@@ -76,6 +78,8 @@ export default function DocumentChatWorkspace({
   sectionEdits,
   resetKeys,
   sectionSuffixes,
+  sectionToolbarActions,
+  sectionBadgeLabel = '概括总结',
   regeneratingSectionKey,
   onChange,
   onReset,
@@ -179,6 +183,7 @@ export default function DocumentChatWorkspace({
             const regenerating = regeneratingSectionKey === section.key;
             const optimizing = optimizingSectionKey === section.key;
             const suffix = sectionSuffixes?.[section.key] ?? sectionSuffixes?.[section.title];
+            const toolbarActions = sectionToolbarActions?.[section.key] ?? sectionToolbarActions?.[section.title];
             const rewrite = pendingRewrite?.sectionKey === section.key ? pendingRewrite : null;
 
             return (
@@ -190,7 +195,7 @@ export default function DocumentChatWorkspace({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-md bg-[#F0F5FF] px-2 py-1 text-[11px] font-extrabold text-[#1E3A8A]">
-                        概括总结
+                        {sectionBadgeLabel}
                       </span>
                       {section.required ? (
                         <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
@@ -209,6 +214,7 @@ export default function DocumentChatWorkspace({
 
                   {!disabled ? (
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                      {toolbarActions}
                       {onRegenerateSection ? (
                         <button
                           type="button"
