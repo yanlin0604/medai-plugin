@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:* ws://localhost:* http://192.168.1.88:8080 ws://192.168.1.88:8081; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:* ws://localhost:* http://192.168.1.88:8080 ws://192.168.1.88:8081 http: https: ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",

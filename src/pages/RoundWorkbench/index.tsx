@@ -107,7 +107,7 @@ export default function RoundWorkbench() {
   const [docCode, setDocCode] = useState<RoundDocCode>(() => (
     isRoundDocCode(selectedDoc?.code) ? selectedDoc.code : 'DOC004'
   ));
-  const [segments, setSegments] = useState<RoundVoiceSegment[]>(ROUND_SEGMENTS);
+  const [segments] = useState<RoundVoiceSegment[]>(ROUND_SEGMENTS);
   const [sections, setSections] = useState<ClinicalSection[]>([]);
   const [resetKeys, setResetKeys] = useState<Record<string, number>>({});
   const [previewMode, setPreviewMode] = useState<PreviewMode>('read');

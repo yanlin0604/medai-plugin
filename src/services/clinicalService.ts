@@ -62,7 +62,6 @@ function renderField(field: DocFieldDef, value: FieldValue | undefined): string 
       return field.options?.find((o) => o.value === v)?.render ?? '';
     }
     case 'text':
-    case 'textarea':
     case 'date':
       return ((value as string) ?? field.default ?? '').trim();
     case 'icd': {

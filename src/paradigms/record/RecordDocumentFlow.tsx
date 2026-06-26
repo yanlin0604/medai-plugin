@@ -16,10 +16,12 @@ import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspa
 import WritebackBar from '../../components/clinical/WritebackBar';
 import VersionHistoryDrawer from '../../components/clinical/VersionHistoryDrawer';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
+import ObjectiveTimeline from '../../components/clinical/ObjectiveTimeline';
+import DictationConsole from '../../components/clinical/DictationConsole';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { useHotkey } from '../../hooks/useHotkey';
 import { saveDraft, loadDraft } from '../../services/draftService';
-import { buildSubmitLabel, buildSubmitSnapshot, stripCitations } from '../../services/documentFlow';
+import { buildSubmitLabel, buildSubmitSnapshot } from '../../services/documentFlow';
 import type { ClinicalSection, FieldValue, IcdItem } from '../../services/types';
 import type { RecordConfig } from './recordData';
 
@@ -107,6 +109,7 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
   const readOnlyEntry = searchParams.get('mode') === 'read';
   const [previewMode, setPreviewMode] = useState<PreviewMode>(readOnlyEntry ? 'read' : 'edit');
   const [voicePanelOpen, setVoicePanelOpen] = useState(true);
+  const [dictation, setDictation] = useState(config.dictationInit);
   const [diagnoses, setDiagnoses] = useState<IcdItem[]>([]);
   const diagnosisText = useMemo(() => diagnoses.map((item) => `${item.name} ${item.code}`).join('；'), [diagnoses]);
   const baseSections = useMemo(() => buildSections(doc.code, doc.name, config, diagnosisText), [config, diagnosisText, doc.code, doc.name]);
@@ -139,10 +142,12 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
         text: (saved.values[section.key] as string | undefined) ?? section.text,
       })));
       setDiagnoses((saved.values.relatedDiagnoses as IcdItem[] | undefined) ?? []);
+      setDictation(((saved.values.doctorNarrative as string | undefined) ?? config.dictationInit));
       setLocked(saved.status === 'submitted');
     } else {
       setSections(baseSections);
       setDiagnoses([]);
+      setDictation(config.dictationInit);
       setLocked(false);
     }
     setResetKeys({});
@@ -182,6 +187,19 @@ export default function RecordDocumentFlow({ doc, config }: Props) {
     if (!base) return;
     updateSection(sectionKey, base.text);
     setResetKeys((prev) => ({ ...prev, [sectionKey]: (prev[sectionKey] ?? 0) + 1 }));
+  };
+
+  const appendDictationToDraft = () => {
+    const text = dictation.trim();
+    if (!text) {
+      message.warning('Please enter dictation text first.');
+      return;
+    }
+    const sectionKey = config.dictationAppendSectionKey ?? 'doctorNarrative';
+    const current = sections.find((section) => section.key === sectionKey)?.text.trimEnd() ?? '';
+    updateSection(sectionKey, current ? `${current}\n${text}` : text);
+    setResetKeys((prev) => ({ ...prev, [sectionKey]: (prev[sectionKey] ?? 0) + 1 }));
+    message.success('Dictation appended.');
   };
 
   const doSubmit = async () => {

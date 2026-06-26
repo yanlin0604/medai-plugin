@@ -105,6 +105,15 @@ export async function loadDischargeRuntimeValues(
   return runtime;
 }
 
+export async function loadDischargeRuntimeField(
+  docCode: string,
+  patientIdHis: string,
+  fieldKey: string,
+  template: RuntimeDocTemplateDto,
+): Promise<DischargeRuntimeFieldState> {
+  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, false);
+  return buildDischargeRuntimeField(template, values, fieldKey);
+}
 
 export function buildDischargeRuntime(
   template: RuntimeDocTemplateDto,
@@ -376,7 +385,7 @@ function isRuntimeIcdCandidate(value: unknown): value is RuntimeIcdCandidateDto 
   );
 }
 
-function readOnlyHintOf(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): string {
+function readOnlyHintOf(_field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): string {
   return [
     value?.errorMessage,
     ...(value?.warnings ?? []),

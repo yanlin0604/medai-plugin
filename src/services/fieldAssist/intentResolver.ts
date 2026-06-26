@@ -1,11 +1,9 @@
 import type { FieldAssistContext, FieldAssistDraft, FieldAssistIntent } from './types';
 import { getFieldAssistContextKey } from './types';
 
-const MIN_PREFIX_LENGTH = 2;
-
 export function resolveFieldAssistIntent(
   context: FieldAssistContext,
-  draft?: FieldAssistDraft | null,
+  _draft?: FieldAssistDraft | null,
 ): FieldAssistIntent {
   let intent: FieldAssistIntent;
   

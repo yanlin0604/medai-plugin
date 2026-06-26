@@ -13,7 +13,7 @@ import MeltdownAlert from '../../components/clinical/MeltdownAlert';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { useHotkey } from '../../hooks/useHotkey';
 import { saveDraft, loadDraft } from '../../services/draftService';
-import { buildSubmitLabel, buildSubmitSnapshot, stripCitations } from '../../services/documentFlow';
+import { buildSubmitLabel, buildSubmitSnapshot } from '../../services/documentFlow';
 import type { ClinicalSection, FieldValue } from '../../services/types';
 import HistoryPullCard from './HistoryPullCard';
 import type { SummaryConfig, SummaryPatient } from './summaryData';
