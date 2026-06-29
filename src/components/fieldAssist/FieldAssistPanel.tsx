@@ -106,7 +106,7 @@ export function renderTextWithCitations(text: string, evidenceSummary?: RuntimeE
                   </div>
                 );
                 return (
-                  <Popover key={`${i}-${j}`} content={content} trigger="click" overlayInnerStyle={{ padding: '8px 12px' }}>
+                  <Popover key={`${i}-${j}`} content={content} trigger="click">
                     <Tag color="blue" className="mx-[1px] px-1 py-0 cursor-pointer hover:bg-blue-100 border-blue-200 leading-tight" title="点击查看出处">
                       {displayNum}
                     </Tag>

@@ -3,8 +3,6 @@ import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
 import {
-  CheckOutlined,
-  CloseOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
@@ -29,7 +27,6 @@ import {
   type AdmissionRuntimeState,
 } from '../../services/admissionRuntime';
 import {
-  ADMISSION_DOCUMENT_FIELD_KEYS,
   type AdmissionCandidate,
   type TempPatientInfo,
 } from '../../services/admissionVoice/types';
@@ -54,16 +51,6 @@ import { UploadOutlined, Loading3QuartersOutlined } from '@ant-design/icons';
 
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const FIELD_EXTRACTION_WS_URL = String(import.meta.env.VITE_FIELD_EXTRACTION_WS_URL ?? '').trim();
-const ADMISSION_DOCUMENT_FIELD_SET = new Set<string>(ADMISSION_DOCUMENT_FIELD_KEYS);
-
-function candidateStatusLabel(status: AdmissionCandidate['status']): string {
-  switch (status) {
-    case 'accepted': return '已采纳';
-    case 'ignored': return '已忽略';
-    case 'conflict': return '需确认';
-    default: return '待确认';
-  }
-}
 
 function readSavedSectionText(
   values: Record<string, FieldValue>,
@@ -529,17 +516,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     return Object.fromEntries(runtimeState.sections.map((section) => [section.key, section.title]));
   }, [runtimeState]);
 
-  const protectedVoiceFieldKeys = useMemo(
-    () =>
-      sections
-        .filter((section) =>
-          ADMISSION_DOCUMENT_FIELD_SET.has(section.key)
-          && section.text.trim(),
-        )
-        .map((section) => section.key),
-    [sections],
-  );
-
   const voicePreFilledFields = useMemo(
     () =>
       Object.fromEntries(
@@ -559,7 +535,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     asrWebSocketUrl: ASR_WS_URL,
     fieldExtractionWebSocketUrl: FIELD_EXTRACTION_WS_URL,
     preFilledFields: voicePreFilledFields,
-    protectedDocumentFieldKeys: protectedVoiceFieldKeys,
+    protectedDocumentFieldKeys: [],
     documentFieldLabels: voiceFieldLabels,
   });
   const stopVoiceSession = voiceSession.stop;
@@ -586,26 +562,25 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     bumpSectionResetKey(candidate.key);
   }, [updateSection, bumpSectionResetKey]);
 
-  const handleAcceptVoiceCandidate = useCallback((fieldKey: string) => {
-    const candidate = voiceSession.candidates.documentFields[fieldKey];
-    if (!candidate || locked || mismatch || readOnlyEntry) return;
-    applyDocumentVoiceCandidate(candidate);
-    voiceSession.markDocumentAccepted(fieldKey);
-    message.success(`已采纳${candidate.label}候选。`);
-  }, [voiceSession, locked, mismatch, readOnlyEntry, applyDocumentVoiceCandidate]);
-
+  // 语音识别到的文书字段候选直接填入对应字段（无需手动采纳），新识别结果会覆盖原内容。
   useEffect(() => {
-    const protectedKeys = new Set(protectedVoiceFieldKeys);
-    const candidates = voiceSession.safeDocumentCandidates.filter((candidate) => !protectedKeys.has(candidate.key));
+    if (locked || mismatch || readOnlyEntry) return;
+    const candidates = Object.values(voiceSession.candidates.documentFields).filter(
+      (candidate) =>
+        (candidate.status === 'pending' || candidate.status === 'conflict')
+        && Boolean(candidate.value.trim()),
+    );
     if (candidates.length > 0) {
       candidates.forEach(applyDocumentVoiceCandidate);
       voiceSession.markDocumentsAccepted(candidates.map((candidate) => candidate.key));
     }
   }, [
-    voiceSession.safeDocumentCandidates,
-    protectedVoiceFieldKeys,
+    voiceSession.candidates.documentFields,
     applyDocumentVoiceCandidate,
     voiceSession,
+    locked,
+    mismatch,
+    readOnlyEntry,
   ]);
 
   const handleAcceptPatientCandidate = (fieldKey: string) => {
@@ -615,81 +590,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     voiceSession.markPatientAccepted(fieldKey);
     message.success(`已采纳${candidate.label}临时信息。`);
   };
-
-  const sectionBottomNodes = useMemo(() => {
-    const nodes: Record<string, ReactNode> = {};
-    const groupedCandidates = new Map<string, AdmissionCandidate[]>();
-    
-    Object.values(voiceSession.candidates.documentFields).forEach((candidate) => {
-      const field = fieldsByKey.get(candidate.key);
-      if (field) {
-        const section = field.key;
-        const list = groupedCandidates.get(section) || [];
-        list.push(candidate);
-        groupedCandidates.set(section, list);
-      }
-    });
-
-    for (const [section, candidates] of groupedCandidates.entries()) {
-      if (candidates.length === 0) continue;
-      
-      nodes[section] = (
-        <div className="flex flex-col gap-2">
-          {candidates.map((candidate) => {
-            const accepted = candidate.status === 'accepted';
-            const ignored = candidate.status === 'ignored';
-            
-            let containerClass = "rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] leading-relaxed transition-colors";
-            if (accepted) containerClass = "rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed transition-colors";
-            else if (ignored) containerClass = "rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed opacity-60 transition-colors";
-            else if (candidate.status === 'conflict') containerClass = "rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed transition-colors";
-            else containerClass = "rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] leading-relaxed transition-colors";
-            
-            return (
-              <div key={candidate.key} className={containerClass}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-extrabold text-slate-800">{candidate.label}</span>
-                    <span className="text-[10px] font-bold text-slate-500">{candidateStatusLabel(candidate.status)}</span>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                     <button
-                        type="button"
-                        disabled={locked || mismatch || readOnlyEntry || accepted}
-                        onClick={() => handleAcceptVoiceCandidate(candidate.key)}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded bg-[#1E3A8A] text-white hover:bg-[#172554] disabled:cursor-not-allowed disabled:opacity-40"
-                        title="采纳"
-                      >
-                        <CheckOutlined />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={locked || mismatch || readOnlyEntry}
-                        onClick={() => voiceSession.ignoreDocumentCandidate(candidate.key)}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        title="忽略"
-                      >
-                        <CloseOutlined />
-                      </button>
-                  </div>
-                </div>
-                <div className="mt-1 text-slate-700 font-medium">{candidate.value}</div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-    return nodes;
-  }, [
-    voiceSession.candidates.documentFields,
-    voiceSession.ignoreDocumentCandidate,
-    fieldsByKey,
-    handleAcceptVoiceCandidate,
-    locked,
-    mismatch,
-    readOnlyEntry
-  ]);
 
   // ==================== 提交流程（对齐出院记录） ====================
   const doSubmit = async () => {
@@ -883,7 +783,6 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                   sectionBadgeLabel="病历段落"
                   hideHeader={true}
                   hideBadges={true}
-                  sectionBottomNodes={sectionBottomNodes}
                   sectionToolbarActions={sectionToolbarActions}
                   locked={locked}
                   sectionEdits={editedSectionMap}

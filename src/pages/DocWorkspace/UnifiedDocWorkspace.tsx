@@ -26,6 +26,7 @@ import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../s
 import type { FieldAssistContext } from '../../services/fieldAssist/types';
 import { getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
 import { renderTextWithCitations } from '../../components/fieldAssist/FieldAssistPanel';
+import RoundSegmentSelector from '../../components/RoundSegmentSelector';
 
 interface Props {
   doc: DocDefinition;
@@ -290,6 +291,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const [wholeWriting, setWholeWriting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [segmentSelectorOpen, setSegmentSelectorOpen] = useState(false);
   const latestFieldSnapshotKeyRef = useRef('');
   const asrWsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -866,6 +868,16 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {doc.name.includes('病程') && (
+                <button
+                  type="button"
+                  onClick={() => setSegmentSelectorOpen(true)}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-[12px] font-bold text-blue-700 hover:bg-blue-100"
+                >
+                  <AudioOutlined />
+                  导入查房记录
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleGenerateWholeDocument}
@@ -1084,6 +1096,21 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
           </div>
         </section>
       </main>
+      <RoundSegmentSelector
+        open={segmentSelectorOpen}
+        onClose={() => setSegmentSelectorOpen(false)}
+        patientId={patient.id}
+        patientName={patient.name}
+        onImport={(generatedText) => {
+          if (activeSession) {
+            const nextText = activeSession.value ? `${activeSession.value}\n${generatedText}` : generatedText;
+            updateSession(activeSession.field.key, (item) => ({ ...item, value: nextText }));
+            message.success(`已将提取的查房记录追加至【${activeSession.field.label}】`);
+          } else {
+            message.warning('请先选中一个正文字段，再导入查房记录');
+          }
+        }}
+      />
     </ParadigmShell>
   );
 }
