@@ -292,6 +292,11 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [segmentSelectorOpen, setSegmentSelectorOpen] = useState(false);
+  const [unassignedCount, setUnassignedCount] = useState(0);
+  const [unassignedSegments, setUnassignedSegments] = useState<any[]>([]);
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [bannerVisible, setBannerVisible] = useState(false);
+
   const latestFieldSnapshotKeyRef = useRef('');
   const asrWsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -347,6 +352,23 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       setVoicePanelOpen(false);
       setRecording(false);
       setLoading(false);
+
+      if (doc.code === 'DOC003') {
+        pluginRuntimeApi.getRoundPendingStatus(patient.id, patient.doctor)
+          .then((res) => {
+            if (cancelled) return;
+            setUnassignedCount(res.unassignedCount);
+            setUnassignedSegments(res.unassignedSegments);
+            setBannerVisible(res.unassignedCount > 0);
+
+            if (res.hasPendingSegment && res.patientSegment) {
+              void handleAutoFillRound(res.patientSegment.transcribeText, nextSessions, res.patientSegment.id);
+            }
+          })
+          .catch((err) => {
+            console.error('获取查房状态失败:', err);
+          });
+      }
     }).catch((loadError) => {
       if (cancelled) return;
       setError(loadError instanceof Error ? loadError.message : '文书字段加载失败');
@@ -450,6 +472,65 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     }
   };
 
+  const handleAutoFillRound = async (segmentText: string, currentSessions: FieldSession[], segmentId: number) => {
+    const fillMessageKey = 'auto-fill-round-process';
+    message.loading({ content: '检测到您刚刚完成了查房，正在为您自动提炼并回填病程记录...', key: fillMessageKey, duration: 0 });
+    
+    const targetFields = ['conditionChange', 'treatmentAdjust', 'seniorOpinion'];
+    let updatedSessions = [...currentSessions];
+
+    // 将需要生成的字段置为 generating 状态以呈现骨架 Loading
+    updatedSessions = updatedSessions.map((session) => {
+      if (targetFields.includes(session.field.key) && !session.value.trim()) {
+        return { ...session, generating: true };
+      }
+      return session;
+    });
+    setSessions(updatedSessions);
+
+    const generatePromises = targetFields.map(async (fieldKey) => {
+      const session = updatedSessions.find((s) => s.field.key === fieldKey);
+      if (!session) return;
+      if (session.value.trim()) return; // 防覆盖，有值的字段不自动填充
+
+      try {
+        const context = buildContext(doc, patient, session, `根据查房记录生成${session.field.label}`);
+        const draft = await generateFieldDraft(context, `根据查房记录生成${session.field.label}`, segmentText);
+        addDraft(draft);
+        
+        setSessions((current) => current.map((s) => {
+          if (s.field.key === fieldKey) {
+            return {
+              ...s,
+              draft,
+              value: draft.generatedText || draft.response.generatedText,
+              generating: false,
+            };
+          }
+          return s;
+        }));
+      } catch (err) {
+        console.error(`自动提取字段 ${fieldKey} 失败:`, err);
+        setSessions((current) => current.map((s) => {
+          if (s.field.key === fieldKey) {
+            return { ...s, generating: false };
+          }
+          return s;
+        }));
+      }
+    });
+
+    await Promise.all(generatePromises);
+
+    try {
+      await pluginRuntimeApi.markRoundStatus(segmentId, 'applied');
+    } catch (err) {
+      console.error('标记片段状态失败:', err);
+    }
+    
+    message.success({ content: '日常病程已自动生成并回填！', key: fillMessageKey, duration: 2 });
+  };
+
   const handleGenerateWholeDocument = async () => {
     const targets = bodySessions.filter((session) => !session.generating);
     if (!targets.length || wholeGenerating || wholeWriting) return;
@@ -506,13 +587,38 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setWholeWriting(true);
     message.loading({ content: `正在回填${doc.name}全文`, key: 'whole-writeback' });
     try {
+      let submitFields = snapshot.fields;
+      let submitFieldLabels = snapshot.fieldLabels;
+      let submitFieldOrder = snapshot.fieldOrder;
+
+      // 如果是日常病程记录 DOC003，由于病历系统 EMR 的字段 key 与病案助手面板不一致，在此进行精准的转换对齐
+      if (doc.code === 'DOC003') {
+        submitFields = {
+          recordDate: snapshot.fields.roundDate || new Date().toISOString().slice(0, 10),
+          subjective: snapshot.fields.conditionChange || '',
+          objective: snapshot.fields.examAnalysis || '',
+          assessment: snapshot.fields.seniorOpinion ? `上级意见：${snapshot.fields.seniorOpinion}` : '病情评估正常。',
+          plan: snapshot.fields.treatmentAdjust || '',
+          physicianSignature: snapshot.fields.roundDoctor || patient.doctor || '医师',
+        };
+        submitFieldLabels = {
+          recordDate: '记录日期',
+          subjective: '患者主诉及症状变化',
+          objective: '查体及辅助检查',
+          assessment: '病情评估',
+          plan: '处理意见',
+          physicianSignature: '医师签名',
+        };
+        submitFieldOrder = ['recordDate', 'subjective', 'objective', 'assessment', 'plan', 'physicianSignature'];
+      }
+
       const result = await submitDocument({
         docCode: doc.code,
         docName: doc.name,
         patientId: patient.id,
-        fields: snapshot.fields,
-        fieldLabels: snapshot.fieldLabels,
-        fieldOrder: snapshot.fieldOrder,
+        fields: submitFields,
+        fieldLabels: submitFieldLabels,
+        fieldOrder: submitFieldOrder,
         content: snapshot.content,
       });
       if (!result.ok) {
@@ -859,6 +965,46 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
           </div>
         </section>
 
+        {bannerVisible && unassignedCount > 0 && (
+          <section className="bg-amber-50 border-b border-amber-200 px-4 py-2">
+            <div className="mx-auto flex max-w-[980px] items-center justify-between gap-3 text-amber-800 text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <span className="text-base">🔔</span>
+                <span className="font-medium">
+                  检测到本次查房有 <strong className="text-amber-950 font-bold">{unassignedCount}</strong> 段语音未匹配到任何患者，可能包含当前患者的信息。
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSegmentSelectorOpen(true)}
+                  className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold transition-colors"
+                >
+                  查看并引入
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    for (const seg of unassignedSegments) {
+                      try {
+                        await pluginRuntimeApi.markRoundStatus(seg.id, 'ignored');
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }
+                    setBannerVisible(false);
+                    setUnassignedCount(0);
+                    message.info('已忽略未匹配的查房片段提示');
+                  }}
+                  className="px-2.5 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors"
+                >
+                  忽略
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         <section className="border-b border-slate-200 bg-white px-4 py-2">
           <div className="mx-auto flex max-w-[980px] items-center justify-between gap-3">
             <div className="min-w-0">
@@ -1101,13 +1247,36 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         onClose={() => setSegmentSelectorOpen(false)}
         patientId={patient.id}
         patientName={patient.name}
-        onImport={(generatedText) => {
-          if (activeSession) {
-            const nextText = activeSession.value ? `${activeSession.value}\n${generatedText}` : generatedText;
-            updateSession(activeSession.field.key, (item) => ({ ...item, value: nextText }));
-            message.success(`已将提取的查房记录追加至【${activeSession.field.label}】`);
-          } else {
+        unassignedSegments={unassignedSegments}
+        onImport={async (selectedTexts, selectedIds) => {
+          if (!activeSession) {
             message.warning('请先选中一个正文字段，再导入查房记录');
+            return;
+          }
+          if (selectedIds.length === 0) return;
+
+          try {
+            await handleGenerate(activeSession.field.key, `根据查房记录生成${activeSession.field.label}`, selectedTexts);
+            
+            // 标记已勾选应用的片段状态为 applied
+            for (const id of selectedIds) {
+              try {
+                await pluginRuntimeApi.markRoundStatus(id, 'applied');
+              } catch (e) {
+                console.error(e);
+              }
+            }
+
+            // 更新本地待处理片段集合，重设 Alert Banner 状态
+            setUnassignedSegments((prev) => {
+              const next = prev.filter((seg) => !selectedIds.includes(seg.id));
+              setUnassignedCount(next.length);
+              setBannerVisible(next.length > 0);
+              return next;
+            });
+            message.success(`已提取选中的查房语音并追加至【${activeSession.field.label}】`);
+          } catch (err) {
+            console.error('导入并提取查房记录失败:', err);
           }
         }}
       />

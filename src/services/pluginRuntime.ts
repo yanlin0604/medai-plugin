@@ -437,6 +437,48 @@ export async function updateRewriteStatus(
   );
 }
 
+export interface RoundPendingSegment {
+  id: number;
+  roundTaskId: number;
+  patientIdHis: string;
+  patientName: string;
+  bedNo: string;
+  transcribeText: string;
+}
+
+export interface RoundPendingStatusResponse {
+  hasPendingSegment: boolean;
+  patientSegment: RoundPendingSegment | null;
+  unassignedCount: number;
+  unassignedSegments: Array<{
+    id: number;
+    transcribeText: string;
+  }>;
+}
+
+export async function getRoundPendingStatus(
+  patientIdHis: string,
+  doctorCode: string,
+): Promise<RoundPendingStatusResponse> {
+  return requestRuntime<RoundPendingStatusResponse>(
+    http.get('/medical/round/pending-status', {
+      params: { patientIdHis, doctorCode },
+    }),
+  );
+}
+
+export async function markRoundStatus(
+  alignId: number | string,
+  status: 'applied' | 'ignored' | 'pending',
+): Promise<void> {
+  await requestRuntime<null>(
+    http.post('/medical/round/mark-status', {
+      id: Number(alignId),
+      status,
+    }),
+  );
+}
+
 export const pluginRuntimeApi = {
   listRuntimeDocumentDefinitions,
   listRuntimeDocuments,
@@ -450,4 +492,6 @@ export const pluginRuntimeApi = {
   createDocVersion,
   rewriteText,
   updateRewriteStatus,
+  getRoundPendingStatus,
+  markRoundStatus,
 };

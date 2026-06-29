@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { uploadSingleChunk, mergeChunks, type UploadResult } from '../services/chunkUpload';
 
 export function useChunkedRecorder(timesliceMs = 15000) { // 默认15秒一个分片
@@ -9,6 +9,33 @@ export function useChunkedRecorder(timesliceMs = 15000) { // 默认15秒一个�
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // 组件卸载时自动清理资源，防止退出页面后继续在后台录制并发送网络分片请求
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current) {
+        // 解绑回调，防止继续触发后台的 Promise 队列上传及合并调用
+        mediaRecorderRef.current.ondataavailable = null;
+        mediaRecorderRef.current.onstop = null;
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          try {
+            mediaRecorderRef.current.stop();
+          } catch (e) {
+            console.error('卸载时停止录音失败', e);
+          }
+        }
+        mediaRecorderRef.current = null;
+      }
+      if (streamRef.current) {
+        try {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        } catch (e) {
+          console.error('卸载时释放音频流轨道失败', e);
+        }
+        streamRef.current = null;
+      }
+    };
+  }, []);
 
   // 记录上传的元数据
   const uploadIdRef = useRef<string | null>(null);

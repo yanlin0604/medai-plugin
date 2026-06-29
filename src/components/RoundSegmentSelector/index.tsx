@@ -50,17 +50,28 @@ interface RoundSegmentSelectorProps {
   onClose: () => void;
   patientId: string;
   patientName: string;
-  onImport: (generatedText: string) => void;
+  onImport: (selectedTexts: string, selectedIds: number[]) => void;
+  unassignedSegments?: Array<{ id: number; transcribeText: string; }>;
 }
 
 export default function RoundSegmentSelector({
   open,
   onClose,
   patientName,
-  onImport
+  onImport,
+  unassignedSegments
 }: RoundSegmentSelectorProps) {
-  // 不做患者过滤，直接展示所有全区录音块
-  const blocks = MOCK_BLOCKS;
+  // 如果传入了真实的未分配片段，我们将其转换为组件内部的 blocks 结构
+  const blocks: AudioBlock[] = unassignedSegments && unassignedSegments.length > 0
+    ? unassignedSegments.map((seg) => ({
+        id: String(seg.id),
+        timestamp: '未分配',
+        segments: [
+          { id: String(seg.id), start: 0, end: 0, speaker: '查房语音', text: seg.transcribeText }
+        ]
+      }))
+    : MOCK_BLOCKS;
+
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -85,13 +96,22 @@ export default function RoundSegmentSelector({
   const handleGenerate = () => {
     if (selectedBlockIds.length === 0) return;
     setGenerating(true);
+
+    const selectedNumericIds = selectedBlockIds
+      .map((id) => Number(id))
+      .filter((id) => !Number.isNaN(id));
+
+    const selectedTexts = blocks
+      .filter((block) => selectedBlockIds.includes(block.id))
+      .flatMap((block) => block.segments.map((seg) => seg.text))
+      .join('\n');
+
     setTimeout(() => {
       setGenerating(false);
-      // 真实场景下会将选中的片段发送给大模型提取
-      const fakeAiResult = '患者诉咳嗽较前明显好转，夜间偶有咳嗽。查体：SpO2维持在95%左右。近期复查血常规示白细胞计数下降。处理：继续当前雾化吸入及抗感染治疗，密切观察病情变化。';
-      onImport(fakeAiResult);
+      onImport(selectedTexts, selectedNumericIds);
+      setSelectedBlockIds([]);
       onClose();
-    }, 1500);
+    }, 1000);
   };
 
   return (
