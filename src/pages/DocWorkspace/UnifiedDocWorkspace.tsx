@@ -294,7 +294,6 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const [segmentSelectorOpen, setSegmentSelectorOpen] = useState(false);
   const [unassignedCount, setUnassignedCount] = useState(0);
   const [unassignedSegments, setUnassignedSegments] = useState<any[]>([]);
-  const [autoFilling, setAutoFilling] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(false);
 
   const latestFieldSnapshotKeyRef = useRef('');

@@ -479,6 +479,26 @@ export async function markRoundStatus(
   );
 }
 
+export interface SurgeryTranscribeRequest {
+  patientIdHis: string;
+  docCode: string;
+  audioOssIds: string[];
+  previousTranscript?: string;
+}
+
+export interface SurgeryTranscribeResponse {
+  transcriptText: string;
+  fields: Record<string, string>;
+}
+
+export async function transcribeSurgery(
+  request: SurgeryTranscribeRequest,
+): Promise<SurgeryTranscribeResponse> {
+  return requestRuntime<SurgeryTranscribeResponse>(
+    http.post(`${RUNTIME_BASE_PATH}/surgery/transcribe`, request),
+  );
+}
+
 export const pluginRuntimeApi = {
   listRuntimeDocumentDefinitions,
   listRuntimeDocuments,
@@ -494,4 +514,5 @@ export const pluginRuntimeApi = {
   updateRewriteStatus,
   getRoundPendingStatus,
   markRoundStatus,
+  transcribeSurgery,
 };

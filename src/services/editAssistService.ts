@@ -129,6 +129,32 @@ const FIELD_PHRASES: Record<string, string[]> = {
     '出院后如出现切口红肿、渗液、发热等情况，及时就诊换药。',
     '按时服用华法林，每周监测INR，维持INR在2.0-3.0之间，根据INR结果调整华法林剂量。',
   ],
+
+  // ========== 手术记录相关字段 ==========
+  operationContent: [
+    '患者平卧于手术台，连接心电监护，吸氧2L/min。生命体征平稳。常规消毒铺巾。',
+    '取右侧桡动脉途径，置入6F动脉鞘管，经鞘管送入指引导管至冠状动脉开口。',
+    '冠脉造影示前降支近段重度狭窄约90%，送入导丝通过病变处，预扩张后植入药物洗脱支架1枚。',
+    '手术过程顺利，术中患者生命体征平稳，无严重并发症发生。出血约10ml，无输血。',
+    '术后即刻造影示支架贴壁良好，残余狭窄<5%，前向血流TIMI 3级。',
+    '拔除鞘管，局部压迫止血，加压包扎。患者安返病房，安全送至CCU监护。',
+    '常规消毒铺巾后，逐层切开皮肤、皮下组织，术中仔细止血。',
+    '探查术区，分离组织层次，显露术野清晰。',
+    '检查无活动性出血后，逐层缝合切口，无菌敷料覆盖。',
+    '术毕清点纱布器械无误，手术过程顺利。',
+  ],
+  postOpDiagnosis: [
+    '冠状动脉粥样硬化性心脏病',
+    '急性ST段抬高型心肌梗死',
+    '急性非ST段抬高型心肌梗死',
+    '不稳定型心绞痛',
+    '冠状动脉支架植入术后',
+    '高血压病3级（很高危组）',
+    '2型糖尿病',
+    '腰椎间盘突出症',
+    '膀胱肿瘤',
+    '肾囊肿',
+  ],
 };
 
 const GENERAL_PHRASES = [
@@ -164,7 +190,9 @@ export function isUsableEditAssistContext(
   if (!context) return false;
   // 支持 BS 端和 CS 端
   const isValidSource = context.source === 'demo-bs' || context.source === 'demo-cs';
-  if (!isValidSource || context.docCode !== 'DOC010') return false;
+  if (!isValidSource) return false;
+  const validDocCodes = new Set(['DOC010', 'DOC013', 'D0C013']);
+  if (!validDocCodes.has(context.docCode)) return false;
   if (!context.fieldKey || !context.fieldLabel) return false;
   if (isEditAssistContextStale(context, now)) return false;
   return getEditAssistToken(context).length >= MIN_TOKEN_LENGTH;

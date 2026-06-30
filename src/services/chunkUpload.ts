@@ -24,12 +24,6 @@ export async function uploadAudioInChunks(
   const totalChunks = Math.ceil(file.size / chunkSize);
   const uploadId = crypto.randomUUID();
 
-  const getHeaders = () => {
-    return {
-      'X-Plugin-Key': PLUGIN_API_KEY,
-    };
-  };
-
   // 1. 串行/并发上传所有分片
   for (let i = 0; i < totalChunks; i++) {
     const start = i * chunkSize;

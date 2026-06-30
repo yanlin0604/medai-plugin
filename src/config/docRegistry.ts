@@ -232,13 +232,13 @@ export const DOC_REGISTRY: DocDefinition[] = [
   },
   {
     code: 'DOC013', id: 'doc-013', name: '手术记录', py: 'ssjl',
-    paradigm: 'record', group: 'event', icon: 'ScissorOutlined',
+    paradigm: 'recording', group: 'event', icon: 'ScissorOutlined',
     prototype: 'doc_013_operation.html',
     dataSources: ['医嘱', '录音'], inputMode: '选项+手动',
   },
   {
     code: 'D0C013', id: 'doc-his-013', name: '手术记录', py: 'ssjl',
-    paradigm: 'record', group: 'event', icon: 'ScissorOutlined',
+    paradigm: 'recording', group: 'event', icon: 'ScissorOutlined',
     prototype: 'doc_013_operation.html',
     dataSources: ['医嘱', '录音'], inputMode: '选项+手动',
   },

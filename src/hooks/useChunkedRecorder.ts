@@ -6,9 +6,11 @@ export function useChunkedRecorder(timesliceMs = 15000) { // 默认15秒一个�
   const [isPaused, setIsPaused] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [duration, setDuration] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 组件卸载时自动清理资源，防止退出页面后继续在后台录制并发送网络分片请求
   useEffect(() => {
@@ -118,6 +120,8 @@ export function useChunkedRecorder(timesliceMs = 15000) { // 默认15秒一个�
       setIsRecording(true);
       setIsPaused(false);
       setError(null);
+      setDuration(0);
+      durationTimerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
     } catch (err) {
       setError(err instanceof Error ? err : new Error('无法访问麦克风'));
     }
@@ -145,6 +149,10 @@ export function useChunkedRecorder(timesliceMs = 15000) { // 默认15秒一个�
       setIsFinishing(true);
       setIsRecording(false);
       setIsPaused(false);
+      if (durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
       finishPromiseRef.current = { resolve, reject };
       
       // 停止录制触发最后一次数据吐出和 onstop
@@ -157,6 +165,7 @@ export function useChunkedRecorder(timesliceMs = 15000) { // 默认15秒一个�
     isPaused,
     isFinishing,
     error,
+    duration,
     startRecording,
     pauseRecording,
     resumeRecording,
