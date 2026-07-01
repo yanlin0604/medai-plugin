@@ -55,15 +55,6 @@ function buildDailyCourseText(patient: RoundPatient, confirmedSegments: RoundVoi
   ].filter(Boolean).join('');
 }
 
-function buildSeniorRoundText(patient: RoundPatient, confirmedSegments: RoundVoiceSegment[]) {
-  const evidence = confirmedSegments.map(formatSegment).map(trimTerminalPunctuation).join('；');
-  return [
-    `上级医师查房对象：${patient.bedNo}${patient.name}，住院号${patient.identifiers.admissionNo}，诊断：${patient.diagnosis}。`,
-    evidence ? `查房意见：${evidence}。` : '',
-    '请责任医师按上级医师意见完善诊疗计划，并持续评估疗效及风险。',
-  ].filter(Boolean).join('');
-}
-
 export function buildRoundSections(
   patient: RoundPatient,
   docCode: RoundDocCode,
@@ -71,10 +62,7 @@ export function buildRoundSections(
 ): ClinicalSection[] {
   const confirmedSegments = getConfirmedRoundSegments(segments, patient.id, docCode);
   const segmentText = confirmedSegments.map(formatSegment).join('\n');
-  const isSeniorRound = docCode === 'DOC004';
-  const finalText = isSeniorRound
-    ? buildSeniorRoundText(patient, confirmedSegments)
-    : buildDailyCourseText(patient, confirmedSegments);
+  const finalText = buildDailyCourseText(patient, confirmedSegments);
 
   return [
     {
@@ -96,9 +84,9 @@ export function buildRoundSections(
       required: true,
     },
     {
-      key: isSeniorRound ? 'seniorRoundOpinion' : 'roundAssessment',
-      title: isSeniorRound ? '上级医师查房意见' : '病情评估',
-      fieldKey: isSeniorRound ? 'seniorRoundOpinion' : 'roundAssessment',
+      key: 'roundAssessment',
+      title: '病情评估',
+      fieldKey: 'roundAssessment',
       text: finalText,
       editable: true,
       source: 'ai',
@@ -108,9 +96,7 @@ export function buildRoundSections(
       key: 'nextPlan',
       title: '下一步计划',
       fieldKey: 'nextPlan',
-      text: isSeniorRound
-        ? '落实上级医师查房意见，复核关键检查结果，必要时调整治疗方案。'
-        : '继续当前治疗，动态观察症状、体征及复查指标变化。必要时请上级医师复核。',
+      text: '继续当前治疗，动态观察症状、体征及复查指标变化。必要时请上级医师复核。',
       editable: true,
       source: 'manual',
       required: true,

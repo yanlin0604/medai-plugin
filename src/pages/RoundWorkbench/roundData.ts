@@ -2,9 +2,9 @@ import type { DocDefinition } from '../../config/docRegistry';
 import type { Patient as StorePatient } from '../../stores/usePatientStore';
 import type { RoundPatient, RoundVoiceSegment } from '../../services/types';
 
-export type RoundDocCode = 'DOC003' | 'DOC004';
+export type RoundDocCode = 'DOC003';
 
-export const ROUND_DOC_CODES: RoundDocCode[] = ['DOC003', 'DOC004'];
+export const ROUND_DOC_CODES: RoundDocCode[] = ['DOC003'];
 
 export interface RoundDocOption {
   code: RoundDocCode;
@@ -19,7 +19,7 @@ const SAMPLE_PATIENTS: RoundPatient[] = [
     age: '67岁',
     bedNo: '12床',
     diagnosis: '慢性阻塞性肺疾病急性加重',
-    targetDocCodes: ['DOC003', 'DOC004'],
+    targetDocCodes: ['DOC003'],
     identifiers: {
       admissionNo: 'ZY20260608001',
       displayName: '12床 周明 / ZY20260608001',
@@ -45,7 +45,7 @@ const SAMPLE_PATIENTS: RoundPatient[] = [
     age: '72岁',
     bedNo: '18床',
     diagnosis: '脑梗死恢复期',
-    targetDocCodes: ['DOC003', 'DOC004'],
+    targetDocCodes: ['DOC003'],
     identifiers: {
       admissionNo: 'ZY20260608003',
       displayName: '18床 林海 / ZY20260608003',
@@ -68,7 +68,7 @@ export const ROUND_SEGMENTS: RoundVoiceSegment[] = [
   {
     id: 'seg-round-002',
     patientId: 'ZY20260608003',
-    targetDocCode: 'DOC004',
+    targetDocCode: 'DOC003',
     startedAt: '09:35',
     endedAt: '09:38',
     originalText: '十八床林海，上级医师指出肌力恢复慢，需要继续康复训练并注意吞咽风险。',
@@ -98,7 +98,7 @@ export function buildRoundPatients(currentPatient: StorePatient | null): RoundPa
     age: currentPatient.age,
     bedNo: currentPatient.bedNo,
     diagnosis: currentPatient.diagnosis,
-    targetDocCodes: ['DOC003', 'DOC004'],
+    targetDocCodes: ['DOC003'],
     identifiers: {
       admissionNo: currentPatient.id,
       displayName: `${currentPatient.bedNo} ${currentPatient.name} / ${currentPatient.id}`,
@@ -119,7 +119,7 @@ export function buildMockRoundSegment(
   patient: RoundPatient,
   docCode: RoundDocCode,
 ): RoundVoiceSegment {
-  const senior = docCode === 'DOC004';
+  const senior = index % 2 === 1;
   const text = senior
     ? `${patient.bedNo}${patient.name}，上级医师查房后认为当前诊断基本明确，需继续观察主要症状变化并调整治疗计划。`
     : `${patient.bedNo}${patient.name}，今日查房精神状态较前改善，主要症状有缓解，继续当前治疗并复查相关指标。`;

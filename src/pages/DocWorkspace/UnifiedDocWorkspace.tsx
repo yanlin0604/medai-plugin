@@ -1084,19 +1084,21 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setActiveFieldKey(session.field.key);
-                          void handleGenerate(session.field.key, `生成${session.field.label}`);
-                        }}
-                        disabled={session.generating}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
-                      >
-                        {session.generating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}
-                        {hasDraft ? '重新生成' : '生成'}
-                      </button>
+                      {!session.field.disableRegenerate && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setActiveFieldKey(session.field.key);
+                            void handleGenerate(session.field.key, `生成${session.field.label}`);
+                          }}
+                          disabled={session.generating}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                        >
+                          {session.generating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}
+                          {hasDraft ? '重新生成' : '生成'}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={(event) => {

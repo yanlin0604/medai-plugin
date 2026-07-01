@@ -9,7 +9,7 @@ const patientA: RoundPatient = {
   age: '67岁',
   bedNo: '12床',
   diagnosis: '慢阻肺急性加重',
-  targetDocCodes: ['DOC003', 'DOC004'],
+  targetDocCodes: ['DOC003'],
   identifiers: {
     admissionNo: 'ZY-A',
     displayName: '12床 周明 / ZY-A',
@@ -97,7 +97,7 @@ describe('roundDraft', () => {
   });
 
   it('requires at least one confirmed segment for selected patient', () => {
-    const issues = getRoundSubmitIssues(segments, patientB.id, 'DOC004');
+    const issues = getRoundSubmitIssues([], patientB.id, 'DOC003');
 
     expect(issues).toContain('请先确认至少 1 条当前患者、当前文书的查房语音片段。');
   });

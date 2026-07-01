@@ -149,12 +149,6 @@ export const DOC_REGISTRY: DocDefinition[] = [
 
   // ---------- 按需书写病程（绿） ----------
   {
-    code: 'DOC004', id: 'doc-004', name: '查房记录', py: 'sjyscfjl',
-    paradigm: 'recording', group: 'onDemand', icon: 'TeamOutlined',
-    prototype: 'doc_004_senior_round.html',
-    dataSources: ['EMR', '录音'], inputMode: '语音+手动',
-  },
-  {
     code: 'DOC005', id: 'doc-005', name: '疑难病例讨论记录', py: 'ynbltljl',
     paradigm: 'recording', group: 'onDemand', icon: 'GroupOutlined',
     prototype: 'meeting_workbench.html',

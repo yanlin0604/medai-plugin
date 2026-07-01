@@ -190,6 +190,7 @@ function toClinicalSection(field: RuntimeDocFieldDto, value?: RuntimeFieldValueD
     source: normalizeFieldSource(field.sourceType),
     required: Boolean(field.required),
     evidenceEnabled: Boolean(field.renderRule?.evidence?.sources?.length),
+    disableRegenerate: field.renderRule?.disableRegenerate,
   };
 }
 

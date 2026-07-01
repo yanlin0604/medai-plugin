@@ -11,7 +11,7 @@ type RecordingDestination = {
   scope: string;
 };
 
-const ROUND_DOC_CODES = new Set(['DOC003', 'DOC004']);
+const ROUND_DOC_CODES = new Set(['DOC003']);
 const MEETING_DOC_CODES = new Set(['DOC005', 'DOC012']);
 
 function getRecordingDestination(docCode: string): RecordingDestination {
@@ -28,7 +28,7 @@ function getRecordingDestination(docCode: string): RecordingDestination {
     path: '/round',
     name: '查房工作台',
     desc: ROUND_DOC_CODES.has(docCode)
-      ? '用于日常病程和上级查房记录，先标注患者，再确认语音片段并生成草稿。'
+      ? '用于日常病程记录，先标注患者，再确认语音片段并生成草稿。'
       : '用于长录音查房场景，先确认目标文书，再进入采集工作台。',
     scope: '患者标注 / 语音片段 / 文书草稿',
   };
@@ -36,7 +36,7 @@ function getRecordingDestination(docCode: string): RecordingDestination {
 
 /**
  * 长录音互动范式中"查房/会议工作台型"文书的引导页。
- * 日常病程/上级查房 → 查房工作台；疑难讨论/死亡讨论 → 会议工作台。
+ * 日常病程 → 查房工作台；疑难讨论/死亡讨论 → 会议工作台。
  * 入院记录走 AdmissionFlow 四步流；进入独立工作台前显式保留当前文书上下文。
  */
 export default function RecordingGuide({ doc }: ParadigmProps) {

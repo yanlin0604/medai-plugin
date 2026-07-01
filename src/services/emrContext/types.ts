@@ -38,8 +38,8 @@ export interface EmrContextDebug {
   checkedAt: string;
 }
 
-export type EmrContextIdentity = Pick<EmrContext, 'patientId' | 'docCode'>;
+export type EmrContextIdentity = Pick<EmrContext, 'patientId' | 'docCode' | 'docName'>;
 
 export function getEmrContextKey(context: EmrContextIdentity) {
-  return `${context.patientId}:${context.docCode}`;
+  return `${context.patientId}:${context.docCode}:${context.docName}`;
 }

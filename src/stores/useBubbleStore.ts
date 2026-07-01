@@ -18,7 +18,7 @@ interface BubbleState {
   hasActivated: (contextKey: string) => boolean;
 }
 
-export function getBubbleContextKey(context: Pick<BubbleEmrContext, 'patientId' | 'docCode'>) {
+export function getBubbleContextKey(context: Pick<BubbleEmrContext, 'patientId' | 'docCode' | 'docName'>) {
   return getEmrContextKey(context);
 }
 

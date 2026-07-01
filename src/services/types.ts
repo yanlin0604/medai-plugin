@@ -113,6 +113,8 @@ export interface DocFieldDef {
   dictatable?: boolean;
   /** 顶部工作台信息槽位（如 patient/date），由具体文书适配器推导或样例数据提供 */
   metaSlot?: string;
+  /** 是否禁用单字段重新生成 */
+  disableRegenerate?: boolean;
 }
 
 /** 文书模板（后台按 docCode 下发） */
@@ -208,6 +210,8 @@ export interface ClinicalSection {
   required?: boolean;
   /** 当前字段是否由后台配置启用证据补全 */
   evidenceEnabled?: boolean;
+  /** 是否禁用单字段重新生成 */
+  disableRegenerate?: boolean;
 }
 
 export interface ClinicalFieldCalculation {

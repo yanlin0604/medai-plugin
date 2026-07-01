@@ -178,11 +178,13 @@ export const admissionTemplate: DocTemplate = {
     {
       key: 'diagnoses', label: '初步诊断 (ICD-10)', section: '初步诊断',
       source: 'ai', required: true, inputType: 'icd',
+      disableRegenerate: true,
     },
     {
       key: 'treatmentPlan', label: '诊疗计划', section: '诊疗计划',
       source: 'ai', required: true, inputType: 'text',
       placeholder: '确认初步诊断后，点击「AI生成诊疗计划」生成，再由医生审核修改',
+      disableRegenerate: true,
     },
   ],
 };

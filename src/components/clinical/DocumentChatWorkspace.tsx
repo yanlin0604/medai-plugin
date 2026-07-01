@@ -222,12 +222,12 @@ export default function DocumentChatWorkspace({
 
                   {!disabled ? (
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                      {onRegenerateSection && section.source === 'ai' ? (
+                      {onRegenerateSection && section.source === 'ai' && !section.disableRegenerate ? (
                         <button
                           type="button"
                           onClick={() => onRegenerateSection(section.key)}
                           disabled={regenerating || optimizing}
-                          className="inline-flex h-7 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex h-7 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                           title="重新生成当前概括总结"
                         >
                           {regenerating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}

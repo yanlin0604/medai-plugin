@@ -74,6 +74,7 @@ export interface RuntimeFieldRenderRuleDto {
   merge?: RuntimeFieldMergeRuleDto;
   evidence?: RuntimeFieldEvidenceRuleDto;
   prompt?: RuntimeFieldPromptRuleDto;
+  disableRegenerate?: boolean;
 }
 
 export interface RuntimeFieldCalculationDto {
