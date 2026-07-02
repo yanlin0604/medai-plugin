@@ -8,11 +8,82 @@ import {
   LoadingOutlined,
 } from '@ant-design/icons';
 import { usePatientStore } from '../../stores/usePatientStore';
+import { useAuthStore } from '../../stores/useAuthStore';
 import { getHostSession } from '../../services/emsBridge';
+import { pluginRuntimeApi, type RoundRosterPatient } from '../../services/pluginRuntime';
 
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+const ROUND_MOCK_ASR_ENABLED = String(import.meta.env.VITE_ROUND_MOCK_ASR ?? '').trim() === '1';
 const ASR_MODE = '2';
+
+const MOCK_ROUND_TRANSCRIPTS = [
+  {
+    delayMs: 800,
+    speaker: '用户1',
+    text: '先看1201床陈建国。老陈，昨晚胸口闷不闷？睡觉怎么样？',
+  },
+  {
+    delayMs: 2200,
+    speaker: '用户2',
+    text: '比前两天轻一点了，晚上能睡，就是翻身快了还是有点发闷，走几步也会气短。',
+  },
+  {
+    delayMs: 3800,
+    speaker: '用户4',
+    text: '家属补充一下，他昨晚大概醒了两次，没有再说那种压着疼，就是早上起来活动时喘一点。',
+  },
+  {
+    delayMs: 5600,
+    speaker: '用户1',
+    text: '今早血压一百三十五八十，心率七十八次，血氧还可以。昨晚尿量也还行，双下肢水肿不明显。',
+  },
+  {
+    delayMs: 7600,
+    speaker: '用户3',
+    text: '目前看症状是在缓解。今天继续抗血小板、调脂和控压，活动量不要一下子上去，观察胸闷和气短有没有再加重。',
+  },
+  {
+    delayMs: 9800,
+    speaker: '用户1',
+    text: '吃饭先清淡一点，今天白天可以床边活动，别走太快。有胸痛胸闷再及时叫我们。',
+  },
+  {
+    delayMs: 12200,
+    speaker: '用户1',
+    text: '下一个1202床刘淑芬。刘阿姨，今天头还胀不胀？昨晚睡得怎么样？恶心有没有好一点？',
+  },
+  {
+    delayMs: 14400,
+    speaker: '用户2',
+    text: '头还是有点沉，不过比刚住进来那天好多了。昨晚能睡一阵，就是半夜醒过一次，起来有点发虚。',
+  },
+  {
+    delayMs: 16400,
+    speaker: '用户4',
+    text: '她昨晚没有再吐，吃了点粥，精神比昨天好一些，就是担心血压再突然上去。',
+  },
+  {
+    delayMs: 18600,
+    speaker: '用户1',
+    text: '今早血压降到一百五十六九十二，比昨天平稳一些。复查电解质问题不大，意识是清楚的，肢体活动也还可以。',
+  },
+  {
+    delayMs: 20800,
+    speaker: '用户3',
+    text: '今天继续平稳降压，降得不要过快。头痛头晕、视物不清这些变化要继续看，同时注意肾功能和靶器官损害评估。',
+  },
+  {
+    delayMs: 22800,
+    speaker: '用户1',
+    text: '今天先别自己下床去厕所，家属陪着。饮食还是清淡，按时吃药，有不舒服马上说。',
+  },
+  {
+    delayMs: 25200,
+    speaker: '用户1',
+    text: '还有一段没说清床号，患者说昨晚睡得比前天好一点，家属说今天想早点下床活动，这段先保留人工确认。',
+  },
+];
 
 interface AsrServerMessage {
   text?: string;
@@ -30,22 +101,32 @@ type AudioContextWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+const formatBedNoLabel = (bedNo: string) => {
+  const normalized = bedNo.trim();
+  if (!normalized) return '';
+  return normalized.endsWith('床') ? normalized : `${normalized}床`;
+};
+
 export default function RoundWorkbench() {
   const navigate = useNavigate();
   const { currentPatient: loggedPatient } = usePatientStore();
+  const authUserInfo = useAuthStore((state) => state.userInfo);
   const [seconds, setSeconds] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
   const [currentPatient, setCurrentPatient] = useState<CurrentPatientState | null>(null);
   const [liveSubtitle, setLiveSubtitle] = useState('');
   const [doctorName, setDoctorName] = useState('医生');
+  const [deptName, setDeptName] = useState('');
 
   useEffect(() => {
     getHostSession().then((session) => {
       if (session && session.doctorName) {
         setDoctorName(session.doctorName);
+        setDeptName(session.deptName || '');
       } else if (loggedPatient && loggedPatient.doctor) {
         setDoctorName(loggedPatient.doctor);
+        setDeptName(loggedPatient.deptName || '');
       }
     });
   }, [loggedPatient]);
@@ -57,38 +138,86 @@ export default function RoundWorkbench() {
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mockTranscriptTimersRef = useRef<number[]>([]);
   
   const sessionIdRef = useRef<string>(`round-session-${Date.now()}`);
   const finalVoiceDraftRef = useRef('');
 
+  const resolveRoundContext = () => {
+    const resolvedDeptCode = authUserInfo?.deptCode?.trim() ?? '';
+    const resolvedDeptName =
+      authUserInfo?.deptName?.trim() || loggedPatient?.deptName?.trim() || deptName.trim();
+
+    return {
+      deptCode: resolvedDeptCode,
+      deptName: resolvedDeptName,
+    };
+  };
+
+  const loadRoundRoster = async (): Promise<RoundRosterPatient[]> => {
+    const context = resolveRoundContext();
+    return pluginRuntimeApi.getRoundRoster({
+      deptCode: context.deptCode || undefined,
+      deptName: context.deptName || undefined,
+    });
+  };
+
+  const clearMockTranscriptTimers = () => {
+    mockTranscriptTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    mockTranscriptTimersRef.current = [];
+  };
+
+  const sendFinalTranscript = (text: string, speaker?: string, timestamp = Date.now()) => {
+    if (!text.trim()) return;
+
+    setLiveSubtitle(text);
+    finalVoiceDraftRef.current = `${finalVoiceDraftRef.current}${text}`;
+
+    if (roundWsRef.current?.readyState === WebSocket.OPEN) {
+      roundWsRef.current.send(JSON.stringify({
+        action: 'text_message',
+        session_id: sessionIdRef.current,
+        text,
+        speaker: speaker || doctorName,
+        timestamp,
+      }));
+    }
+  };
+
+  const startMockTranscripts = () => {
+    clearMockTranscriptTimers();
+
+    MOCK_ROUND_TRANSCRIPTS.forEach((item) => {
+      const timer = window.setTimeout(() => {
+        sendFinalTranscript(item.text, item.speaker);
+      }, item.delayMs);
+      mockTranscriptTimersRef.current.push(timer);
+    });
+  };
+
   // 1. 开始查房与录音（初始化 WebSocket 和麦克风采集）
   const startRoundSession = async () => {
-    if (!ASR_WS_URL) {
+    if (!ROUND_MOCK_ASR_ENABLED && !ASR_WS_URL) {
       message.error('请配置 VITE_ASR_WS_URL 环境变量');
       return;
     }
 
     try {
-      setIsRecording(true);
-      setSeconds(0);
       setCurrentPatient(null);
       setLiveSubtitle('');
       finalVoiceDraftRef.current = '';
 
-      // 获取麦克风裸流 (16000Hz 单声道)
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, sampleRate: 16000 }
-      });
-      mediaStreamRef.current = stream;
+      const patientRoster = await loadRoundRoster();
+      if (patientRoster.length === 0) {
+        message.warning('当前科室暂无可查房患者，请先补齐 med_visit 在院数据');
+        return;
+      }
 
-      // 1.1 初始化与 ASR 服务的 WebSocket
-      const asrWsUrl = ASR_WS_URL.includes('?') 
-        ? `${ASR_WS_URL}&mode=${ASR_MODE}`
-        : `${ASR_WS_URL}?mode=${ASR_MODE}`;
-      const asrWs = new WebSocket(asrWsUrl);
-      asrWsRef.current = asrWs;
+      const roundContext = resolveRoundContext();
+      setIsRecording(true);
+      setSeconds(0);
 
-      // 1.2 初始化与后端路由分流的 WebSocket
+      // 1.1 初始化与后端路由分流的 WebSocket
       const wsBase = API_BASE_URL.replace(/^http/, 'ws');
       const roundWsUrl = `${wsBase}/ws/field-extraction`;
       const roundWs = new WebSocket(roundWsUrl);
@@ -101,29 +230,61 @@ export default function RoundWorkbench() {
           session_id: sessionIdRef.current,
           doc_code: 'DOC003',
           patient_mode: 'existing',
-          pre_filled_fields: {}
+          workflow_type: 'round',
+          enable_patient_routing: true,
+          patient_roster: patientRoster.map((patient) => ({
+            patientIdHis: patient.patientIdHis,
+            patientName: patient.patientName,
+            bedNo: patient.bedNo,
+          })),
+          pre_filled_fields: {},
+          doctor_code: loggedPatient?.doctor || doctorName,
+          doctor_name: doctorName || loggedPatient?.doctor || '',
+          dept_code: roundContext.deptCode || roundContext.deptName || '',
+          hospital_code: '',
         }));
+
+        if (ROUND_MOCK_ASR_ENABLED) {
+          startMockTranscripts();
+        }
       };
 
       roundWs.onmessage = (event) => {
         if (typeof event.data !== 'string') return;
         try {
           const msg = JSON.parse(event.data);
-          if (msg.action === 'update_fields') {
-            const patientFields = msg.patient_fields || {};
-            // 检测后端推回的 patient_fields 从而高亮当前对齐患者
-            if (patientFields.patientName || patientFields.bedNo) {
-              setCurrentPatient({
-                name: patientFields.patientName || '未知患者',
-                bedNo: patientFields.bedNo || '',
-                patientIdHis: patientFields.patientIdHis
-              });
+          if (msg.action === 'patient_routed') {
+            if (msg.matched === false) {
+              setCurrentPatient(null);
+              return;
             }
+            setCurrentPatient({
+              name: msg.patientName || '未知患者',
+              bedNo: msg.bedNo || '',
+              patientIdHis: msg.patientIdHis,
+            });
           }
         } catch (e) {
           console.error('解析后端 WS 路由消息失败:', e);
         }
       };
+
+      if (ROUND_MOCK_ASR_ENABLED) {
+        return;
+      }
+
+      // 获取麦克风裸流 (16000Hz 单声道)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, sampleRate: 16000 }
+      });
+      mediaStreamRef.current = stream;
+
+      // 1.2 初始化与 ASR 服务的 WebSocket
+      const asrWsUrl = ASR_WS_URL.includes('?') 
+        ? `${ASR_WS_URL}&mode=${ASR_MODE}`
+        : `${ASR_WS_URL}?mode=${ASR_MODE}`;
+      const asrWs = new WebSocket(asrWsUrl);
+      asrWsRef.current = asrWs;
 
       // 1.3 连接 ASR 并开启流式采集发送
       asrWs.onopen = () => {
@@ -167,18 +328,7 @@ export default function RoundWorkbench() {
 
             // 当 ASR 段落识别结束，发送 action: text_message 给后端，让后端进行患者床位路由
             if (data.is_final) {
-              const fullDraft = `${finalVoiceDraftRef.current}${currentSentence}`;
-              finalVoiceDraftRef.current = fullDraft;
-
-              if (roundWsRef.current?.readyState === WebSocket.OPEN) {
-                roundWsRef.current.send(JSON.stringify({
-                  action: 'text_message',
-                  session_id: sessionIdRef.current,
-                  text: currentSentence,
-                  speaker: data.speaker || doctorName,
-                  timestamp: Date.now()
-                }));
-              }
+              sendFinalTranscript(currentSentence, data.speaker);
             }
           }
         } catch (e) {
@@ -187,6 +337,7 @@ export default function RoundWorkbench() {
       };
 
     } catch (err) {
+      stopSession();
       setIsRecording(false);
       message.error(`无法开启录音或建立服务连接: ${err instanceof Error ? err.message : '未知错误'}`);
     }
@@ -194,6 +345,8 @@ export default function RoundWorkbench() {
 
   // 2. 清理全部 WebSocket 及其麦克风资源
   const stopSession = () => {
+    clearMockTranscriptTimers();
+
     const processor = audioProcessorRef.current;
     audioProcessorRef.current = null;
     if (processor) {
@@ -312,7 +465,7 @@ export default function RoundWorkbench() {
             <div className="flex flex-col items-center justify-center rounded-2xl bg-gradient-to-r from-blue-500 to-[#1E3A8A] px-6 py-5 text-white shadow-xl shadow-blue-500/10 border border-blue-400/20 transform scale-100 transition-all duration-500">
               <span className="text-[10px] uppercase font-bold tracking-widest text-blue-200">🩺 当前对齐患者</span>
               <h2 className="mt-2 text-2xl font-extrabold tracking-wider">
-                {currentPatient.bedNo ? `${currentPatient.bedNo}床 - ` : ''}{currentPatient.name}
+                {currentPatient.bedNo ? `${formatBedNoLabel(currentPatient.bedNo)} - ` : ''}{currentPatient.name}
               </h2>
               <p className="mt-1.5 text-xs text-blue-100 font-medium">后续语音记录将写入此患者日常病程</p>
             </div>
@@ -347,7 +500,11 @@ export default function RoundWorkbench() {
               {formatTime(seconds)}
             </div>
             <div className="mt-3 text-xs font-semibold tracking-widest text-[#1E3A8A] bg-blue-50 px-4 py-1 rounded-full inline-block">
-              {isFinishing ? '正在整理查房意见...' : '正在录制中'}
+              {isFinishing
+                ? '正在整理查房意见...'
+                : isRecording
+                  ? (ROUND_MOCK_ASR_ENABLED ? '模拟识别中' : '正在录制中')
+                  : '等待开始'}
             </div>
           </div>
         </div>

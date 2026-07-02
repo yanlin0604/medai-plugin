@@ -3,55 +3,55 @@ import type { RoundPatient, RoundVoiceSegment } from '../../services/types';
 import { buildRoundSections, getConfirmedRoundSegments, getRoundSubmitIssues } from './roundDraft';
 
 const patientA: RoundPatient = {
-  id: 'ZY-A',
-  name: '周明',
+  id: 'ZY20260001',
+  name: '陈建国',
   gender: '男',
-  age: '67岁',
-  bedNo: '12床',
-  diagnosis: '慢阻肺急性加重',
+  age: '65岁',
+  bedNo: '1201',
+  diagnosis: '冠状动脉粥样硬化性心脏病',
   targetDocCodes: ['DOC003'],
   identifiers: {
-    admissionNo: 'ZY-A',
-    displayName: '12床 周明 / ZY-A',
+    admissionNo: 'ZY20260001',
+    displayName: '1201床 陈建国 / ZY20260001',
   },
 };
 
 const patientB: RoundPatient = {
-  id: 'ZY-B',
-  name: '陈婧',
+  id: 'ZY20260002',
+  name: '刘淑芬',
   gender: '女',
   age: '58岁',
-  bedNo: '15床',
-  diagnosis: '2型糖尿病',
+  bedNo: '1202',
+  diagnosis: '高血压病3级',
   targetDocCodes: ['DOC003'],
   identifiers: {
-    admissionNo: 'ZY-B',
-    displayName: '15床 陈婧 / ZY-B',
+    admissionNo: 'ZY20260002',
+    displayName: '1202床 刘淑芬 / ZY20260002',
   },
 };
 
 const segments: RoundVoiceSegment[] = [
   {
     id: 'right',
-    patientId: 'ZY-A',
+    patientId: 'ZY20260001',
     targetDocCode: 'DOC003',
     startedAt: '09:10',
-    revisedText: '12床周明今日咳嗽减轻，继续抗感染。',
-    originalText: '十二床周明今日咳嗽减轻继续抗感染',
+    revisedText: '1201床陈建国今日胸闷减轻，继续抗血小板治疗。',
+    originalText: '一二零一床陈建国今日胸闷减轻继续抗血小板治疗',
     status: 'confirmed',
   },
   {
     id: 'wrong-patient',
-    patientId: 'ZY-B',
+    patientId: 'ZY20260002',
     targetDocCode: 'DOC003',
     startedAt: '09:11',
-    revisedText: '15床陈婧血糖仍需观察。',
-    originalText: '十五床陈婧血糖仍需观察',
+    revisedText: '1202床刘淑芬血压仍需继续观察。',
+    originalText: '一二零二床刘淑芬血压仍需继续观察',
     status: 'confirmed',
   },
   {
     id: 'wrong-doc',
-    patientId: 'ZY-A',
+    patientId: 'ZY20260001',
     targetDocCode: 'DOC004',
     startedAt: '09:12',
     revisedText: '上级医师意见不应进入日常病程。',
@@ -60,7 +60,7 @@ const segments: RoundVoiceSegment[] = [
   },
   {
     id: 'draft',
-    patientId: 'ZY-A',
+    patientId: 'ZY20260001',
     targetDocCode: 'DOC003',
     startedAt: '09:13',
     revisedText: '待确认内容。',
@@ -85,8 +85,8 @@ describe('roundDraft', () => {
     const voiceSection = sections.find((section) => section.key === 'confirmedVoiceSegments');
 
     expect(confirmed.map((segment) => segment.id)).toEqual(['right']);
-    expect(voiceSection?.text).toContain('12床周明今日咳嗽减轻');
-    expect(voiceSection?.text).not.toContain('15床陈婧');
+    expect(voiceSection?.text).toContain('1201床陈建国今日胸闷减轻');
+    expect(voiceSection?.text).not.toContain('1202床刘淑芬');
     expect(voiceSection?.text).not.toContain('待确认内容');
   });
 

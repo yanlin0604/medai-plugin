@@ -1,5 +1,4 @@
 import type { DocDefinition } from '../../config/docRegistry';
-import type { Patient as StorePatient } from '../../stores/usePatientStore';
 import type { RoundPatient, RoundVoiceSegment } from '../../services/types';
 
 export type RoundDocCode = 'DOC003';
@@ -11,44 +10,31 @@ export interface RoundDocOption {
   name: string;
 }
 
-const SAMPLE_PATIENTS: RoundPatient[] = [
+export const ROUND_DEMO_PATIENTS: RoundPatient[] = [
   {
-    id: 'ZY20260608001',
-    name: '周明',
+    id: 'ZY20260001',
+    name: '陈建国',
     gender: '男',
-    age: '67岁',
-    bedNo: '12床',
-    diagnosis: '慢性阻塞性肺疾病急性加重',
+    age: '65岁',
+    bedNo: '1201',
+    diagnosis: '冠状动脉粥样硬化性心脏病，不稳定型心绞痛',
     targetDocCodes: ['DOC003'],
     identifiers: {
-      admissionNo: 'ZY20260608001',
-      displayName: '12床 周明 / ZY20260608001',
+      admissionNo: 'ZY20260001',
+      displayName: '1201床 陈建国 / ZY20260001',
     },
   },
   {
-    id: 'ZY20260608002',
-    name: '陈婧',
+    id: 'ZY20260002',
+    name: '刘淑芬',
     gender: '女',
     age: '58岁',
-    bedNo: '15床',
-    diagnosis: '2型糖尿病伴感染',
+    bedNo: '1202',
+    diagnosis: '高血压病3级，高血压脑病',
     targetDocCodes: ['DOC003'],
     identifiers: {
-      admissionNo: 'ZY20260608002',
-      displayName: '15床 陈婧 / ZY20260608002',
-    },
-  },
-  {
-    id: 'ZY20260608003',
-    name: '林海',
-    gender: '男',
-    age: '72岁',
-    bedNo: '18床',
-    diagnosis: '脑梗死恢复期',
-    targetDocCodes: ['DOC003'],
-    identifiers: {
-      admissionNo: 'ZY20260608003',
-      displayName: '18床 林海 / ZY20260608003',
+      admissionNo: 'ZY20260002',
+      displayName: '1202床 刘淑芬 / ZY20260002',
     },
   },
 ];
@@ -56,23 +42,23 @@ const SAMPLE_PATIENTS: RoundPatient[] = [
 export const ROUND_SEGMENTS: RoundVoiceSegment[] = [
   {
     id: 'seg-round-001',
-    patientId: 'ZY20260608001',
+    patientId: 'ZY20260001',
     targetDocCode: 'DOC003',
     startedAt: '09:10',
     endedAt: '09:12',
-    originalText: '十二床周明，夜间咳嗽较前减轻，氧饱和度维持九十五左右，继续雾化和抗感染。',
-    revisedText: '12床周明，夜间咳嗽较前减轻，SpO2维持约95%，继续雾化吸入及抗感染治疗。',
+    originalText: '一二零一床陈建国，昨晚胸闷较前减轻，心率维持在七十八次左右，继续抗血小板和控压治疗。',
+    revisedText: '1201床陈建国，昨晚胸闷较前减轻，心率维持在78次/分左右，继续抗血小板及控压治疗。',
     status: 'confirmed',
     speakerRole: '住院医师',
   },
   {
     id: 'seg-round-002',
-    patientId: 'ZY20260608003',
+    patientId: 'ZY20260002',
     targetDocCode: 'DOC003',
     startedAt: '09:35',
     endedAt: '09:38',
-    originalText: '十八床林海，上级医师指出肌力恢复慢，需要继续康复训练并注意吞咽风险。',
-    revisedText: '18床林海，上级医师查房指出肢体肌力恢复较慢，需继续康复训练，并重点评估吞咽风险。',
+    originalText: '一二零二床刘淑芬，上级医师指出继续平稳降压，并重点评估靶器官损害情况。',
+    revisedText: '1202床刘淑芬，上级医师查房指出继续平稳降压，并重点评估靶器官损害情况。',
     status: 'confirmed',
     speakerRole: '上级医师',
   },
@@ -81,32 +67,12 @@ export const ROUND_SEGMENTS: RoundVoiceSegment[] = [
     patientId: null,
     targetDocCode: 'DOC003',
     startedAt: '09:42',
-    originalText: '患者说今天胃口好一点，血糖还要继续看。',
-    revisedText: '患者诉今日食欲较前改善，需继续监测血糖波动。',
+    originalText: '患者说昨晚睡眠好一些，但是具体哪床还需要再确认。',
+    revisedText: '患者诉昨晚睡眠较前改善，但当前片段未明确具体床号，需人工确认归属。',
     status: 'draft',
     speakerRole: '患者',
   },
 ];
-
-export function buildRoundPatients(currentPatient: StorePatient | null): RoundPatient[] {
-  if (!currentPatient) return SAMPLE_PATIENTS;
-
-  const active: RoundPatient = {
-    id: currentPatient.id,
-    name: currentPatient.name,
-    gender: currentPatient.gender,
-    age: currentPatient.age,
-    bedNo: currentPatient.bedNo,
-    diagnosis: currentPatient.diagnosis,
-    targetDocCodes: ['DOC003'],
-    identifiers: {
-      admissionNo: currentPatient.id,
-      displayName: `${currentPatient.bedNo} ${currentPatient.name} / ${currentPatient.id}`,
-    },
-  };
-
-  return [active, ...SAMPLE_PATIENTS.filter((patient) => patient.id !== active.id)];
-}
 
 export function buildRoundDocOptions(docs: Array<DocDefinition | undefined>): RoundDocOption[] {
   return docs

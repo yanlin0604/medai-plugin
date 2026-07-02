@@ -19,6 +19,7 @@ import { message } from 'antd';
 import appIcon from '../../../src-tauri/icons/app-icon-64.png';
 import { getDocByCode } from '../../config/docRegistry';
 import { collapseAssistantWindow, expandAssistantWindow, showAssistBubbleWindow } from '../../services/windowMode';
+import { pluginRuntimeApi, type RoundPendingSegment } from '../../services/pluginRuntime';
 import { BubbleEmrContext, useBubbleStore, getBubbleContextKey } from '../../stores/useBubbleStore';
 import { usePatientStore } from '../../stores/usePatientStore';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
@@ -69,6 +70,7 @@ const FIELD_CONTEXT_POLL_MS = 800;
 const FIELD_AUTO_GENERATE_DELAY_MS = 450;
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const ASR_MODE = '2';
+const ROUND_TRANSCRIPT_FIELD_KEYS = new Set(['conditionChange', 'treatmentAdjust', 'seniorOpinion']);
 
 function getFieldContextSnapshotKey(context: FieldAssistContext) {
   return getFieldAssistSnapshotKey(context);
@@ -85,6 +87,17 @@ function getEditContextSnapshotKey(context: BsEditAssistContext) {
     context.selectionEnd,
     context.trigger,
   ].join('|');
+}
+
+function isRoundDrivenFieldContext(context: FieldAssistContext | null): context is FieldAssistContext {
+  return Boolean(context && context.docCode === 'DOC003' && ROUND_TRANSCRIPT_FIELD_KEYS.has(context.fieldKey));
+}
+
+function buildRoundTranscriptText(segments: RoundPendingSegment[]) {
+  return segments
+    .map((segment) => segment.transcribeText?.trim())
+    .filter((text): text is string => Boolean(text))
+    .join('\n');
 }
 
 export default function BubbleShell({ onExpand }: BubbleShellProps) {
@@ -129,6 +142,13 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     () => (detectedContext ? buildPatientFromEmrContext(detectedContext) : null),
     [contextKey],
   );
+  const shouldAutoGenerateCurrentField = useMemo(() => {
+    if (!fieldContext) return false;
+    if (fieldContext.docCode === 'DOC003' && !ROUND_TRANSCRIPT_FIELD_KEYS.has(fieldContext.fieldKey)) {
+      return false;
+    }
+    return shouldAutoGenerateField(fieldContext, fieldDraft);
+  }, [fieldContext, fieldDraft]);
   const editContextKey = useMemo(
     () =>
       editContext
@@ -141,9 +161,32 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
           editContext.selectionStart,
           editContext.selectionEnd,
         ].join('|')
-        : '',
+      : '',
     [editContext],
   );
+
+  const resolveRoundTranscriptText = async (context: FieldAssistContext) => {
+    if (!isRoundDrivenFieldContext(context)) {
+      return undefined;
+    }
+    const pendingStatus = await pluginRuntimeApi.getRoundPendingStatus(
+      context.patientId,
+      currentPatient?.doctor || '',
+    );
+    const transcriptText = buildRoundTranscriptText(
+      (pendingStatus.assignedSegments ?? []).filter((segment) => segment.status !== 'ignored'),
+    );
+    if (!transcriptText.trim()) {
+      throw new Error('当前患者暂无可用查房片段');
+    }
+    return transcriptText;
+  };
+
+  const generateContextAwareFieldDraft = async (context: FieldAssistContext) => {
+    const transcriptText = await resolveRoundTranscriptText(context);
+    const effectiveContext = transcriptText ? { ...context, fieldValue: '' } : context;
+    return generateFieldDraft(effectiveContext, undefined, transcriptText);
+  };
   const suggestions = useMemo(
     () => (editContext ? buildEditAssistSuggestions(editContext, suggestionBatch) : []),
     [editContext, suggestionBatch],
@@ -328,7 +371,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         return;
       }
       const isWaitingForAutoGenerate =
-        fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft);
+        fieldDraftStatus === 'idle' && shouldAutoGenerateCurrentField;
       if (isWaitingForAutoGenerate || fieldDraftStatus === 'generating') {
         // 仅在等待自动生成和生成中时收缩为气泡
         void collapseAssistantWindow();
@@ -346,7 +389,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   }, [editContext, fieldContext, fieldDraft, fieldDraftStatus, isManuallyCollapsed]);
 
   useEffect(() => {
-    if (!fieldContext || !shouldAutoGenerateField(fieldContext, fieldDraft)) return;
+    if (!fieldContext || !shouldAutoGenerateCurrentField) return;
     const requestKey = `${fieldContextKey}:auto`;
     if (autoGenerateRequestKeysRef.current.has(requestKey)) return;
     // 防竞态：如果已有另一个上下文正在生成，先等其取消
@@ -361,7 +404,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
 
     const timer = window.setTimeout(() => {
       requestStarted = true;
-      generateFieldDraft(fieldContext)
+      generateContextAwareFieldDraft(fieldContext)
         .then((draft) => {
           if (cancelled) return;
           setFieldDraft(draft);
@@ -386,7 +429,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         generatingContextKeyRef.current = '';
       }
     };
-  }, [addStoredFieldDraft, fieldContext, fieldContextKey, fieldDraft]);
+  }, [addStoredFieldDraft, fieldContext, fieldContextKey, shouldAutoGenerateCurrentField]);
 
   useEffect(() => {
     if (!fieldContextKey) return;
@@ -730,7 +773,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     const requestContextKey = fieldContextKey;
     setFieldDraftStatus('generating');
     setFieldStatusText('正在重新生成');
-    void generateFieldDraft(fieldContext)
+    void generateContextAwareFieldDraft(fieldContext)
       .then((draft) => {
         if (latestFieldContextKeyRef.current !== requestContextKey) return;
         setFieldDraft(draft);
@@ -889,7 +932,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       </div>
     ) : null;
 
-    if (isFieldBusy || (fieldDraftStatus === 'idle' && shouldAutoGenerateField(fieldContext, fieldDraft)) || isManuallyCollapsed) {
+    if (isFieldBusy || (fieldDraftStatus === 'idle' && shouldAutoGenerateCurrentField) || isManuallyCollapsed) {
       const collapsedTitle = isWorking
         ? `${detectedContext?.patientName ?? fieldContext.patientName} · ${draftStatusLabel}`
         : `${fieldContext.patientName} · ${fieldActionLabel}`;

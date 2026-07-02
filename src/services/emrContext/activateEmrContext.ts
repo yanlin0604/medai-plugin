@@ -12,8 +12,11 @@ function optionalText(value: string | undefined) {
 }
 
 export function buildPatientFromEmrContext(context: EmrContext): Patient {
+  const patientIdHis = optionalText(context.patientIdHis);
+  const inpatientNo = optionalText(context.inpatientNo);
+
   return {
-    id: context.patientId,
+    id: patientIdHis || inpatientNo || context.patientId,
     name: context.patientName,
     gender: optionalText(context.gender),
     age: optionalText(context.age),

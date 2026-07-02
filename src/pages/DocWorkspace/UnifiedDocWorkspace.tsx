@@ -292,9 +292,11 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [segmentSelectorOpen, setSegmentSelectorOpen] = useState(false);
+  const [assignedSegments, setAssignedSegments] = useState<any[]>([]);
   const [unassignedCount, setUnassignedCount] = useState(0);
   const [unassignedSegments, setUnassignedSegments] = useState<any[]>([]);
   const [bannerVisible, setBannerVisible] = useState(false);
+  const [refreshingSegments, setRefreshingSegments] = useState(false);
 
   const latestFieldSnapshotKeyRef = useRef('');
   const asrWsRef = useRef<WebSocket | null>(null);
@@ -356,12 +358,15 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         pluginRuntimeApi.getRoundPendingStatus(patient.id, patient.doctor)
           .then((res) => {
             if (cancelled) return;
+            setAssignedSegments(res.assignedSegments ?? []);
             setUnassignedCount(res.unassignedCount);
             setUnassignedSegments(res.unassignedSegments);
             setBannerVisible(res.unassignedCount > 0);
 
-            if (res.hasPendingSegment && res.patientSegment) {
-              void handleAutoFillRound(res.patientSegment.transcribeText, nextSessions, res.patientSegment.id);
+            const pendingAssignedSegments = (res.assignedSegments ?? [])
+              .filter((segment) => segment.status === 'pending');
+            if (res.hasPendingAssignedSegments && pendingAssignedSegments.length > 0) {
+              void handleAutoFillRound(pendingAssignedSegments, nextSessions);
             }
           })
           .catch((err) => {
@@ -378,6 +383,24 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       cancelled = true;
     };
   }, [doc.code, patient.id]);
+
+  const handleRefreshRoundSegments = async () => {
+    if (doc.code !== 'DOC003' || refreshingSegments) return;
+    setRefreshingSegments(true);
+    try {
+      const res = await pluginRuntimeApi.getRoundPendingStatus(patient.id, patient.doctor);
+      setAssignedSegments(res.assignedSegments ?? []);
+      setUnassignedCount(res.unassignedCount);
+      setUnassignedSegments(res.unassignedSegments);
+      setBannerVisible(res.unassignedCount > 0);
+      message.success('已刷新最新查房记录');
+    } catch (err) {
+      console.error('刷新查房状态失败:', err);
+      message.error('刷新查房记录失败');
+    } finally {
+      setRefreshingSegments(false);
+    }
+  };
 
   useEffect(() => {
     setSessions((current) => mergeLatestDraftsIntoSessions(current, drafts, patient.id, doc.code));
@@ -471,62 +494,86 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     }
   };
 
-  const handleAutoFillRound = async (segmentText: string, currentSessions: FieldSession[], segmentId: number) => {
-    const fillMessageKey = 'auto-fill-round-process';
-    message.loading({ content: '检测到您刚刚完成了查房，正在为您自动提炼并回填病程记录...', key: fillMessageKey, duration: 0 });
-    
+  const generateRoundDrivenFields = async (
+    segmentText: string,
+    currentSessions: FieldSession[],
+    overwriteExisting: boolean,
+  ): Promise<number> => {
     const targetFields = ['conditionChange', 'treatmentAdjust', 'seniorOpinion'];
-    let updatedSessions = [...currentSessions];
+    const targetSessions = currentSessions.filter((session) =>
+      targetFields.includes(session.field.key) && (overwriteExisting || !session.value.trim()),
+    );
 
-    // 将需要生成的字段置为 generating 状态以呈现骨架 Loading
-    updatedSessions = updatedSessions.map((session) => {
-      if (targetFields.includes(session.field.key) && !session.value.trim()) {
-        return { ...session, generating: true };
-      }
-      return session;
-    });
-    setSessions(updatedSessions);
+    if (targetSessions.length === 0) return 0;
 
-    const generatePromises = targetFields.map(async (fieldKey) => {
-      const session = updatedSessions.find((s) => s.field.key === fieldKey);
-      if (!session) return;
-      if (session.value.trim()) return; // 防覆盖，有值的字段不自动填充
+    setSessions((prev) => prev.map((session) => (
+      targetSessions.some((target) => target.field.key === session.field.key)
+        ? { ...session, generating: true }
+        : session
+    )));
 
+    const results = await Promise.all(targetSessions.map(async (session) => {
       try {
-        const context = buildContext(doc, patient, session, `根据查房记录生成${session.field.label}`);
-        const draft = await generateFieldDraft(context, `根据查房记录生成${session.field.label}`, segmentText);
+        const baseContext = buildContext(doc, patient, session, `根据查房记录生成${session.field.label}`);
+        const draft = await generateFieldDraft(
+          overwriteExisting ? { ...baseContext, fieldValue: '' } : baseContext,
+          `根据查房记录生成${session.field.label}`,
+          segmentText,
+        );
         addDraft(draft);
-        
-        setSessions((current) => current.map((s) => {
-          if (s.field.key === fieldKey) {
+
+        setSessions((current) => current.map((item) => {
+          if (item.field.key === session.field.key) {
             return {
-              ...s,
+              ...item,
               draft,
               value: draft.generatedText || draft.response.generatedText,
               generating: false,
             };
           }
-          return s;
+          return item;
         }));
+        return true;
       } catch (err) {
-        console.error(`自动提取字段 ${fieldKey} 失败:`, err);
-        setSessions((current) => current.map((s) => {
-          if (s.field.key === fieldKey) {
-            return { ...s, generating: false };
-          }
-          return s;
-        }));
+        console.error(`查房片段生成字段 ${session.field.key} 失败:`, err);
+        setSessions((current) => current.map((item) => (
+          item.field.key === session.field.key ? { ...item, generating: false } : item
+        )));
+        return false;
       }
-    });
+    }));
 
-    await Promise.all(generatePromises);
+    return results.filter(Boolean).length;
+  };
 
-    try {
-      await pluginRuntimeApi.markRoundStatus(segmentId, 'applied');
-    } catch (err) {
-      console.error('标记片段状态失败:', err);
+  const handleAutoFillRound = async (segments: any[], currentSessions: FieldSession[]) => {
+    const pendingSegments = segments.filter((segment) => segment.status === 'pending');
+    if (pendingSegments.length === 0) return;
+
+    const segmentText = buildRoundTranscriptText(pendingSegments);
+    if (!segmentText.trim()) return;
+
+    const fillMessageKey = 'auto-fill-round-process';
+    message.loading({ content: '检测到您刚刚完成了查房，正在为您自动提炼并回填病程记录...', key: fillMessageKey, duration: 0 });
+
+    const generatedCount = await generateRoundDrivenFields(segmentText, currentSessions, false);
+    if (generatedCount === 0) {
+      message.info({ content: '检测到新的查房片段，但当前病程字段已有内容，未自动覆盖。', key: fillMessageKey, duration: 2 });
+      return;
     }
-    
+
+    const pendingIds = pendingSegments.map((segment) => segment.id);
+    for (const segmentId of pendingIds) {
+      try {
+        await pluginRuntimeApi.markRoundStatus(segmentId, 'applied');
+      } catch (err) {
+        console.error('标记片段状态失败:', err);
+      }
+    }
+    setAssignedSegments((prev) => prev.map((segment) => (
+      pendingIds.includes(segment.id) ? { ...segment, status: 'applied', isUnassigned: false } : segment
+    )));
+
     message.success({ content: '日常病程已自动生成并回填！', key: fillMessageKey, duration: 2 });
   };
 
@@ -1248,19 +1295,54 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         onClose={() => setSegmentSelectorOpen(false)}
         patientId={patient.id}
         patientName={patient.name}
+        assignedSegments={assignedSegments}
         unassignedSegments={unassignedSegments}
-        onImport={async (selectedTexts, selectedIds) => {
-          if (!activeSession) {
-            message.warning('请先选中一个正文字段，再导入查房记录');
-            return;
-          }
-          if (selectedIds.length === 0) return;
+        onRefresh={handleRefreshRoundSegments}
+        refreshing={refreshingSegments}
+        onImport={async ({ selectedTexts, assignedIds, unassignedIds }) => {
+          if (!selectedTexts.trim()) return;
 
           try {
-            await handleGenerate(activeSession.field.key, `根据查房记录生成${activeSession.field.label}`, selectedTexts);
-            
-            // 标记已勾选应用的片段状态为 applied
-            for (const id of selectedIds) {
+            if (unassignedIds.length > 0) {
+              await pluginRuntimeApi.claimAndApplyRoundSegments({
+                segmentIds: unassignedIds,
+                patientIdHis: patient.id,
+                patientName: patient.name,
+                bedNo: patient.bedNo || undefined,
+              });
+
+              setAssignedSegments((prev) => {
+                const existing = new Map(prev.map((segment) => [segment.id, segment]));
+                unassignedSegments
+                  .filter((segment) => unassignedIds.includes(segment.id))
+                  .forEach((segment) => {
+                    existing.set(segment.id, {
+                      ...segment,
+                      patientIdHis: patient.id,
+                      patientName: patient.name,
+                      bedNo: patient.bedNo,
+                      isUnassigned: false,
+                      status: 'applied',
+                    });
+                  });
+                return Array.from(existing.values()).sort((left, right) => left.id - right.id);
+              });
+
+              setUnassignedSegments((prev) => {
+                const next = prev.filter((seg) => !unassignedIds.includes(seg.id));
+                setUnassignedCount(next.length);
+                setBannerVisible(next.length > 0);
+                return next;
+              });
+            }
+
+            const generatedCount = await generateRoundDrivenFields(selectedTexts, sessions, true);
+            if (generatedCount === 0) {
+              message.warning('当前没有可重新生成的查房病程字段');
+              return;
+            }
+
+            for (const id of assignedIds) {
               try {
                 await pluginRuntimeApi.markRoundStatus(id, 'applied');
               } catch (e) {
@@ -1268,14 +1350,16 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               }
             }
 
-            // 更新本地待处理片段集合，重设 Alert Banner 状态
-            setUnassignedSegments((prev) => {
-              const next = prev.filter((seg) => !selectedIds.includes(seg.id));
-              setUnassignedCount(next.length);
-              setBannerVisible(next.length > 0);
-              return next;
+            setAssignedSegments((prev) => {
+              const existing = new Map(prev.map((segment) => [segment.id, segment]));
+              prev.forEach((segment) => {
+                if (assignedIds.includes(segment.id)) {
+                  existing.set(segment.id, { ...segment, status: 'applied', isUnassigned: false });
+                }
+              });
+              return Array.from(existing.values()).sort((left, right) => left.id - right.id);
             });
-            message.success(`已提取选中的查房语音并追加至【${activeSession.field.label}】`);
+            message.success('已根据所选查房片段重新生成日常病程字段');
           } catch (err) {
             console.error('导入并提取查房记录失败:', err);
           }
@@ -1283,4 +1367,18 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       />
     </ParadigmShell>
   );
+}
+
+function buildRoundTranscriptText(segments: any[]) {
+  return segments
+    .map((seg) => {
+      try {
+        const speaker = seg.speakerListJson ? JSON.parse(seg.speakerListJson) : [];
+        const speakerLabel = speaker.length > 0 ? speaker[0] : '发言人';
+        return `【${speakerLabel}】${seg.transcribeText}`;
+      } catch (e) {
+        return `【查房片段】${seg.transcribeText}`;
+      }
+    })
+    .join('\n');
 }

@@ -11,6 +11,8 @@ export type EmrContextSignal = KnownEmrContextSignal | (string & {});
 export interface EmrContext {
   source: EmrContextSource;
   patientId: string;
+  patientIdHis?: string;
+  inpatientNo?: string;
   patientName: string;
   gender?: string;
   age?: string;

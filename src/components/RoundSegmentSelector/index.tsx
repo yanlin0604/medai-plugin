@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Drawer, Button, Checkbox, Tag } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, RobotOutlined } from '@ant-design/icons';
+import { useState, useEffect } from 'react';
+import { Drawer, Button, Checkbox, Tag, Tabs } from 'antd';
+import { PlayCircleOutlined, PauseCircleOutlined, RobotOutlined, ReloadOutlined } from '@ant-design/icons';
 
 interface DiarizationSegment {
   id: string;
@@ -14,67 +14,167 @@ export interface AudioBlock {
   id: string;
   timestamp: string;
   segments: DiarizationSegment[];
+  group: 'assigned' | 'unassigned';
+  status?: 'pending' | 'applied' | 'ignored';
 }
-
-// 模拟后端返回的全病区查房大录音片段（未绑定具体患者）
-const MOCK_BLOCKS: AudioBlock[] = [
-  {
-    id: 'block-1',
-    timestamp: '09:12',
-    segments: [
-      { id: '1', start: 0, end: 5, speaker: '说话人 1', text: '12床，今天感觉怎么样？咳嗽好点了吗？' },
-      { id: '2', start: 6, end: 10, speaker: '说话人 2', text: '咳嗽好多了，就是晚上还有点。' },
-      { id: '3', start: 11, end: 15, speaker: '说话人 1', text: '好，那我们继续雾化和抗感染治疗，氧饱和度我看维持在95左右，挺好的。' },
-    ]
-  },
-  {
-    id: 'block-2',
-    timestamp: '09:18',
-    segments: [
-      { id: '4', start: 120, end: 125, speaker: '说话人 1', text: '下一个，15床。昨天的血糖查了没？' },
-      { id: '5', start: 126, end: 130, speaker: '说话人 3', text: '空腹是8.2。' },
-      { id: '6', start: 131, end: 138, speaker: '说话人 1', text: '还是偏高，胰岛素稍微加2个单位。' }
-    ]
-  },
-  {
-    id: 'block-3',
-    timestamp: '09:25',
-    segments: [
-      { id: '7', start: 600, end: 605, speaker: '说话人 1', text: '对了12床，昨天复查的血常规白细胞下来了。' }
-    ]
-  }
-];
 
 interface RoundSegmentSelectorProps {
   open: boolean;
   onClose: () => void;
   patientId: string;
   patientName: string;
-  onImport: (selectedTexts: string, selectedIds: number[]) => void;
-  unassignedSegments?: Array<{ id: number; transcribeText: string; }>;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  onImport: (payload: { selectedTexts: string; assignedIds: number[]; unassignedIds: number[] }) => void;
+  assignedSegments?: Array<{
+    id: number;
+    transcribeText: string;
+    alignTimestamp?: string;
+    status?: 'pending' | 'applied' | 'ignored';
+  }>;
+  unassignedSegments?: Array<{
+    id: number;
+    transcribeText: string;
+    alignTimestamp?: string;
+    status?: 'pending' | 'applied' | 'ignored';
+  }>;
 }
 
 export default function RoundSegmentSelector({
   open,
   onClose,
   patientName,
+  onRefresh,
+  refreshing,
   onImport,
+  assignedSegments,
   unassignedSegments
 }: RoundSegmentSelectorProps) {
-  // 如果传入了真实的未分配片段，我们将其转换为组件内部的 blocks 结构
-  const blocks: AudioBlock[] = unassignedSegments && unassignedSegments.length > 0
-    ? unassignedSegments.map((seg) => ({
-        id: String(seg.id),
-        timestamp: '未分配',
-        segments: [
-          { id: String(seg.id), start: 0, end: 0, speaker: '查房语音', text: seg.transcribeText }
-        ]
-      }))
-    : MOCK_BLOCKS;
+  const blocks: AudioBlock[] = [
+    ...(assignedSegments ?? []).map((seg) => ({
+      id: String(seg.id),
+      timestamp: seg.alignTimestamp || '已归属',
+      group: 'assigned' as const,
+      status: seg.status,
+      segments: [
+        { id: String(seg.id), start: 0, end: 0, speaker: '查房片段', text: seg.transcribeText }
+      ]
+    })),
+    ...(unassignedSegments ?? []).map((seg) => ({
+      id: String(seg.id),
+      timestamp: seg.alignTimestamp || '未归属',
+      group: 'unassigned' as const,
+      status: seg.status,
+      segments: [
+        { id: String(seg.id), start: 0, end: 0, speaker: '查房片段', text: seg.transcribeText }
+      ]
+    })),
+  ];
+  const assignedBlocks = blocks.filter((block) => block.group === 'assigned');
+  const unassignedBlocks = blocks.filter((block) => block.group === 'unassigned');
 
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [expandedBlockIds, setExpandedBlockIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('assigned');
+
+  useEffect(() => {
+    if (open) {
+      if (assignedBlocks.length === 0 && unassignedBlocks.length > 0) {
+        setActiveTab('unassigned');
+      } else {
+        setActiveTab('assigned');
+      }
+    }
+  }, [open, assignedBlocks.length, unassignedBlocks.length]);
+
+  const renderBlock = (block: AudioBlock, indexLabel: string) => {
+    const isSelected = selectedBlockIds.includes(block.id);
+    const isPlaying = playingId === block.id;
+    const isExpanded = expandedBlockIds.includes(block.id);
+    const blockText = block.segments
+      .map((seg) => seg.text.trim())
+      .filter(Boolean)
+      .join(' ');
+    let statusText = '未归属';
+    let tagColor = 'orange';
+
+    if (block.status === 'ignored') {
+      statusText = '已忽略';
+      tagColor = 'default';
+    } else if (block.group === 'assigned') {
+      if (block.status === 'applied') {
+        statusText = '已自动采纳';
+        tagColor = 'blue';
+      } else {
+        statusText = '待自动生成';
+        tagColor = 'geekblue';
+      }
+    }
+
+    return (
+      <div
+        key={block.id}
+        className={`py-2 px-1 transition-colors ${
+          isSelected ? 'bg-blue-50/30' : 'hover:bg-slate-50/50'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <Checkbox
+            checked={isSelected}
+            onChange={() => toggleSelect(block.id)}
+            className="mt-1 shrink-0"
+          />
+
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => toggleSelect(block.id)}
+              className="w-full text-left"
+            >
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-xs font-semibold text-slate-800">{indexLabel}</span>
+                <span className="text-[11px] font-medium text-slate-400">{block.timestamp}</span>
+                <Tag className="!m-0" color={tagColor}>
+                  {statusText}
+                </Tag>
+              </div>
+              <div className="mt-1 line-clamp-2 break-words text-xs leading-5 text-slate-600">
+                {blockText}
+              </div>
+            </button>
+
+            {isExpanded && (
+              <div className="mt-2 rounded-md border border-slate-100 bg-slate-50 px-2.5 py-2">
+                {block.segments.map((seg) => (
+                  <div key={seg.id} className="text-xs leading-relaxed">
+                    <Tag bordered={false} color="geekblue">{seg.speaker}</Tag>
+                    <span className="text-slate-700">{seg.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1 self-start">
+            <Button
+              type="text"
+              size="small"
+              icon={isPlaying ? <PauseCircleOutlined className="text-blue-500" /> : <PlayCircleOutlined />}
+              onClick={() => togglePlay(block.id)}
+              className={isPlaying ? 'text-blue-500 bg-blue-50' : ''}
+            >
+              {isPlaying ? '试听中' : '试听'}
+            </Button>
+            <Button type="text" size="small" onClick={() => toggleExpand(block.id)}>
+              {isExpanded ? '收起' : '展开'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const toggleSelect = (blockId: string) => {
     setSelectedBlockIds(prev => 
@@ -93,30 +193,58 @@ export default function RoundSegmentSelector({
     }
   };
 
+  const toggleExpand = (blockId: string) => {
+    setExpandedBlockIds((prev) =>
+      prev.includes(blockId) ? prev.filter((id) => id !== blockId) : [...prev, blockId]
+    );
+  };
+
   const handleGenerate = () => {
     if (selectedBlockIds.length === 0) return;
     setGenerating(true);
 
-    const selectedNumericIds = selectedBlockIds
-      .map((id) => Number(id))
+    const selectedBlocks = blocks.filter((block) => selectedBlockIds.includes(block.id));
+    const assignedIds = selectedBlocks
+      .filter((block) => block.group === 'assigned')
+      .map((block) => Number(block.id))
+      .filter((id) => !Number.isNaN(id));
+    const unassignedIds = selectedBlocks
+      .filter((block) => block.group === 'unassigned')
+      .map((block) => Number(block.id))
       .filter((id) => !Number.isNaN(id));
 
-    const selectedTexts = blocks
-      .filter((block) => selectedBlockIds.includes(block.id))
+    const selectedTexts = selectedBlocks
       .flatMap((block) => block.segments.map((seg) => seg.text))
       .join('\n');
 
     setTimeout(() => {
       setGenerating(false);
-      onImport(selectedTexts, selectedNumericIds);
+      onImport({ selectedTexts, assignedIds, unassignedIds });
       setSelectedBlockIds([]);
+      setExpandedBlockIds([]);
       onClose();
     }, 1000);
   };
 
   return (
     <Drawer
-      title={<span>导入查房记录 - <b>{patientName}</b></span>}
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 24 }}>
+          <span>导入查房记录 - <b>{patientName}</b></span>
+          {onRefresh && (
+            <Button
+              type="text"
+              size="small"
+              icon={<ReloadOutlined spin={refreshing} />}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefresh();
+              }}
+              title="刷新"
+            />
+          )}
+        </div>
+      }
       placement="right"
       size="default"
       onClose={onClose}
@@ -138,54 +266,50 @@ export default function RoundSegmentSelector({
         </div>
       }
     >
-      <div className="mb-4 rounded-lg bg-orange-50 p-3 text-xs text-orange-700 border border-orange-200">
-        以下是最近的病区查房语音片段。请人工核对并勾选属于 <b>{patientName}</b> 的内容，AI 将为您一键提取。
+      <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700">
+        以下是本次查房中与 <b>{patientName}</b> 相关的已归属片段，以及当前仍未归属的片段。请人工勾选后重新生成病程字段。
       </div>
 
-      <div className="space-y-4">
-        {blocks.map((block, index) => {
-          const isSelected = selectedBlockIds.includes(block.id);
-          const isPlaying = playingId === block.id;
-
-          return (
-            <div 
-              key={block.id} 
-              className={`rounded-lg border-2 p-3 transition-all ${
-                isSelected ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200 hover:border-blue-300'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <Checkbox 
-                  checked={isSelected}
-                  onChange={() => toggleSelect(block.id)}
-                >
-                  <span className="font-semibold text-slate-800">
-                    片段 {index + 1} <span className="text-slate-400 font-normal text-xs ml-1">({block.timestamp})</span>
-                  </span>
-                </Checkbox>
-                <Button 
-                  type="text" 
-                  size="small" 
-                  icon={isPlaying ? <PauseCircleOutlined className="text-blue-500" /> : <PlayCircleOutlined />}
-                  onClick={() => togglePlay(block.id)}
-                  className={isPlaying ? "text-blue-500 bg-blue-50" : ""}
-                >
-                  {isPlaying ? '试听中...' : '试听'}
-                </Button>
-              </div>
-              
-              <div className="space-y-2 mt-3 bg-slate-50 border border-slate-100 p-2 rounded max-h-32 overflow-y-auto">
-                {block.segments.map(seg => (
-                  <div key={seg.id} className="text-xs leading-relaxed">
-                    <Tag bordered={false} color={['blue', 'green', 'orange', 'purple'][parseInt(seg.speaker.replace(/[^0-9]/g, '') || '0') % 4]}>{seg.speaker}</Tag>
-                    <span className="text-slate-700">{seg.text}</span>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'assigned',
+            label: `已归属片段 (${assignedBlocks.length})`,
+            children: (
+              <div className="pt-1">
+                {assignedBlocks.length > 0 ? (
+                  <div className="divide-y divide-slate-100">
+                    {assignedBlocks.map((block, index) => renderBlock(block, `已归属片段 ${index + 1}`))}
                   </div>
-                ))}
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-xs text-slate-400">
+                    当前患者暂无可重选的已归属查房片段。
+                  </div>
+                )}
               </div>
-            </div>
-          );
-        })}
-      </div>
+            )
+          },
+          {
+            key: 'unassigned',
+            label: `未归属片段 (${unassignedBlocks.length})`,
+            children: (
+              <div className="pt-1">
+                {unassignedBlocks.length > 0 ? (
+                  <div className="divide-y divide-slate-100">
+                    {unassignedBlocks.map((block, index) => renderBlock(block, `未归属片段 ${index + 1}`))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-xs text-slate-400">
+                    当前没有待认领的未归属查房片段。
+                  </div>
+                )}
+              </div>
+            )
+          }
+        ]}
+      />
     </Drawer>
   );
 }

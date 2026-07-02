@@ -441,20 +441,47 @@ export async function updateRewriteStatus(
 export interface RoundPendingSegment {
   id: number;
   roundTaskId: number;
-  patientIdHis: string;
-  patientName: string;
-  bedNo: string;
+  patientIdHis?: string;
+  patientName?: string;
+  bedNo?: string;
   transcribeText: string;
+  alignTimestamp?: string;
+  status?: 'pending' | 'applied' | 'ignored';
+  isUnassigned?: boolean;
 }
 
 export interface RoundPendingStatusResponse {
+  roundTaskId: number | null;
   hasPendingSegment: boolean;
   patientSegment: RoundPendingSegment | null;
+  hasPendingAssignedSegments: boolean;
+  hasPendingUnassignedSegments: boolean;
+  assignedSegments: RoundPendingSegment[];
   unassignedCount: number;
-  unassignedSegments: Array<{
-    id: number;
-    transcribeText: string;
-  }>;
+  unassignedSegments: RoundPendingSegment[];
+}
+
+export interface RoundRosterPatient {
+  patientIdHis: string;
+  patientName: string;
+  bedNo: string;
+  gender?: string;
+  age?: string;
+  diagnosis?: string;
+  deptCode?: string;
+  deptName?: string;
+  attendingDoctorName?: string;
+}
+
+export async function getRoundRoster(params: {
+  deptCode?: string;
+  deptName?: string;
+}): Promise<RoundRosterPatient[]> {
+  return requestRuntime<RoundRosterPatient[]>(
+    http.get('/medical/round/roster', {
+      params,
+    }),
+  );
 }
 
 export async function getRoundPendingStatus(
@@ -477,6 +504,17 @@ export async function markRoundStatus(
       id: Number(alignId),
       status,
     }),
+  );
+}
+
+export async function claimAndApplyRoundSegments(request: {
+  segmentIds: number[];
+  patientIdHis: string;
+  patientName: string;
+  bedNo?: string;
+}): Promise<void> {
+  await requestRuntime<null>(
+    http.post('/medical/round/claim-and-apply', request),
   );
 }
 
@@ -513,7 +551,9 @@ export const pluginRuntimeApi = {
   createDocVersion,
   rewriteText,
   updateRewriteStatus,
+  getRoundRoster,
   getRoundPendingStatus,
   markRoundStatus,
+  claimAndApplyRoundSegments,
   transcribeSurgery,
 };

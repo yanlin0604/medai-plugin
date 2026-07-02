@@ -15,6 +15,8 @@ const REQUEST_BUFFER_BYTES: usize = 128 * 1024;
 pub struct EmrContext {
     pub source: String,
     pub patient_id: String,
+    pub patient_id_his: Option<String>,
+    pub inpatient_no: Option<String>,
     pub patient_name: String,
     pub gender: Option<String>,
     pub age: Option<String>,
@@ -370,6 +372,8 @@ fn parse_context_target(target: &str) -> Option<EmrContext> {
             .cloned()
             .unwrap_or_else(|| "demo-bs".to_string()),
         patient_id: required(&params, "patientId")?,
+        patient_id_his: optional(&params, "patientIdHis"),
+        inpatient_no: optional(&params, "inpatientNo"),
         patient_name: required(&params, "patientName")?,
         gender: optional(&params, "gender"),
         age: optional(&params, "age"),
