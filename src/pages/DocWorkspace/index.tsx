@@ -37,16 +37,16 @@ export default function DocWorkspace() {
     }
   }, []);
 
-  // 优先用 store 选中文书；支持通过 URL code 直达（刷新/外链场景）
+  // 优先用 store/运行时文书，避免同一 docCode 的后台文书名被本地兜底配置覆盖。
   const localDoc = code ? getDocByCode(code) ?? null : null;
   const storeDoc = selectedDoc && selectedDoc.code === code ? selectedDoc : null;
-  const doc = localDoc ?? storeDoc ?? runtimeDoc;
+  const doc = storeDoc ?? runtimeDoc ?? localDoc;
   const isAdmissionDoc = doc ? ADMISSION_DOC_CODES.has(doc.code) : false;
 
   useEffect(() => {
-    if (!code || localDoc || storeDoc) return;
+    if (!code || storeDoc || runtimeDoc) return;
     void loadDocByCode(code);
-  }, [code, loadDocByCode, localDoc, storeDoc]);
+  }, [code, loadDocByCode, runtimeDoc, storeDoc]);
 
   // URL 直达时回填 store
   useEffect(() => {

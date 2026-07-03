@@ -65,6 +65,7 @@ const EMPTY_SESSION_META = {
 const FIELD_CONTEXT_POLL_MS = 1800;
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const ASR_MODE = '2';
+const DOC003_ROUND_FIELD_KEYS = ['subjective', 'objective', 'assessment', 'plan'];
 
 function buildAsrWsUrl(baseUrl: string, mode: string) {
   const separator = baseUrl.includes('?') ? '&' : '?';
@@ -100,6 +101,21 @@ function buildInitialSessions(template: DocTemplate, values: Record<string, unkn
     generating: false,
     applying: false,
   }));
+}
+
+function resolveInitialValues(docCode: string, patientId: string) {
+  if (docCode === 'DOC003') {
+    return Promise.resolve({
+      docCode,
+      patientIdHis: patientId,
+      values: {},
+      icdCandidates: [],
+      pulledSources: [],
+      resolvedAt: new Date().toISOString(),
+    });
+  }
+
+  return pluginRuntimeApi.resolveRuntimeValues(docCode, patientId, true);
 }
 
 function readSavedFieldValue(values: Record<string, FieldValue>, field: DocFieldDef): string | undefined {
@@ -332,7 +348,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
     Promise.all([
       pluginRuntimeApi.getRuntimeDocTemplate(doc.code),
-      pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, true),
+      resolveInitialValues(doc.code, patient.id),
     ]).then(([nextTemplate, values]) => {
       if (cancelled) return;
       setTemplate(nextTemplate);
@@ -363,11 +379,6 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
             setUnassignedSegments(res.unassignedSegments);
             setBannerVisible(res.unassignedCount > 0);
 
-            const pendingAssignedSegments = (res.assignedSegments ?? [])
-              .filter((segment) => segment.status === 'pending');
-            if (res.hasPendingAssignedSegments && pendingAssignedSegments.length > 0) {
-              void handleAutoFillRound(pendingAssignedSegments, nextSessions);
-            }
           })
           .catch((err) => {
             console.error('获取查房状态失败:', err);
@@ -499,9 +510,8 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     currentSessions: FieldSession[],
     overwriteExisting: boolean,
   ): Promise<number> => {
-    const targetFields = ['conditionChange', 'treatmentAdjust', 'seniorOpinion'];
     const targetSessions = currentSessions.filter((session) =>
-      targetFields.includes(session.field.key) && (overwriteExisting || !session.value.trim()),
+      DOC003_ROUND_FIELD_KEYS.includes(session.field.key) && (overwriteExisting || !session.value.trim()),
     );
 
     if (targetSessions.length === 0) return 0;
@@ -544,37 +554,6 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     }));
 
     return results.filter(Boolean).length;
-  };
-
-  const handleAutoFillRound = async (segments: any[], currentSessions: FieldSession[]) => {
-    const pendingSegments = segments.filter((segment) => segment.status === 'pending');
-    if (pendingSegments.length === 0) return;
-
-    const segmentText = buildRoundTranscriptText(pendingSegments);
-    if (!segmentText.trim()) return;
-
-    const fillMessageKey = 'auto-fill-round-process';
-    message.loading({ content: '检测到您刚刚完成了查房，正在为您自动提炼并回填病程记录...', key: fillMessageKey, duration: 0 });
-
-    const generatedCount = await generateRoundDrivenFields(segmentText, currentSessions, false);
-    if (generatedCount === 0) {
-      message.info({ content: '检测到新的查房片段，但当前病程字段已有内容，未自动覆盖。', key: fillMessageKey, duration: 2 });
-      return;
-    }
-
-    const pendingIds = pendingSegments.map((segment) => segment.id);
-    for (const segmentId of pendingIds) {
-      try {
-        await pluginRuntimeApi.markRoundStatus(segmentId, 'applied');
-      } catch (err) {
-        console.error('标记片段状态失败:', err);
-      }
-    }
-    setAssignedSegments((prev) => prev.map((segment) => (
-      pendingIds.includes(segment.id) ? { ...segment, status: 'applied', isUnassigned: false } : segment
-    )));
-
-    message.success({ content: '日常病程已自动生成并回填！', key: fillMessageKey, duration: 2 });
   };
 
   const handleGenerateWholeDocument = async () => {
@@ -633,38 +612,13 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setWholeWriting(true);
     message.loading({ content: `正在回填${doc.name}全文`, key: 'whole-writeback' });
     try {
-      let submitFields = snapshot.fields;
-      let submitFieldLabels = snapshot.fieldLabels;
-      let submitFieldOrder = snapshot.fieldOrder;
-
-      // 如果是日常病程记录 DOC003，由于病历系统 EMR 的字段 key 与病案助手面板不一致，在此进行精准的转换对齐
-      if (doc.code === 'DOC003') {
-        submitFields = {
-          recordDate: snapshot.fields.roundDate || new Date().toISOString().slice(0, 10),
-          subjective: snapshot.fields.conditionChange || '',
-          objective: snapshot.fields.examAnalysis || '',
-          assessment: snapshot.fields.seniorOpinion ? `上级意见：${snapshot.fields.seniorOpinion}` : '病情评估正常。',
-          plan: snapshot.fields.treatmentAdjust || '',
-          physicianSignature: snapshot.fields.roundDoctor || patient.doctor || '医师',
-        };
-        submitFieldLabels = {
-          recordDate: '记录日期',
-          subjective: '患者主诉及症状变化',
-          objective: '查体及辅助检查',
-          assessment: '病情评估',
-          plan: '处理意见',
-          physicianSignature: '医师签名',
-        };
-        submitFieldOrder = ['recordDate', 'subjective', 'objective', 'assessment', 'plan', 'physicianSignature'];
-      }
-
       const result = await submitDocument({
         docCode: doc.code,
         docName: doc.name,
         patientId: patient.id,
-        fields: submitFields,
-        fieldLabels: submitFieldLabels,
-        fieldOrder: submitFieldOrder,
+        fields: snapshot.fields,
+        fieldLabels: snapshot.fieldLabels,
+        fieldOrder: snapshot.fieldOrder,
         content: snapshot.content,
       });
       if (!result.ok) {
@@ -1338,7 +1292,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
             const generatedCount = await generateRoundDrivenFields(selectedTexts, sessions, true);
             if (generatedCount === 0) {
-              message.warning('当前没有可重新生成的查房病程字段');
+              message.warning('当前没有可重新生成的查房记录字段');
               return;
             }
 
@@ -1359,7 +1313,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               });
               return Array.from(existing.values()).sort((left, right) => left.id - right.id);
             });
-            message.success('已根据所选查房片段重新生成日常病程字段');
+            message.success('已根据所选查房片段重新生成查房记录字段');
           } catch (err) {
             console.error('导入并提取查房记录失败:', err);
           }
@@ -1367,18 +1321,4 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       />
     </ParadigmShell>
   );
-}
-
-function buildRoundTranscriptText(segments: any[]) {
-  return segments
-    .map((seg) => {
-      try {
-        const speaker = seg.speakerListJson ? JSON.parse(seg.speakerListJson) : [];
-        const speakerLabel = speaker.length > 0 ? speaker[0] : '发言人';
-        return `【${speakerLabel}】${seg.transcribeText}`;
-      } catch (e) {
-        return `【查房片段】${seg.transcribeText}`;
-      }
-    })
-    .join('\n');
 }

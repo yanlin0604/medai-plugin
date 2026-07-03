@@ -53,7 +53,7 @@ export async function inspectCurrentEmrContext(): Promise<EmrContextDebug> {
 
     return {
       status: 'accepted',
-      message: `已接收 ${normalizedContext.docCode} ${normalizedContext.docName}`,
+      message: `已接收 ${normalizedContext.docName}`,
       context: normalizedContext,
       checkedAt,
     };

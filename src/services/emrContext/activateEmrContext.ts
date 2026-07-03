@@ -34,10 +34,14 @@ export function activateEmrContext(
   selectPatient: (patient: Patient) => void,
   selectDoc: (doc: NonNullable<ReturnType<typeof getDocByCode>>) => void,
 ): EmrContextActivation | null {
-  const doc = getDocByCode(context.docCode);
-  if (!doc) return null;
+  const registryDoc = getDocByCode(context.docCode);
+  if (!registryDoc) return null;
 
   const patient = buildPatientFromEmrContext(context);
+  const doc = {
+    ...registryDoc,
+    name: optionalText(context.docName) || registryDoc.name,
+  };
   selectPatient(patient);
   selectDoc(doc);
 

@@ -35,6 +35,8 @@ import type { DocDefinition } from '../../config/docRegistry';
 import { getActivePatient, getHostSession, HostSession } from '../../services/emsBridge';
 import { collapseAssistantWindow } from '../../services/windowMode';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
+import { formatEmrContextDebugLabel } from '../../services/emrContext/debugLabel';
+import { resolveWindowTitleBarCopy } from './titleBar';
 
 // 文书图标映射
 const renderIcon = (iconName: string) => {
@@ -65,13 +67,22 @@ const isTauri = typeof window !== 'undefined' && window.__TAURI_INTERNALS__;
 // 无边框窗口自定义标题栏（拖拽 + 最小化/最大化/关闭）
 const WindowTitleBar = () => {
   const collapse = useBubbleStore((state) => state.collapse);
+  const selectedDoc = usePatientStore((state) => state.selectedDoc);
+  const location = useLocation();
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
+  const titleBarCopy = resolveWindowTitleBarCopy(location.pathname, selectedDoc);
 
   useEffect(() => {
     if (isTauri) {
       void getCurrentWindow().setAlwaysOnTop(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (isTauri) {
+      void getCurrentWindow().setTitle(titleBarCopy.title);
+    }
+  }, [titleBarCopy.title]);
 
   const handleCollapseToBubble = () => {
     collapse();
@@ -117,10 +128,10 @@ const WindowTitleBar = () => {
         </div>
         <div data-tauri-drag-region className="min-w-0">
           <h3 data-tauri-drag-region className="text-sm font-bold text-white tracking-wide truncate">
-            病历书写助手
+            {titleBarCopy.title}
           </h3>
           <p data-tauri-drag-region className="text-[10px] text-blue-200 font-medium tracking-wide mt-0.5 truncate">
-            住院病历 · 病历系统联动
+            {titleBarCopy.subtitle}
           </p>
         </div>
       </div>
@@ -308,7 +319,7 @@ export default function AppLayout() {
                 : 'border-slate-200 bg-white text-slate-500',
           ].join(' ')}
           >
-            HIS 上报：{emrDebug.context?.docCode ?? '--'} {emrDebug.context?.docName ?? ''} · {emrDebug.message}
+            HIS 上报：{formatEmrContextDebugLabel(emrDebug)}
           </div>
         ) : null}
         <Outlet />

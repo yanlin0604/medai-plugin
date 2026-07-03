@@ -25,6 +25,7 @@ import { usePatientStore } from '../../stores/usePatientStore';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
 import { watchEmrContext } from '../../services/emrContext/watchEmrContext';
 import { activateEmrContext, buildPatientFromEmrContext } from '../../services/emrContext/activateEmrContext';
+import { formatEmrContextDebugLabel } from '../../services/emrContext/debugLabel';
 import {
   buildBubbleDischargeDraft,
   submitBubbleDischargeDraft,
@@ -70,7 +71,7 @@ const FIELD_CONTEXT_POLL_MS = 800;
 const FIELD_AUTO_GENERATE_DELAY_MS = 450;
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const ASR_MODE = '2';
-const ROUND_TRANSCRIPT_FIELD_KEYS = new Set(['conditionChange', 'treatmentAdjust', 'seniorOpinion']);
+const ROUND_TRANSCRIPT_FIELD_KEYS = new Set(['subjective', 'objective', 'assessment', 'plan']);
 
 function getFieldContextSnapshotKey(context: FieldAssistContext) {
   return getFieldAssistSnapshotKey(context);
@@ -1401,7 +1402,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
             </div>
             <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
               {emrDebug
-                ? `${emrDebug.status === 'accepted' ? '已接收' : emrDebug.status === 'rejected' ? '已过滤' : emrDebug.status === 'empty' ? '未收到' : '检测异常'}：${emrDebug.context?.docCode ?? ''}${emrDebug.context?.docName ? ` ${emrDebug.context.docName}` : ''}${emrDebug.message ? ` · ${emrDebug.message}` : ''}`
+                ? formatEmrContextDebugLabel(emrDebug)
                 : '等待病历系统文书'}
             </div>
           </>
