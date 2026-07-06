@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Drawer, Button, Checkbox, Tag, Tabs } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, RobotOutlined, ReloadOutlined } from '@ant-design/icons';
+import { RobotOutlined, ReloadOutlined } from '@ant-design/icons';
 
 interface DiarizationSegment {
   id: string;
@@ -74,7 +74,6 @@ export default function RoundSegmentSelector({
   const unassignedBlocks = blocks.filter((block) => block.group === 'unassigned');
 
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
-  const [playingId, setPlayingId] = useState<string | null>(null);
   const [expandedBlockIds, setExpandedBlockIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('assigned');
@@ -91,7 +90,6 @@ export default function RoundSegmentSelector({
 
   const renderBlock = (block: AudioBlock, indexLabel: string) => {
     const isSelected = selectedBlockIds.includes(block.id);
-    const isPlaying = playingId === block.id;
     const isExpanded = expandedBlockIds.includes(block.id);
     const blockText = block.segments
       .map((seg) => seg.text.trim())
@@ -158,15 +156,6 @@ export default function RoundSegmentSelector({
           </div>
 
           <div className="flex shrink-0 items-center gap-1 self-start">
-            <Button
-              type="text"
-              size="small"
-              icon={isPlaying ? <PauseCircleOutlined className="text-blue-500" /> : <PlayCircleOutlined />}
-              onClick={() => togglePlay(block.id)}
-              className={isPlaying ? 'text-blue-500 bg-blue-50' : ''}
-            >
-              {isPlaying ? '试听中' : '试听'}
-            </Button>
             <Button type="text" size="small" onClick={() => toggleExpand(block.id)}>
               {isExpanded ? '收起' : '展开'}
             </Button>
@@ -180,17 +169,6 @@ export default function RoundSegmentSelector({
     setSelectedBlockIds(prev => 
       prev.includes(blockId) ? prev.filter(i => i !== blockId) : [...prev, blockId]
     );
-  };
-
-  const togglePlay = (id: string) => {
-    if (playingId === id) {
-      setPlayingId(null);
-    } else {
-      setPlayingId(id);
-      setTimeout(() => {
-        setPlayingId(prev => (prev === id ? null : prev));
-      }, 3000);
-    }
   };
 
   const toggleExpand = (blockId: string) => {

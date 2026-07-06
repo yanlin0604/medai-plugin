@@ -38,3 +38,4 @@ npm-debug.log*
 # spec-workflow (local only)
 .spec-workflow/
 /.superpowers
+/docs
