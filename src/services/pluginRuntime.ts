@@ -45,7 +45,7 @@ import { buildGenericDocTemplate, docTemplates } from './samples/templates';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 const RUNTIME_SUCCESS_CODE = 200;
 const RUNTIME_BASE_PATH = '/medical/pluginRuntime';
-const LOCAL_TEMPLATE_FIRST_DOC_CODES = new Set(['DOC011', 'D0C011', 'DOC012']);
+const LOCAL_TEMPLATE_FIRST_DOC_CODES = new Set<string>([]);
 const STRICT_RUNTIME_TEMPLATE_DOC_CODES = new Set(['DOC010']);
 const LOCAL_DEFINITION_FIRST_DOC_CODES = new Set([
   'DOC099',

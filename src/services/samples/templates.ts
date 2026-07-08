@@ -191,11 +191,11 @@ export const admissionTemplate: DocTemplate = {
 
 const genericFieldLabels: Record<string, string[]> = {
   DOC002: ['病例特点', '初步诊断', '诊断依据', '鉴别诊断', '诊疗计划'],
-  DOC011: ['术前诊断', '手术指征', '术前准备', '拟行手术', '注意事项'],
-  D0C011: ['术前诊断', '手术指征', '术前准备', '拟行手术', '注意事项'],
-  DOC012: ['围术期评估', '术前情况', '术中情况', '术后处理', '风险提示'],
-  DOC013: ['术前诊断', '手术名称', '手术经过', '术后诊断', '术后处理'],
-  D0C013: ['术前诊断', '手术名称', '手术经过', '术后诊断', '术后处理'],
+  DOC011: ['术前诊断', '手术指征', '拟行手术', '拟用麻醉方式', '术前准备', '手术风险评估'],
+  D0C011: ['术前诊断', '手术指征', '拟行手术', '拟用麻醉方式', '术前准备', '手术风险评估'],
+  DOC012: ['生命体征', '伤口情况', '引流量', '症状及主诉', '处理意见'],
+  DOC013: ['手术名称', '麻醉方式', '详细手术经过', '术后诊断'],
+  D0C013: ['手术名称', '麻醉方式', '详细手术经过', '术后诊断'],
   DOC020: ['患者情况', '拟行诊疗', '风险告知', '替代方案', '患者意见'],
   DOC030: ['申请科室意见', '会诊目的', '病情摘要', '会诊意见', '处理建议'],
   DOC040: ['死亡时间', '死亡诊断', '诊疗经过', '死亡原因', '家属告知'],
@@ -246,9 +246,67 @@ function withDocCode(template: DocTemplate, docCode: string, title?: string): Do
   };
 }
 
+/** 术前小结（DOC011）字段模板 */
+export const preoperativeSummaryTemplate: DocTemplate = {
+  docCode: 'DOC011',
+  version: 'v1.0',
+  title: '术前小结',
+  fields: [
+    { key: 'patientInfo', label: '患者基本信息', section: '患者基本信息', source: 'emr', required: true, inputType: 'static' },
+    { key: 'recordDate', label: '记录日期', section: '基本信息', source: 'his', required: true, inputType: 'date' },
+    { key: 'preOpDiagnosis', label: '术前诊断', section: '术前诊断', source: 'emr', required: true, inputType: 'textarea' },
+    { key: 'surgeryIndication', label: '手术指征', section: '手术指征', source: 'emr', required: true, inputType: 'textarea' },
+    { key: 'plannedSurgery', label: '拟行手术', section: '手术计划', source: 'manual', required: true, inputType: 'text' },
+    { key: 'anesthesiaMethod', label: '拟用麻醉方式', section: '手术计划', source: 'manual', required: true, inputType: 'text' },
+    { key: 'surgeryPreparation', label: '术前准备', section: '术前准备', source: 'emr', required: true, inputType: 'textarea' },
+    { key: 'riskAssessment', label: '手术风险评估', section: '风险评估', source: 'manual', required: false, inputType: 'textarea' },
+    { key: 'physicianSignature', label: '医师签名', section: '签名', source: 'manual', required: true, inputType: 'text' },
+  ],
+};
+
+/** 围术期记录（DOC012）字段模板 */
+export const perioperativeRecordTemplate: DocTemplate = {
+  docCode: 'DOC012',
+  version: 'v1.0',
+  title: '围术期记录',
+  fields: [
+    { key: 'patientInfo', label: '患者基本信息', section: '患者基本信息', source: 'emr', required: true, inputType: 'static' },
+    { key: 'recordDate', label: '记录日期', section: '基本信息', source: 'his', required: true, inputType: 'date' },
+    { key: 'postOpDay', label: '术后天数', section: '基本信息', source: 'his', required: false, inputType: 'text' },
+    { key: 'vitalSigns', label: '生命体征', section: '生命体征', source: 'emr', required: true, inputType: 'textarea' },
+    { key: 'woundCondition', label: '伤口情况', section: '伤口情况', source: 'emr', required: true, inputType: 'textarea' },
+    { key: 'drainageVolume', label: '引流量', section: '引流情况', source: 'manual', required: false, inputType: 'text' },
+    { key: 'symptoms', label: '症状及主诉', section: '病情变化', source: 'emr', required: true, inputType: 'textarea' },
+    { key: 'treatmentPlan', label: '处理意见', section: '处理意见', source: 'emr', required: true, inputType: 'textarea' },
+    { key: 'physicianSignature', label: '医师签名', section: '签名', source: 'manual', required: true, inputType: 'text' },
+  ],
+};
+
+/** 手术记录（DOC013）字段模板 */
+export const operationRecordTemplate: DocTemplate = {
+  docCode: 'DOC013',
+  version: 'v1.0',
+  title: '手术记录',
+  fields: [
+    { key: 'patientInfo', label: '患者基本信息', section: '患者基本信息', source: 'emr', required: true, inputType: 'static' },
+    { key: 'operationDate', label: '手术日期', section: '基本信息', source: 'his', required: true, inputType: 'date' },
+    { key: 'operationName', label: '手术名称', section: '基本信息', source: 'his', required: true, inputType: 'text' },
+    { key: 'anesthesiaMethod', label: '麻醉方式', section: '基本信息', source: 'his', required: true, inputType: 'text' },
+    { key: 'operationContent', label: '详细手术经过', section: '手术经过', source: 'manual', required: true, inputType: 'textarea' },
+    { key: 'postOpDiagnosis', label: '术后诊断', section: '术后诊断', source: 'ai', required: true, inputType: 'textarea' },
+    { key: 'operator', label: '术者', section: '人员', source: 'his', required: true, inputType: 'text' },
+    { key: 'assistant', label: '助手', section: '人员', source: 'manual', required: false, inputType: 'text' },
+  ],
+};
+
 /** 按 docCode 索引的模板表（后台下发后由此返回） */
 export const docTemplates: Record<string, DocTemplate> = {
   DOC099: homepageTemplate,
   DOC001: admissionTemplate,
   D0C001: withDocCode(admissionTemplate, 'D0C001', '入院记录'),
+  DOC011: preoperativeSummaryTemplate,
+  D0C011: withDocCode(preoperativeSummaryTemplate, 'D0C011', '术前小结'),
+  DOC012: perioperativeRecordTemplate,
+  DOC013: operationRecordTemplate,
+  D0C013: withDocCode(operationRecordTemplate, 'D0C013', '手术记录'),
 };

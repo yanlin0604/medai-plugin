@@ -40,13 +40,19 @@ export default function DocWorkspace() {
   // 优先用 store/运行时文书，避免同一 docCode 的后台文书名被本地兜底配置覆盖。
   const localDoc = code ? getDocByCode(code) ?? null : null;
   const storeDoc = selectedDoc && selectedDoc.code === code ? selectedDoc : null;
-  const doc = storeDoc ?? runtimeDoc ?? localDoc;
+  const runtimeDocForCode = runtimeDoc && runtimeDoc.code === code ? runtimeDoc : null;
+  const doc = storeDoc ?? runtimeDocForCode ?? localDoc;
   const isAdmissionDoc = doc ? ADMISSION_DOC_CODES.has(doc.code) : false;
 
+  // 当路由 code 变化时，清空当前组件缓存的旧 runtimeDoc，避免串数据
   useEffect(() => {
-    if (!code || storeDoc || runtimeDoc) return;
+    setRuntimeDoc(null);
+  }, [code]);
+
+  useEffect(() => {
+    if (!code || storeDoc || runtimeDocForCode) return;
     void loadDocByCode(code);
-  }, [code, loadDocByCode, runtimeDoc, storeDoc]);
+  }, [code, loadDocByCode, runtimeDocForCode, storeDoc]);
 
   // URL 直达时回填 store
   useEffect(() => {
