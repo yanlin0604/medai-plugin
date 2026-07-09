@@ -11,7 +11,7 @@ import {
   admissionQc,
 } from './samples/admission';
 import { docTemplates } from './samples/templates';
-import { medicalTerms } from './samples/terms';
+import { pluginRuntimeApi } from './pluginRuntime';
 import type {
   ObjectiveItem,
   TranscriptSegment,
@@ -103,13 +103,23 @@ export function renderDocument(
 
 /**
  * 医疗术语 / 句式输入联想（成稿编辑时的"输入时提示"）。
- * 当前样例：从术语库按前缀匹配（startsWith 优先、includes 兜底）；
- * 真实环境接后端术语服务 / AI 联想（可按科室、文书类型下发词库）。
+ * 从后端术语服务按前缀查询。
  */
 export async function suggestTerms(prefix: string): Promise<string[]> {
   const p = prefix.trim();
   if (p.length < 2) return [];
-  const starts = medicalTerms.filter((t) => t !== p && t.startsWith(p));
-  const includes = medicalTerms.filter((t) => t !== p && !t.startsWith(p) && t.includes(p));
-  return [...starts, ...includes].slice(0, 6);
+  const response = await pluginRuntimeApi.getEditAssistSuggestions({
+    patientId: 'UNKNOWN',
+    docCode: 'UNKNOWN',
+    docName: '成稿编辑',
+    fieldKey: 'content',
+    fieldLabel: '正文',
+    prefix: p,
+    assistType: 'term',
+    trigger: 'term_only',
+    batchIndex: 0,
+  });
+  return response.suggestions
+    .filter((item) => item.type === 'term')
+    .map((item) => item.text);
 }

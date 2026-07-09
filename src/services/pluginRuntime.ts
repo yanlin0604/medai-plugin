@@ -28,6 +28,8 @@ import type {
   RuntimeDocValueBundleDto,
   RuntimeDocValues,
   RuntimeDocVersionDto,
+  RuntimeEditAssistSuggestionRequest,
+  RuntimeEditAssistSuggestionResponse,
   RuntimeEvidenceBundleDto,
   RuntimeEvidenceQueryRequest,
   RuntimeFieldCompletionRequest,
@@ -438,6 +440,14 @@ export async function updateRewriteStatus(
   );
 }
 
+export async function getEditAssistSuggestions(
+  request: RuntimeEditAssistSuggestionRequest,
+): Promise<RuntimeEditAssistSuggestionResponse> {
+  return requestRuntime<RuntimeEditAssistSuggestionResponse>(
+    http.post(`${RUNTIME_BASE_PATH}/edit-assist/suggestions`, request),
+  );
+}
+
 export interface RoundPendingSegment {
   id: number;
   roundTaskId: number;
@@ -551,6 +561,7 @@ export const pluginRuntimeApi = {
   createDocVersion,
   rewriteText,
   updateRewriteStatus,
+  getEditAssistSuggestions,
   getRoundRoster,
   getRoundPendingStatus,
   markRoundStatus,

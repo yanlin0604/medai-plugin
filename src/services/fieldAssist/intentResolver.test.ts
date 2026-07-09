@@ -61,7 +61,7 @@ describe('fieldAssist intentResolver', () => {
     expect(resolveFieldAssistIntent(context)).toBe('rewrite');
   });
 
-  it('uses term suggestions only for input prefix with content', () => {
+  it('uses input suggestions for fresh input with a prefix', () => {
     const context = createContext({
       fieldValue: '患者胸闷',
       prefix: '胸闷',
@@ -70,7 +70,31 @@ describe('fieldAssist intentResolver', () => {
       selectionEnd: 4,
     });
 
-    expect(resolveFieldAssistIntent(context)).toBe('term');
+    expect(resolveFieldAssistIntent(context)).toBe('continue');
+  });
+
+  it('uses continuation when the field has text but no input prefix', () => {
+    const context = createContext({
+      fieldValue: '患者胸闷',
+      prefix: '',
+      trigger: 'focus',
+      selectionStart: 4,
+      selectionEnd: 4,
+    });
+
+    expect(resolveFieldAssistIntent(context)).toBe('continue');
+  });
+
+  it('uses continuation on focus even when an existing cursor prefix is present', () => {
+    const context = createContext({
+      fieldValue: '患者胸闷',
+      prefix: '胸闷',
+      trigger: 'focus',
+      selectionStart: 4,
+      selectionEnd: 4,
+    });
+
+    expect(resolveFieldAssistIntent(context)).toBe('continue');
   });
 
   it('auto-generates an empty focused field and suppresses duplicate generation for the same draft', () => {
@@ -96,5 +120,29 @@ describe('fieldAssist intentResolver', () => {
     });
 
     expect(resolveFieldAssistIntent(context, createDraft(context))).toBe('draftReady');
+  });
+
+  it('prioritizes fresh input suggestions over an unapplied draft', () => {
+    const context = createContext({
+      fieldValue: '患者胸闷',
+      prefix: '胸闷',
+      trigger: 'input',
+      selectionStart: 4,
+      selectionEnd: 4,
+    });
+
+    expect(resolveFieldAssistIntent(context, createDraft(context))).toBe('continue');
+  });
+
+  it('does not keep showing an unapplied draft after short fresh input', () => {
+    const context = createContext({
+      fieldValue: '无',
+      prefix: '',
+      trigger: 'input',
+      selectionStart: 1,
+      selectionEnd: 1,
+    });
+
+    expect(resolveFieldAssistIntent(context, createDraft(context))).toBe('continue');
   });
 });

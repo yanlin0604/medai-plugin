@@ -32,11 +32,12 @@ import {
   type BubbleDischargeDraft,
 } from '../../services/bubbleDischargeWriteback';
 import {
-  buildEditAssistSuggestions,
   copyEditAssistSuggestion,
+  fetchEditAssistSuggestions,
   getEditAssistModeLabel,
   getLatestBsEditAssistContext,
   isUsableEditAssistContext,
+  resolveEditAssistType,
   type BsEditAssistContext,
   type EditAssistSuggestion,
 } from '../../services/editAssistService';
@@ -60,6 +61,7 @@ interface BubbleShellProps {
 type BubbleDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written' | 'error';
 type CopyStatus = 'idle' | 'copied' | 'error';
 type FieldDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written' | 'error';
+type SuggestionStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 const GENERATION_STEPS = [
   '拉取入院记录',
@@ -101,6 +103,13 @@ function buildRoundTranscriptText(segments: RoundPendingSegment[]) {
     .join('\n');
 }
 
+function getSuggestionAssistType(intent: FieldAssistIntent) {
+  if (intent === 'continue' || intent === 'rewrite') {
+    return intent;
+  }
+  return null;
+}
+
 export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const navigate = useNavigate();
   const { mode, detectedContext, emrDebug, expand, setDetectedContext, setEmrDebug, markActivated, hasActivated } = useBubbleStore();
@@ -130,6 +139,10 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const generatingContextKeyRef = useRef('');
   const fieldDraftStickyRef = useRef(false);
   const [suggestionBatch, setSuggestionBatch] = useState(0);
+  const [suggestions, setSuggestions] = useState<EditAssistSuggestion[]>([]);
+  const [suggestionStatus, setSuggestionStatus] = useState<SuggestionStatus>('idle');
+  const [suggestionErrorText, setSuggestionErrorText] = useState('');
+  const suggestionRequestKeyRef = useRef('');
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
   const [copiedSuggestionId, setCopiedSuggestionId] = useState('');
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
@@ -188,15 +201,59 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     const effectiveContext = transcriptText ? { ...context, fieldValue: '' } : context;
     return generateFieldDraft(effectiveContext, undefined, transcriptText);
   };
-  const suggestions = useMemo(
-    () => (editContext ? buildEditAssistSuggestions(editContext, suggestionBatch) : []),
-    [editContext, suggestionBatch],
-  );
   const fieldIntent: FieldAssistIntent = useMemo(
     () => (fieldContext ? resolveFieldAssistIntent(fieldContext, fieldDraft) : 'idle'),
     [fieldContext, fieldDraft],
   );
   const fieldContextKey = fieldContext ? getFieldAssistContextKey(fieldContext) : '';
+
+  useEffect(() => {
+    const fieldSuggestionAssistType = getSuggestionAssistType(fieldIntent);
+    const suggestionAssistType = editContext
+      ? resolveEditAssistType(editContext)
+      : fieldSuggestionAssistType ?? undefined;
+    const suggestionContext = editContext ?? (fieldContext && fieldSuggestionAssistType
+      ? { ...fieldContext, source: 'demo-cs' } as BsEditAssistContext
+      : null);
+
+    if (!suggestionContext) {
+      suggestionRequestKeyRef.current = '';
+      setSuggestions([]);
+      setSuggestionStatus('idle');
+      setSuggestionErrorText('');
+      return;
+    }
+
+    const requestKey = [
+      suggestionContext.patientId,
+      suggestionContext.docCode,
+      suggestionContext.fieldKey,
+      suggestionContext.fieldValue,
+      suggestionContext.selectedText,
+      suggestionContext.prefix,
+      suggestionContext.selectionStart,
+      suggestionContext.selectionEnd,
+      suggestionAssistType ?? '',
+      suggestionBatch,
+    ].join('|');
+
+    suggestionRequestKeyRef.current = requestKey;
+    setSuggestionStatus('loading');
+    setSuggestionErrorText('');
+
+    void fetchEditAssistSuggestions(suggestionContext, suggestionBatch, suggestionAssistType)
+      .then((items) => {
+        if (suggestionRequestKeyRef.current !== requestKey) return;
+        setSuggestions(items);
+        setSuggestionStatus('ready');
+      })
+      .catch((error) => {
+        if (suggestionRequestKeyRef.current !== requestKey) return;
+        setSuggestions([]);
+        setSuggestionStatus('error');
+        setSuggestionErrorText(error instanceof Error ? error.message : '候选加载失败');
+      });
+  }, [editContext, fieldContext, fieldIntent, suggestionBatch]);
 
   useEffect(() => {
     latestFieldContextKeyRef.current = fieldContextKey;
@@ -259,11 +316,13 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
 
         const nextSnapshotKey = getFieldContextSnapshotKey(usableField);
         if (nextSnapshotKey !== latestFieldSnapshotKeyRef.current) {
-          // 如果正在生成中且字段身份相同（只是 prefix/selection 等微变），跳过更新防止生成被取消
+          // 如果正在生成中且字段仍为空，跳过同字段微变防止生成被取消；
+          // 一旦医生开始输入或划词，必须更新上下文，让气泡切到输入候选或改写候选。
           const isGenerating = generatingContextKeyRef.current !== '';
           const sameField = isGenerating
             && generatingContextKeyRef.current === getFieldAssistContextKey(usableField);
-          if (sameField) {
+          const hasDoctorEdit = Boolean(usableField.fieldValue.trim() || usableField.selectedText.trim());
+          if (sameField && !hasDoctorEdit) {
             // 仅更新快照 key 记录，不更新 state 以避免打断生成
             latestFieldSnapshotKeyRef.current = nextSnapshotKey;
           } else {
@@ -812,7 +871,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const handleApplyFieldSuggestion = (event: MouseEvent<HTMLButtonElement>, suggestion: EditAssistSuggestion) => {
     event.stopPropagation();
     if (!fieldContext || fieldDraftStatus === 'writing') return;
-    const draft = buildSuggestionDraft(fieldContext, suggestion.text, fieldIntent === 'rewrite' ? '改写选区' : '术语/续写');
+    const draftLabel = fieldIntent === 'rewrite' ? '改写选区' : '输入候选';
+    const draft = buildSuggestionDraft(fieldContext, suggestion.text, draftLabel);
     setFieldDraft(draft);
     addStoredFieldDraft(draft);
     setFieldDraftStatus('writing');
@@ -865,14 +925,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               : '待书写';
 
   if (fieldContext) {
-    const hasSuggestionIntent = fieldIntent === 'term' || fieldIntent === 'rewrite';
+    const hasSuggestionIntent = Boolean(getSuggestionAssistType(fieldIntent));
     const currentFieldDraft = fieldDraft?.contextKey === fieldContextKey ? fieldDraft : null;
-    const fieldSuggestions = hasSuggestionIntent
-      ? buildEditAssistSuggestions({
-        ...fieldContext,
-        source: 'demo-cs',
-      } as BsEditAssistContext, suggestionBatch)
-      : [];
+    const fieldSuggestions = hasSuggestionIntent ? suggestions : [];
     const isFieldBusy = fieldDraftStatus === 'generating' || fieldDraftStatus === 'writing';
     const canApplyField = Boolean(currentFieldDraft) && fieldDraftStatus === 'ready';
     const fieldActionLabel = fieldDraftStatus === 'writing'
@@ -1064,7 +1119,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
           <div data-tauri-drag-region className="flex items-start justify-between gap-2">
             <div data-tauri-drag-region className="min-w-0">
               <div data-tauri-drag-region className="text-[11px] font-bold text-emerald-700 truncate">
-                {fieldContext.fieldLabel} · {fieldIntent === 'rewrite' ? '改写选区' : fieldIntent === 'term' ? '术语/续写' : '字段生成'}
+                {fieldContext.fieldLabel} · {fieldIntent === 'rewrite' ? '改写选区' : fieldIntent === 'continue' ? '输入候选' : '字段生成'}
               </div>
               <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
                 {fieldContext.selectedText || fieldContext.prefix || fieldStatusText || fieldActionText}
@@ -1129,7 +1184,16 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         {hasSuggestionIntent ? (
           <>
             <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-2 space-y-1.5">
-              {fieldSuggestions.length > 0 ? (
+              {suggestionStatus === 'loading' ? (
+                <div className="h-full min-h-[90px] flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+                  <Loading3QuartersOutlined className="animate-spin" />
+                  正在加载候选
+                </div>
+              ) : suggestionStatus === 'error' ? (
+                <div className="h-full min-h-[90px] flex items-center justify-center px-3 text-center text-[11px] text-red-500">
+                  {suggestionErrorText || '候选加载失败'}
+                </div>
+              ) : fieldSuggestions.length > 0 ? (
                 fieldSuggestions.map((suggestion) => (
                   <button
                     key={suggestion.id}
@@ -1162,7 +1226,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
                 type="button"
                 data-tauri-drag-region="false"
                 onClick={handleRefreshSuggestions}
-                className="h-7 px-2.5 shrink-0 inline-flex items-center gap-1 bg-slate-900 text-white hover:bg-slate-700 text-[11px] font-bold"
+                disabled={suggestionStatus === 'loading'}
+                className="h-7 px-2.5 shrink-0 inline-flex items-center gap-1 bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50 text-[11px] font-bold"
                 title="换一批候选"
               >
                 <ReloadOutlined className="text-[10px]" />
@@ -1274,7 +1339,16 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-2 space-y-1.5">
-          {suggestions.length > 0 ? (
+          {suggestionStatus === 'loading' ? (
+            <div className="h-full min-h-[90px] flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+              <Loading3QuartersOutlined className="animate-spin" />
+              正在加载候选
+            </div>
+          ) : suggestionStatus === 'error' ? (
+            <div className="h-full min-h-[90px] flex items-center justify-center px-3 text-center text-[11px] text-red-500">
+              {suggestionErrorText || '候选加载失败'}
+            </div>
+          ) : suggestions.length > 0 ? (
             suggestions.map((suggestion) => (
               <button
                 key={suggestion.id}
@@ -1320,7 +1394,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
             type="button"
             data-tauri-drag-region="false"
             onClick={handleRefreshSuggestions}
-            className="h-7 px-2.5 shrink-0 inline-flex items-center gap-1 bg-slate-900 text-white hover:bg-slate-700 text-[11px] font-bold"
+            disabled={suggestionStatus === 'loading'}
+            className="h-7 px-2.5 shrink-0 inline-flex items-center gap-1 bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50 text-[11px] font-bold"
             title="换一批候选"
           >
             <ReloadOutlined className="text-[10px]" />

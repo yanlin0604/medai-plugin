@@ -1,10 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  buildEditAssistSuggestions,
+  fetchEditAssistSuggestions,
+  getEditAssistModeLabel,
   isEditAssistContextStale,
   isUsableEditAssistContext,
+  resolveEditAssistType,
   type BsEditAssistContext,
 } from './editAssistService';
+import { pluginRuntimeApi } from './pluginRuntime';
+
+vi.mock('./pluginRuntime', () => ({
+  pluginRuntimeApi: {
+    getEditAssistSuggestions: vi.fn(),
+  },
+}));
 
 const baseContext: BsEditAssistContext = {
   source: 'demo-bs',
@@ -25,8 +34,40 @@ const baseContext: BsEditAssistContext = {
 };
 
 describe('editAssistService', () => {
+  beforeEach(() => {
+    vi.mocked(pluginRuntimeApi.getEditAssistSuggestions).mockReset();
+  });
+
   it('accepts fresh discharge edit context with a usable prefix', () => {
     expect(isUsableEditAssistContext(baseContext, Date.parse(baseContext.receivedAt))).toBe(true);
+  });
+
+  it('accepts continuation context when the field has text but no prefix', () => {
+    const context = {
+      ...baseContext,
+      fieldValue: '患者住院期间病情平稳',
+      prefix: '',
+      selectionStart: 10,
+      selectionEnd: 10,
+      trigger: 'focus',
+    };
+
+    expect(isUsableEditAssistContext(context, Date.parse(context.receivedAt))).toBe(true);
+    expect(resolveEditAssistType(context)).toBe('continue');
+    expect(getEditAssistModeLabel(context)).toBe('输入候选');
+  });
+
+  it('uses continuation on focus even when a cursor prefix can be derived from existing text', () => {
+    const context = {
+      ...baseContext,
+      fieldValue: '患者住院期间病情平稳',
+      prefix: '平稳',
+      selectionStart: 10,
+      selectionEnd: 10,
+      trigger: 'focus',
+    };
+
+    expect(resolveEditAssistType(context)).toBe('continue');
   });
 
   it('accepts CS端 (demo-cs) edit context', () => {
@@ -44,26 +85,45 @@ describe('editAssistService', () => {
     expect(isUsableEditAssistContext(baseContext, Date.parse(baseContext.receivedAt) + 10_001)).toBe(false);
   });
 
-  it('builds term and phrase suggestions for input prefix', () => {
-    const suggestions = buildEditAssistSuggestions(baseContext, 0);
-    expect(suggestions.length).toBeGreaterThan(0);
-    expect(suggestions.some((item) => item.text.includes('规律'))).toBe(true);
+  it('loads suggestions from backend runtime API', async () => {
+    vi.mocked(pluginRuntimeApi.getEditAssistSuggestions).mockResolvedValue({
+      suggestions: [
+        { id: 'term-1', type: 'term', text: '规律服药', source: 'terms' },
+        { id: 'phrase-2', type: 'phrase', text: '建议遵医嘱规律服药。', source: 'ai' },
+      ],
+      warnings: [],
+    });
+
+    const suggestions = await fetchEditAssistSuggestions(baseContext, 1);
+
+    expect(pluginRuntimeApi.getEditAssistSuggestions).toHaveBeenCalledWith({
+      patientId: baseContext.patientId,
+      docCode: baseContext.docCode,
+      docName: baseContext.docName,
+      fieldKey: baseContext.fieldKey,
+      fieldLabel: baseContext.fieldLabel,
+      fieldValue: baseContext.fieldValue,
+      selectedText: baseContext.selectedText,
+      prefix: baseContext.prefix,
+      assistType: 'continue',
+      trigger: baseContext.trigger,
+      batchIndex: 1,
+    });
+    expect(suggestions).toEqual([
+      { id: 'term-1', type: 'term', text: '规律服药', source: 'terms' },
+      { id: 'phrase-2', type: 'phrase', text: '建议遵医嘱规律服药。', source: 'ai' },
+    ]);
   });
 
-  it('prioritizes selected text as rewrite context', () => {
-    const suggestions = buildEditAssistSuggestions(
-      { ...baseContext, selectedText: '胸痛较前缓解', prefix: '' },
-      0,
-    );
+  it('normalizes unknown backend suggestion values', async () => {
+    vi.mocked(pluginRuntimeApi.getEditAssistSuggestions).mockResolvedValue({
+      suggestions: [
+        { id: 'x', type: 'unknown', text: '候选文本', source: 'model' },
+      ],
+    });
 
-    expect(suggestions.length).toBeGreaterThan(0);
-    expect(suggestions.every((item) => item.type === 'term' || item.type === 'rewrite')).toBe(true);
-  });
-
-  it('builds suggestions for CS端 context', () => {
-    const csContext = { ...baseContext, source: 'demo-cs' as const, prefix: '阿司匹林' };
-    const suggestions = buildEditAssistSuggestions(csContext, 0);
-    expect(suggestions.length).toBeGreaterThan(0);
-    expect(suggestions.some((item) => item.text.includes('阿司匹林'))).toBe(true);
+    await expect(fetchEditAssistSuggestions(baseContext)).resolves.toEqual([
+      { id: 'x', type: 'phrase', text: '候选文本', source: 'ai' },
+    ]);
   });
 });

@@ -3,7 +3,7 @@ import { getFieldAssistContextKey } from './types';
 
 export function resolveFieldAssistIntent(
   context: FieldAssistContext,
-  _draft?: FieldAssistDraft | null,
+  draft?: FieldAssistDraft | null,
 ): FieldAssistIntent {
   let intent: FieldAssistIntent;
   
@@ -12,15 +12,19 @@ export function resolveFieldAssistIntent(
   } else if (!context.fieldValue.trim()) {
     // 如果字段完全为空，无论是刚聚焦还是生成完草稿没回填，都保持在 AI 生成模式（展示草稿卡片）
     intent = 'autoGenerate';
+  } else if (context.trigger !== 'input'
+    && draft?.contextKey === getFieldAssistContextKey(context)
+    && context.fieldValue.trim()) {
+    intent = 'draftReady';
   } else {
-    // 只要字段里有了文本（不论是回填进来的，还是医生自己开始敲字的），全部进入术语续写模式
-    intent = 'term';
+    // 非划词编辑统一走输入候选：后台合并术语表和 AI 续写。
+    intent = 'continue';
   }
 
   const intentNames: Record<FieldAssistIntent, string> = {
     rewrite: '划词改写',
     autoGenerate: '自动生成',
-    term: '术语/续写',
+    continue: '输入候选',
     draftReady: '待回填草稿',
     idle: '空闲/等待'
   };

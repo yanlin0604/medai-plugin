@@ -361,6 +361,34 @@ export interface RuntimeRewriteStatusRequest {
   adoptStatus: RuntimeRewriteStatus;
 }
 
+export type RuntimeEditAssistType = 'term' | 'continue' | 'rewrite';
+
+export interface RuntimeEditAssistSuggestionRequest {
+  patientId: string;
+  docCode: string;
+  docName: string;
+  fieldKey: string;
+  fieldLabel: string;
+  fieldValue?: string;
+  selectedText?: string;
+  prefix?: string;
+  assistType?: RuntimeEditAssistType;
+  trigger?: string;
+  batchIndex?: number;
+}
+
+export interface RuntimeEditAssistSuggestionDto {
+  id: string;
+  type: 'term' | 'phrase' | 'rewrite' | string;
+  text: string;
+  source: 'terms' | 'ai' | string;
+}
+
+export interface RuntimeEditAssistSuggestionResponse {
+  suggestions: RuntimeEditAssistSuggestionDto[];
+  warnings?: string[];
+}
+
 export type RuntimeDocDefinition = DocDefinition;
 export type RuntimeFrontendDocTemplate = DocTemplate;
 export type RuntimeFrontendDocVersion = DocVersion;

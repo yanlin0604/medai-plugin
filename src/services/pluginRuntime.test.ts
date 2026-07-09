@@ -10,6 +10,7 @@ import {
 import type {
   RuntimeApiResponse,
   RuntimeDocFieldDto,
+  RuntimeEditAssistSuggestionResponse,
   RuntimeEvidenceBundleDto,
   RuntimeFieldCompletionResponse,
   RuntimeWritebackAuditResponse,
@@ -225,5 +226,29 @@ describe('pluginRuntime adapters', () => {
       '/medical/pluginRuntime/field-completions/FCR-1/writeback-audit',
       auditRequest,
     );
+  });
+
+  it('posts edit assist suggestion payload through runtime API', async () => {
+    const response: RuntimeEditAssistSuggestionResponse = {
+      suggestions: [
+        { id: 'term-1', type: 'term', text: '规律服药', source: 'terms' },
+      ],
+      warnings: [],
+    };
+    const request = {
+      patientId: 'ZY001',
+      docCode: 'DOC010',
+      docName: '出院记录',
+      fieldKey: 'dischargeOrders',
+      fieldLabel: '出院医嘱',
+      prefix: '规律',
+      assistType: 'term' as const,
+      batchIndex: 0,
+    };
+    mockHttp.post.mockReturnValueOnce(ok(response));
+
+    await expect(pluginRuntimeApi.getEditAssistSuggestions(request)).resolves.toEqual(response);
+
+    expect(mockHttp.post).toHaveBeenCalledWith('/medical/pluginRuntime/edit-assist/suggestions', request);
   });
 });

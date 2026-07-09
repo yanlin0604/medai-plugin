@@ -7,7 +7,7 @@ export type FieldAssistTrigger = 'focus' | 'input' | 'selection' | (string & {})
 
 export type FieldAssistIntent =
   | 'idle'
-  | 'term'
+  | 'continue'
   | 'rewrite'
   | 'autoGenerate'
   | 'draftReady';
