@@ -74,6 +74,7 @@ export interface RuntimeFieldRenderRuleDto {
   merge?: RuntimeFieldMergeRuleDto;
   evidence?: RuntimeFieldEvidenceRuleDto;
   prompt?: RuntimeFieldPromptRuleDto;
+  completionMode?: string;
   disableRegenerate?: boolean;
 }
 
@@ -122,6 +123,14 @@ export interface RuntimeEvidenceQueryRequest {
   documentType: string;
   docCode: string;
   fieldKey: string;
+  parentFieldKey?: string;
+  compositionItemKey?: string;
+  compositionItemLabel?: string;
+  doctorCode?: string;
+  doctorName?: string;
+  deptCode?: string;
+  hospitalCode?: string;
+  clientId?: string;
 }
 
 export interface RuntimeFieldEvidenceRuleDto {
@@ -164,6 +173,9 @@ export interface RuntimeEvidenceBundleDto {
   documentType: string;
   docCode: string;
   fieldKey: string;
+  parentFieldKey?: string;
+  compositionItemKey?: string;
+  compositionItemLabel?: string;
   rule?: RuntimeFieldEvidenceRuleDto;
   prompt?: RuntimeFieldPromptRuleDto;
   evidenceItems: RuntimeEvidenceItemDto[];
@@ -197,6 +209,14 @@ export interface RuntimeFieldCompletionRequest {
   mode?: RuntimeFieldCompletionMode;
   instruction?: string;
   transcriptText?: string;
+  parentFieldKey?: string;
+  compositionItemKey?: string;
+  compositionItemLabel?: string;
+  doctorCode?: string;
+  doctorName?: string;
+  deptCode?: string;
+  hospitalCode?: string;
+  clientId?: string;
 }
 
 export interface RuntimeFieldCompletionResponse {
@@ -206,6 +226,9 @@ export interface RuntimeFieldCompletionResponse {
   documentType: string;
   docCode: string;
   fieldKey: string;
+  parentFieldKey?: string;
+  compositionItemKey?: string;
+  compositionItemLabel?: string;
   generatedText: string;
   usedEvidenceIds: string[];
   evidenceSummary: RuntimeEvidenceSummaryDto[];
@@ -256,6 +279,36 @@ export interface RuntimeWritebackAuditResponse {
   auditedAt?: string;
 }
 
+export type RuntimeFieldCompositionSourceType = 'fixed' | 'ai' | 'manual' | string;
+
+export interface RuntimeFieldCompositionDto {
+  docCode: string;
+  parentFieldKey: string;
+  selectedTemplateId?: number | null;
+  templates: RuntimeFieldCompositionTemplateDto[];
+}
+
+export interface RuntimeFieldCompositionTemplateDto {
+  templateId?: number | null;
+  templateName: string;
+  scopeType?: string;
+  ownerCode?: string;
+  defaultTemplate?: boolean;
+  items: RuntimeFieldCompositionItemDto[];
+}
+
+export interface RuntimeFieldCompositionItemDto {
+  itemKey: string;
+  itemLabel: string;
+  sourceType: RuntimeFieldCompositionSourceType;
+  defaultText?: string;
+  renderRule?: RuntimeFieldRenderRuleDto;
+  required?: boolean;
+  editable?: boolean;
+  itemOrder?: number;
+  lineTemplate?: string;
+}
+
 export interface RuntimeFieldValueRefDto {
   adapterKey?: string;
   sourcePath?: string;
@@ -272,6 +325,16 @@ export interface RuntimeDocValueBundleDto {
 }
 
 export type RuntimeDocValues = RuntimeDocValueBundleDto;
+
+export interface RuntimeDocValueGenerationRequest {
+  patientIdHis: string;
+  skipGeneration?: boolean;
+  doctorCode?: string;
+  doctorName?: string;
+  deptCode?: string;
+  hospitalCode?: string;
+  clientId?: string;
+}
 
 export interface RuntimeFieldValueDto {
   fieldKey: string;
@@ -406,3 +469,4 @@ export type RuntimeEvidenceQuery = RuntimeEvidenceQueryRequest;
 export type RuntimeEvidenceBundle = RuntimeEvidenceBundleDto;
 export type RuntimeEvidenceItem = RuntimeEvidenceItemDto;
 export type RuntimeFieldCompletion = RuntimeFieldCompletionResponse;
+export type RuntimeFieldComposition = RuntimeFieldCompositionDto;

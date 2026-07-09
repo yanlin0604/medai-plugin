@@ -31,7 +31,9 @@ export const useFieldAssistStore = create<FieldAssistState>((set, get) => ({
     const identityKey = getFieldIdentityKey(context);
     return drafts.filter((draft) => {
       if (draft.contextKey === contextKey) return true;
-      const responseIdentity = `${draft.response.patientId}:${draft.response.docCode}:${draft.response.fieldKey}`;
+      const responseIdentity = draft.response.compositionItemKey
+        ? `${draft.response.patientId}:${draft.response.docCode}:${draft.response.fieldKey}:${draft.response.compositionItemKey}`
+        : `${draft.response.patientId}:${draft.response.docCode}:${draft.response.fieldKey}`;
       return responseIdentity === identityKey;
     });
   },

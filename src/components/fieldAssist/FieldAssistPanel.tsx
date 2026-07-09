@@ -20,7 +20,7 @@ import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../s
 import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
 import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import type { FieldAssistDraft } from '../../services/fieldAssist/types';
-import { getFieldAssistContextKey, getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
+import { getFieldAssistContextKey, getFieldAssistSnapshotKey, getFieldIdentityKey } from '../../services/fieldAssist/types';
 
 const VOICE_PLACEHOLDER = '语音转写文本会出现在这里，也可以先手动粘贴转写结果。';
 const FIELD_CONTEXT_POLL_MS = 1800;
@@ -141,10 +141,13 @@ export default function FieldAssistPanel() {
   const currentDrafts = useMemo(() => {
     if (!context) return [];
     const contextKey = getFieldAssistContextKey(context);
-    const identityKey = `${context.patientId}:${context.docCode}:${context.fieldKey}`;
+    const identityKey = getFieldIdentityKey(context);
     return drafts.filter((draft) => {
       if (draft.contextKey === contextKey) return true;
-      return `${draft.response.patientId}:${draft.response.docCode}:${draft.response.fieldKey}` === identityKey;
+      const responseIdentity = draft.response.compositionItemKey
+        ? `${draft.response.patientId}:${draft.response.docCode}:${draft.response.fieldKey}:${draft.response.compositionItemKey}`
+        : `${draft.response.patientId}:${draft.response.docCode}:${draft.response.fieldKey}`;
+      return responseIdentity === identityKey;
     }).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }, [context, drafts]);
 

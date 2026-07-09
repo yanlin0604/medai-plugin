@@ -15,6 +15,9 @@ export interface BsEditAssistContext {
   docName: string;
   fieldKey: string;
   fieldLabel: string;
+  parentFieldKey?: string;
+  compositionItemKey?: string;
+  compositionItemLabel?: string;
   fieldValue: string;
   selectedText: string;
   prefix: string;

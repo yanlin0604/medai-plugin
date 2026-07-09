@@ -20,6 +20,14 @@ export interface FieldAssistContext {
   docName: string;
   fieldKey: string;
   fieldLabel: string;
+  parentFieldKey?: string;
+  compositionItemKey?: string;
+  compositionItemLabel?: string;
+  doctorCode?: string;
+  doctorName?: string;
+  deptCode?: string;
+  hospitalCode?: string;
+  clientId?: string;
   fieldValue: string;
   selectedText: string;
   prefix: string;
@@ -47,6 +55,9 @@ export interface FieldWritebackPayload {
   patientId: string;
   docCode: string;
   fieldKey: string;
+  parentFieldKey?: string;
+  compositionItemKey?: string;
+  compositionItemLabel?: string;
   sessionId: string;
   text: string;
   writebackMode: RuntimeEvidenceWritebackMode | 'replaceSelection';
@@ -56,14 +67,20 @@ export interface FieldWritebackPayload {
 }
 
 export function getFieldAssistContextKey(
-  context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey' | 'sessionId'>,
+  context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey' | 'sessionId' | 'compositionItemKey'>,
 ) {
+  if (context.compositionItemKey) {
+    return `${context.patientId}:${context.docCode}:${context.fieldKey}:${context.compositionItemKey}:${context.sessionId}`;
+  }
   return `${context.patientId}:${context.docCode}:${context.fieldKey}:${context.sessionId}`;
 }
 
 export function getFieldAssistSnapshotKey(context: FieldAssistContext) {
   return [
     getFieldAssistContextKey(context),
+    context.parentFieldKey ?? '',
+    context.compositionItemKey ?? '',
+    context.compositionItemLabel ?? '',
     context.fieldValue,
     context.selectedText,
     context.prefix,
@@ -75,7 +92,10 @@ export function getFieldAssistSnapshotKey(context: FieldAssistContext) {
 }
 
 export function getFieldIdentityKey(
-  context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey'>,
+  context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey' | 'compositionItemKey'>,
 ) {
+  if (context.compositionItemKey) {
+    return `${context.patientId}:${context.docCode}:${context.fieldKey}:${context.compositionItemKey}`;
+  }
   return `${context.patientId}:${context.docCode}:${context.fieldKey}`;
 }

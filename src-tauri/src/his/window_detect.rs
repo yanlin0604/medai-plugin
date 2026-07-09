@@ -45,6 +45,12 @@ pub struct BsEditAssistContext {
     pub doc_name: String,
     pub field_key: String,
     pub field_label: String,
+    #[serde(default)]
+    pub parent_field_key: Option<String>,
+    #[serde(default)]
+    pub composition_item_key: Option<String>,
+    #[serde(default)]
+    pub composition_item_label: Option<String>,
     pub field_value: String,
     pub selected_text: String,
     pub prefix: String,
@@ -65,6 +71,22 @@ pub struct FieldAssistContext {
     pub doc_name: String,
     pub field_key: String,
     pub field_label: String,
+    #[serde(default)]
+    pub parent_field_key: Option<String>,
+    #[serde(default)]
+    pub composition_item_key: Option<String>,
+    #[serde(default)]
+    pub composition_item_label: Option<String>,
+    #[serde(default)]
+    pub doctor_code: Option<String>,
+    #[serde(default)]
+    pub doctor_name: Option<String>,
+    #[serde(default)]
+    pub dept_code: Option<String>,
+    #[serde(default)]
+    pub hospital_code: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
     pub field_value: String,
     pub selected_text: String,
     pub prefix: String,
@@ -424,6 +446,9 @@ fn parse_edit_assist_target(target: &str) -> Option<BsEditAssistContext> {
         doc_name: required(&params, "docName")?,
         field_key: required(&params, "fieldKey")?,
         field_label: required(&params, "fieldLabel")?,
+        parent_field_key: optional(&params, "parentFieldKey"),
+        composition_item_key: optional(&params, "compositionItemKey"),
+        composition_item_label: optional(&params, "compositionItemLabel"),
         field_value: params.get("fieldValue").cloned().unwrap_or_default(),
         selected_text: params.get("selectedText").cloned().unwrap_or_default(),
         prefix: params.get("prefix").cloned().unwrap_or_default(),

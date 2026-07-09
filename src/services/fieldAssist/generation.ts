@@ -20,6 +20,14 @@ export async function generateFieldDraft(
     mode: context.selectedText ? 'rewrite_selection' : context.fieldValue.trim() ? 'append' : 'generate',
     instruction,
     transcriptText,
+    parentFieldKey: context.parentFieldKey,
+    compositionItemKey: context.compositionItemKey,
+    compositionItemLabel: context.compositionItemLabel,
+    doctorCode: context.doctorCode,
+    doctorName: context.doctorName,
+    deptCode: context.deptCode,
+    hospitalCode: context.hospitalCode,
+    clientId: context.clientId,
   });
 
   return {
@@ -44,6 +52,9 @@ export function buildSuggestionDraft(
     documentType: context.docName,
     docCode: context.docCode,
     fieldKey: context.fieldKey,
+    parentFieldKey: context.parentFieldKey,
+    compositionItemKey: context.compositionItemKey,
+    compositionItemLabel: context.compositionItemLabel,
     generatedText: text,
     usedEvidenceIds: [],
     evidenceSummary: [],

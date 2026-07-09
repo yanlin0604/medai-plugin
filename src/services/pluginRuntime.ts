@@ -25,6 +25,7 @@ import type {
   RuntimeDocFieldDto,
   RuntimeDocFieldOptionDto,
   RuntimeDocTemplateDto,
+  RuntimeDocValueGenerationRequest,
   RuntimeDocValueBundleDto,
   RuntimeDocValues,
   RuntimeDocVersionDto,
@@ -34,6 +35,7 @@ import type {
   RuntimeEvidenceQueryRequest,
   RuntimeFieldCompletionRequest,
   RuntimeFieldCompletionResponse,
+  RuntimeFieldCompositionDto,
   RuntimeIcdCandidateDto,
   RuntimeRewriteRequest,
   RuntimeRewriteResponse,
@@ -61,7 +63,6 @@ const LOCAL_DEFINITION_FIRST_DOC_CODES = new Set([
   'DOC012',
   'DOC020',
   'DOC030',
-  'DOC010',
   'DOC040',
   'DOC050',
   'DOC060',
@@ -170,6 +171,7 @@ function normalizeInputType(inputType: string): FieldInputType {
     case 'static':
     case 'options':
     case 'text':
+    case 'textarea':
     case 'icd':
     case 'date':
       return inputType;
@@ -351,12 +353,14 @@ export async function resolveRuntimeValues(
   docCode: string,
   patientIdHis: string,
   skipGeneration = false,
+  context: Omit<RuntimeDocValueGenerationRequest, 'patientIdHis' | 'skipGeneration'> = {},
 ): Promise<RuntimeDocValues> {
   try {
     return await requestRuntime<RuntimeDocValueBundleDto>(
       http.post(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
         patientIdHis,
         skipGeneration,
+        ...context,
       }),
     );
   } catch {
@@ -374,6 +378,24 @@ export async function resolveRuntimeValues(
 export async function getEvidence(request: RuntimeEvidenceQueryRequest): Promise<RuntimeEvidenceBundleDto> {
   return requestRuntime<RuntimeEvidenceBundleDto>(
     http.get(`${RUNTIME_BASE_PATH}/evidence`, { params: request }),
+  );
+}
+
+export async function getFieldComposition(
+  docCode: string,
+  fieldKey: string,
+  params?: {
+    doctorCode?: string;
+    doctorName?: string;
+    deptCode?: string;
+    hospitalCode?: string;
+    clientId?: string;
+  },
+): Promise<RuntimeFieldCompositionDto> {
+  return requestRuntime<RuntimeFieldCompositionDto>(
+    http.get(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/fields/${encodePath(fieldKey)}/composition`, {
+      params,
+    }),
   );
 }
 
@@ -555,6 +577,7 @@ export const pluginRuntimeApi = {
   getRuntimeDocTemplate,
   resolveRuntimeValues,
   getEvidence,
+  getFieldComposition,
   completeField,
   auditFieldWriteback,
   listDocVersions,

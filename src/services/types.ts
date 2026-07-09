@@ -77,7 +77,7 @@ export interface PatientConsistency {
 export type FieldSource = 'his' | 'emr' | 'asr' | 'lis' | 'pacs' | 'manual' | 'ai' | 'option';
 
 /** 字段录入形态 */
-export type FieldInputType = 'static' | 'options' | 'text' | 'icd' | 'date';
+export type FieldInputType = 'static' | 'options' | 'text' | 'textarea' | 'icd' | 'date';
 
 /** 选项型字段的单个选项（value 为存储值，render 为写入病历正文的规范表述） */
 export interface DocFieldOption {

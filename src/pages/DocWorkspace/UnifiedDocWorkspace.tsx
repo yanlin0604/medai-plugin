@@ -12,8 +12,12 @@ import { message } from 'antd';
 import ParadigmShell from '../../paradigms/ParadigmShell';
 import type { DocDefinition } from '../../config/docRegistry';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
+import type {
+  RuntimeFieldCompositionItemDto,
+  RuntimeFieldCompositionTemplateDto,
+} from '../../services/pluginRuntimeTypes';
 import type { DocFieldDef, DocTemplate, FieldValue } from '../../services/types';
-import type { FieldAssistDraft } from '../../services/fieldAssist/types';
+import type { FieldAssistContext, FieldAssistDraft } from '../../services/fieldAssist/types';
 import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
 import { applyFieldDraft, insertTextIntoFieldContext } from '../../services/fieldAssist/writeback';
 import { submitDocument } from '../../services/emsBridge';
@@ -23,7 +27,6 @@ import { localVersionAdapter } from '../../services/versionService';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
 import type { Patient } from '../../stores/usePatientStore';
 import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../services/fieldAssist/contextBridge';
-import type { FieldAssistContext } from '../../services/fieldAssist/types';
 import { getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
 import { renderTextWithCitations } from '../../components/fieldAssist/FieldAssistPanel';
 import RoundSegmentSelector from '../../components/RoundSegmentSelector';
@@ -37,6 +40,10 @@ interface FieldSession {
   field: DocFieldDef;
   value: string;
   draft?: FieldAssistDraft;
+  compositionTemplate?: RuntimeFieldCompositionTemplateDto;
+  compositionValues?: Record<string, string>;
+  compositionDrafts?: Record<string, FieldAssistDraft>;
+  compositionGenerating?: Record<string, boolean>;
   generating: boolean;
   applying: boolean;
 }
@@ -103,6 +110,187 @@ function buildInitialSessions(template: DocTemplate, values: Record<string, unkn
   }));
 }
 
+function sortedCompositionItems(
+  template: RuntimeFieldCompositionTemplateDto,
+): RuntimeFieldCompositionItemDto[] {
+  return [...(template.items ?? [])].sort((left, right) => (left.itemOrder ?? 0) - (right.itemOrder ?? 0));
+}
+
+function normalizeCompositionLabel(value: string): string {
+  return valueToText(value).replace(/\s+/g, '');
+}
+
+function createDefaultCompositionValues(
+  template: RuntimeFieldCompositionTemplateDto,
+): Record<string, string> {
+  return sortedCompositionItems(template).reduce<Record<string, string>>((result, item) => {
+    result[item.itemKey] = item.defaultText || '';
+    return result;
+  }, {});
+}
+
+function parseCompositionFieldValue(
+  template: RuntimeFieldCompositionTemplateDto,
+  value?: string,
+): Record<string, string> {
+  const values = createDefaultCompositionValues(template);
+  const text = valueToText(value);
+  if (!text) return values;
+
+  const items = sortedCompositionItems(template);
+  const itemByLabel = new Map(items.map((item) => [normalizeCompositionLabel(item.itemLabel), item]));
+  const lines = text.split(/\r?\n/);
+  const hasLabelLine = lines.some((line) => {
+    const match = /^(?:\d+[.、]\s*)?([^：:]+)[：:]\s*(.*)$/.exec(line.trim());
+    return Boolean(match && itemByLabel.has(normalizeCompositionLabel(match[1])));
+  });
+
+  if (!hasLabelLine) {
+    const positionalValues = { ...values };
+    lines.forEach((line, index) => {
+      const item = items[index] ?? items[items.length - 1];
+      if (!item) return;
+      const textLine = line.trim();
+      positionalValues[item.itemKey] = index < items.length
+        ? textLine
+        : [positionalValues[item.itemKey], textLine].filter(Boolean).join('；');
+    });
+    return positionalValues;
+  }
+
+  let activeItemKey = '';
+  const unmatchedLines: string[] = [];
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    const match = /^(?:\d+[.、]\s*)?([^：:]+)[：:]\s*(.*)$/.exec(trimmed);
+    const item = match ? itemByLabel.get(normalizeCompositionLabel(match[1])) : undefined;
+    if (item) {
+      activeItemKey = item.itemKey;
+      values[item.itemKey] = match?.[2]?.trim() || '';
+      return;
+    }
+
+    if (activeItemKey) {
+      values[activeItemKey] = [values[activeItemKey], trimmed].filter(Boolean).join('\n');
+    } else {
+      unmatchedLines.push(trimmed);
+    }
+  });
+
+  if (unmatchedLines.length > 0 && items[0]) {
+    values[items[0].itemKey] = [values[items[0].itemKey], ...unmatchedLines].filter(Boolean).join('\n');
+  }
+
+  return values;
+}
+
+function normalizeCompositionItemOutput(value: unknown): string {
+  return valueToText(value)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('；');
+}
+
+function formatCompositionFieldValue(
+  template: RuntimeFieldCompositionTemplateDto,
+  values: Record<string, string>,
+): string {
+  return sortedCompositionItems(template)
+    .map((item) => normalizeCompositionItemOutput(values[item.itemKey]))
+    .join('\n');
+}
+
+function getSessionDisplayValue(session: FieldSession): string {
+  if (!session.compositionTemplate) return session.value;
+  return formatCompositionFieldValue(
+    session.compositionTemplate,
+    session.compositionValues ?? createDefaultCompositionValues(session.compositionTemplate),
+  );
+}
+
+function attachCompositionTemplate(
+  session: FieldSession,
+  compositionTemplate: RuntimeFieldCompositionTemplateDto,
+): FieldSession {
+  const compositionValues = parseCompositionFieldValue(compositionTemplate, session.value);
+  return {
+    ...session,
+    compositionTemplate,
+    compositionValues,
+    value: formatCompositionFieldValue(compositionTemplate, compositionValues),
+  };
+}
+
+function updateCompositionItemInSession(
+  session: FieldSession,
+  itemKey: string,
+  nextText: string,
+  draft?: FieldAssistDraft,
+): FieldSession {
+  if (!session.compositionTemplate) return session;
+  const nextValues = {
+    ...createDefaultCompositionValues(session.compositionTemplate),
+    ...(session.compositionValues ?? {}),
+    [itemKey]: nextText,
+  };
+  const nextDrafts = draft
+    ? { ...(session.compositionDrafts ?? {}), [itemKey]: draft }
+    : session.compositionDrafts;
+
+  return {
+    ...session,
+    value: formatCompositionFieldValue(session.compositionTemplate, nextValues),
+    compositionValues: nextValues,
+    compositionDrafts: nextDrafts,
+  };
+}
+
+function applyRuntimeValueToSession(session: FieldSession, value: unknown): FieldSession {
+  const nextValue = valueToText(value);
+  if (!session.compositionTemplate) {
+    return {
+      ...session,
+      value: nextValue,
+    };
+  }
+
+  const compositionValues = parseCompositionFieldValue(session.compositionTemplate, nextValue);
+  return {
+    ...session,
+    compositionValues,
+    value: formatCompositionFieldValue(session.compositionTemplate, compositionValues),
+  };
+}
+
+function isAiCompositionItem(item: RuntimeFieldCompositionItemDto): boolean {
+  return String(item.sourceType).toLowerCase() === 'ai';
+}
+
+function getCompositionSourceLabel(item: RuntimeFieldCompositionItemDto): string {
+  switch (String(item.sourceType).toLowerCase()) {
+    case 'ai':
+      return 'AI';
+    case 'fixed':
+      return '固定';
+    case 'manual':
+      return '手填';
+    default:
+      return item.sourceType || '配置';
+  }
+}
+
+function getLatestCompositionDraft(session: FieldSession): FieldAssistDraft | undefined {
+  return Object.values(session.compositionDrafts ?? {}).reduce<FieldAssistDraft | undefined>((latest, draft) => {
+    if (!draft) return latest;
+    if (!latest || Date.parse(draft.createdAt) > Date.parse(latest.createdAt)) return draft;
+    return latest;
+  }, undefined);
+}
+
 function resolveInitialValues(docCode: string, patientId: string) {
   if (docCode === 'DOC003') {
     return Promise.resolve({
@@ -116,6 +304,41 @@ function resolveInitialValues(docCode: string, patientId: string) {
   }
 
   return pluginRuntimeApi.resolveRuntimeValues(docCode, patientId, true);
+}
+
+async function loadFieldCompositionTemplates(
+  template: DocTemplate,
+  docCode: string,
+  params: {
+    doctorCode?: string;
+    doctorName?: string;
+    deptCode?: string;
+    clientId?: string;
+  },
+): Promise<Map<string, RuntimeFieldCompositionTemplateDto>> {
+  const entries = await Promise.all(template.fields.map(async (field) => {
+    try {
+      const composition = await pluginRuntimeApi.getFieldComposition(docCode, field.key, params);
+      const compositionTemplate = composition.templates?.[0];
+      if (!compositionTemplate || !compositionTemplate.items?.length) return null;
+      return [field.key, compositionTemplate] as const;
+    } catch {
+      return null;
+    }
+  }));
+
+  return new Map(entries.filter((entry): entry is readonly [string, RuntimeFieldCompositionTemplateDto] => Boolean(entry)));
+}
+
+function attachCompositionTemplates(
+  sessions: FieldSession[],
+  templatesByFieldKey: Map<string, RuntimeFieldCompositionTemplateDto>,
+): FieldSession[] {
+  if (!templatesByFieldKey.size) return sessions;
+  return sessions.map((session) => {
+    const compositionTemplate = templatesByFieldKey.get(session.field.key);
+    return compositionTemplate ? attachCompositionTemplate(session, compositionTemplate) : session;
+  });
 }
 
 function readSavedFieldValue(values: Record<string, FieldValue>, field: DocFieldDef): string | undefined {
@@ -164,10 +387,20 @@ function mergeLatestDraftsIntoSessions(
   docCode: string,
 ): FieldSession[] {
   const latestByField = new Map<string, FieldAssistDraft>();
+  const latestByCompositionItem = new Map<string, FieldAssistDraft>();
 
   drafts.forEach((draft) => {
     const response = draft.response;
     if (response.patientId !== patientId || response.docCode !== docCode || !response.fieldKey) return;
+
+    if (response.compositionItemKey) {
+      const key = `${response.fieldKey}:${response.compositionItemKey}`;
+      const current = latestByCompositionItem.get(key);
+      if (!current || Date.parse(draft.createdAt) > Date.parse(current.createdAt)) {
+        latestByCompositionItem.set(key, draft);
+      }
+      return;
+    }
 
     const current = latestByField.get(response.fieldKey);
     if (!current || Date.parse(draft.createdAt) > Date.parse(current.createdAt)) {
@@ -175,17 +408,51 @@ function mergeLatestDraftsIntoSessions(
     }
   });
 
-  if (!latestByField.size) return sessions;
+  if (!latestByField.size && !latestByCompositionItem.size) return sessions;
 
   return sessions.map((session) => {
-    const draft = latestByField.get(session.field.key);
-    if (!draft) return session;
+    let nextSession = session;
+    const parentDraft = latestByField.get(session.field.key);
+    if (parentDraft) {
+      const nextText = parentDraft.generatedText || parentDraft.response.generatedText || nextSession.value;
+      nextSession = nextSession.compositionTemplate
+        ? {
+          ...nextSession,
+          draft: parentDraft,
+          compositionValues: parseCompositionFieldValue(nextSession.compositionTemplate, nextText),
+        }
+        : {
+          ...nextSession,
+          draft: parentDraft,
+          value: nextText,
+        };
 
-    return {
-      ...session,
-      draft,
-      value: draft.generatedText || draft.response.generatedText || session.value,
-    };
+      if (nextSession.compositionTemplate) {
+        nextSession = {
+          ...nextSession,
+          value: formatCompositionFieldValue(
+            nextSession.compositionTemplate,
+            nextSession.compositionValues ?? createDefaultCompositionValues(nextSession.compositionTemplate),
+          ),
+        };
+      }
+    }
+
+    if (nextSession.compositionTemplate) {
+      sortedCompositionItems(nextSession.compositionTemplate).forEach((item) => {
+        const itemDraft = latestByCompositionItem.get(`${session.field.key}:${item.itemKey}`);
+        if (!itemDraft) return;
+        if (parentDraft && Date.parse(itemDraft.createdAt) < Date.parse(parentDraft.createdAt)) return;
+        nextSession = updateCompositionItemInSession(
+          nextSession,
+          item.itemKey,
+          itemDraft.generatedText || itemDraft.response.generatedText || '',
+          itemDraft,
+        );
+      });
+    }
+
+    return nextSession;
   });
 }
 
@@ -194,7 +461,7 @@ function buildContext(
   patient: Patient,
   session: FieldSession,
   instruction?: string,
-) {
+): FieldAssistContext {
   return {
     ...EMPTY_SESSION_META,
     patientId: patient.id,
@@ -203,10 +470,44 @@ function buildContext(
     docName: doc.name,
     fieldKey: session.field.key,
     fieldLabel: session.field.label,
-    fieldValue: session.value,
+    fieldValue: getSessionDisplayValue(session),
+    doctorCode: patient.doctor,
+    doctorName: patient.doctor,
+    deptCode: patient.deptName,
+    clientId: 'medai-plugin',
     detectedAt: new Date().toISOString(),
     receivedAt: new Date().toISOString(),
     sessionId: `full-document:${doc.code}:${patient.id}:${session.field.key}`,
+    trigger: instruction ? 'input' : 'focus',
+  };
+}
+
+function buildCompositionItemContext(
+  doc: DocDefinition,
+  patient: Patient,
+  session: FieldSession,
+  item: RuntimeFieldCompositionItemDto,
+  instruction?: string,
+): FieldAssistContext {
+  return {
+    ...EMPTY_SESSION_META,
+    patientId: patient.id,
+    patientName: patient.name,
+    docCode: doc.code,
+    docName: doc.name,
+    fieldKey: session.field.key,
+    fieldLabel: `${session.field.label}-${item.itemLabel}`,
+    parentFieldKey: session.field.key,
+    compositionItemKey: item.itemKey,
+    compositionItemLabel: item.itemLabel,
+    fieldValue: session.compositionValues?.[item.itemKey] ?? '',
+    doctorCode: patient.doctor,
+    doctorName: patient.doctor,
+    deptCode: patient.deptName,
+    clientId: 'medai-plugin',
+    detectedAt: new Date().toISOString(),
+    receivedAt: new Date().toISOString(),
+    sessionId: `full-document:${doc.code}:${patient.id}:${session.field.key}:${item.itemKey}`,
     trigger: instruction ? 'input' : 'focus',
   };
 }
@@ -256,7 +557,7 @@ function compactTopMetaItems(topSessions: FieldSession[]) {
   const patientLabels = new Set(['姓名', '性别', '年龄', '住院号']);
   const seen = new Set(patientLabels);
   return topSessions
-    .map((session) => ({ label: session.field.label, value: session.value || '待同步' }))
+    .map((session) => ({ label: session.field.label, value: getSessionDisplayValue(session) || '待同步' }))
     .filter((item) => {
       if (seen.has(item.label)) return false;
       seen.add(item.label);
@@ -267,7 +568,7 @@ function compactTopMetaItems(topSessions: FieldSession[]) {
 function buildWholeDocumentSnapshot(sessions: FieldSession[]) {
   const effectiveSessions = sessions.map((session) => ({
     ...session,
-    value: stripCitations(session.value.trim()),
+    value: stripCitations(getSessionDisplayValue(session).trim()),
   }));
   const writableSessions = effectiveSessions.filter((session) => session.value);
 
@@ -283,14 +584,35 @@ function buildWholeDocumentSnapshot(sessions: FieldSession[]) {
 }
 
 function getMissingWholeRequiredFields(sessions: FieldSession[]): string[] {
-  return sessions
-    .filter((session) => (
+  return sessions.flatMap((session) => {
+    if (session.compositionTemplate) {
+      const values = session.compositionValues ?? createDefaultCompositionValues(session.compositionTemplate);
+      const missingItems = sortedCompositionItems(session.compositionTemplate)
+        .filter((item) => item.required && !stripCitations(valueToText(values[item.itemKey])).trim())
+        .map((item) => `${session.field.label}-${item.itemLabel}`);
+      if (missingItems.length) return missingItems;
+
+      const hasAnyValue = Object.values(values).some((value) => stripCitations(valueToText(value)).trim());
+      if ((
+        session.field.required
+        || WHOLE_REQUIRED_FIELD_KEYS.has(session.field.key)
+        || WHOLE_REQUIRED_FIELD_LABELS.has(session.field.label)
+        || WHOLE_REQUIRED_FIELD_LABELS.has(session.field.section)
+      ) && !hasAnyValue) {
+        return [session.field.label];
+      }
+      return [];
+    }
+
+    return ((
       session.field.required
       || WHOLE_REQUIRED_FIELD_KEYS.has(session.field.key)
       || WHOLE_REQUIRED_FIELD_LABELS.has(session.field.label)
       || WHOLE_REQUIRED_FIELD_LABELS.has(session.field.section)
-    ) && !session.value.trim())
-    .map((session) => session.field.label);
+    ) && !getSessionDisplayValue(session).trim())
+      ? [session.field.label]
+      : [];
+  });
 }
 
 export default function UnifiedDocWorkspace({ doc, patient }: Props) {
@@ -346,54 +668,69 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setLoading(true);
     setError('');
 
-    Promise.all([
-      pluginRuntimeApi.getRuntimeDocTemplate(doc.code),
-      resolveInitialValues(doc.code, patient.id),
-    ]).then(([nextTemplate, values]) => {
-      if (cancelled) return;
-      setTemplate(nextTemplate);
-      const saved = loadDraft(doc.code, patient.id);
-      const nextSessions = mergeLatestDraftsIntoSessions(
-        mergeSavedDraftIntoSessions(
-          buildInitialSessions(nextTemplate, values.values ?? {}),
-          saved?.values,
-          saved?.content,
-        ),
-        useFieldAssistStore.getState().drafts,
-        patient.id,
-        doc.code,
-      );
-      setSessions(nextSessions);
-      setActiveFieldKey(nextSessions.find((session) => !isTopWorkbenchField(session.field))?.field.key ?? '');
-      setVoiceText('');
-      setVoicePanelOpen(false);
-      setRecording(false);
-      setLoading(false);
+    const loadWorkspace = async () => {
+      try {
+        const [nextTemplate, values] = await Promise.all([
+          pluginRuntimeApi.getRuntimeDocTemplate(doc.code),
+          resolveInitialValues(doc.code, patient.id),
+        ]);
+        const compositionTemplates = await loadFieldCompositionTemplates(nextTemplate, doc.code, {
+          doctorCode: patient.doctor,
+          doctorName: patient.doctor,
+          deptCode: patient.deptName,
+          clientId: 'medai-plugin',
+        });
+        if (cancelled) return;
 
-      if (doc.code === 'DOC003') {
-        pluginRuntimeApi.getRoundPendingStatus(patient.id, patient.doctor)
-          .then((res) => {
-            if (cancelled) return;
-            setAssignedSegments(res.assignedSegments ?? []);
-            setUnassignedCount(res.unassignedCount);
-            setUnassignedSegments(res.unassignedSegments);
-            setBannerVisible(res.unassignedCount > 0);
+        setTemplate(nextTemplate);
+        const saved = loadDraft(doc.code, patient.id);
+        const nextSessions = mergeLatestDraftsIntoSessions(
+          attachCompositionTemplates(
+            mergeSavedDraftIntoSessions(
+              buildInitialSessions(nextTemplate, values.values ?? {}),
+              saved?.values,
+              saved?.content,
+            ),
+            compositionTemplates,
+          ),
+          useFieldAssistStore.getState().drafts,
+          patient.id,
+          doc.code,
+        );
+        setSessions(nextSessions);
+        setActiveFieldKey(nextSessions.find((session) => !isTopWorkbenchField(session.field))?.field.key ?? '');
+        setVoiceText('');
+        setVoicePanelOpen(false);
+        setRecording(false);
+        setLoading(false);
 
-          })
-          .catch((err) => {
-            console.error('获取查房状态失败:', err);
-          });
+        if (doc.code === 'DOC003') {
+          pluginRuntimeApi.getRoundPendingStatus(patient.id, patient.doctor)
+            .then((res) => {
+              if (cancelled) return;
+              setAssignedSegments(res.assignedSegments ?? []);
+              setUnassignedCount(res.unassignedCount);
+              setUnassignedSegments(res.unassignedSegments);
+              setBannerVisible(res.unassignedCount > 0);
+
+            })
+            .catch((err) => {
+              console.error('获取查房状态失败:', err);
+            });
+        }
+      } catch (loadError) {
+        if (cancelled) return;
+        setError(loadError instanceof Error ? loadError.message : '文书字段加载失败');
+        setLoading(false);
       }
-    }).catch((loadError) => {
-      if (cancelled) return;
-      setError(loadError instanceof Error ? loadError.message : '文书字段加载失败');
-      setLoading(false);
-    });
+    };
+
+    void loadWorkspace();
 
     return () => {
       cancelled = true;
     };
-  }, [doc.code, patient.id]);
+  }, [doc.code, patient.deptName, patient.doctor, patient.id]);
 
   const handleRefreshRoundSegments = async () => {
     if (doc.code !== 'DOC003' || refreshingSegments) return;
@@ -476,9 +813,71 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     )));
   };
 
+  const updateCompositionItemValue = (fieldKey: string, itemKey: string, nextText: string) => {
+    updateSession(fieldKey, (session) => updateCompositionItemInSession(session, itemKey, nextText));
+  };
+
+  const handleGenerateCompositionItem = async (
+    fieldKey: string,
+    itemKey: string,
+    instruction?: string,
+    transcriptText?: string,
+  ) => {
+    const session = sessions.find((item) => item.field.key === fieldKey);
+    const compositionTemplate = session?.compositionTemplate;
+    const compositionItem = compositionTemplate
+      ? sortedCompositionItems(compositionTemplate).find((item) => item.itemKey === itemKey)
+      : undefined;
+
+    if (!session || !compositionTemplate || !compositionItem) return;
+    if (!isAiCompositionItem(compositionItem)) {
+      message.info(`${compositionItem.itemLabel}为${getCompositionSourceLabel(compositionItem)}项，请直接编辑。`);
+      return;
+    }
+    if (session.compositionGenerating?.[itemKey]) return;
+
+    updateSession(fieldKey, (item) => ({
+      ...item,
+      compositionGenerating: {
+        ...(item.compositionGenerating ?? {}),
+        [itemKey]: true,
+      },
+    }));
+
+    try {
+      const draft = await generateFieldDraft(
+        buildCompositionItemContext(doc, patient, session, compositionItem, instruction),
+        instruction,
+        transcriptText,
+      );
+      addDraft(draft);
+      updateSession(fieldKey, (item) => updateCompositionItemInSession(
+        item,
+        itemKey,
+        draft.generatedText || draft.response.generatedText,
+        draft,
+      ));
+      message.success(`已生成${session.field.label}-${compositionItem.itemLabel}`);
+    } catch (generateError) {
+      message.error(generateError instanceof Error ? generateError.message : '字段生成失败');
+    } finally {
+      updateSession(fieldKey, (item) => ({
+        ...item,
+        compositionGenerating: {
+          ...(item.compositionGenerating ?? {}),
+          [itemKey]: false,
+        },
+      }));
+    }
+  };
+
   const handleGenerate = async (fieldKey: string, instruction?: string, transcriptText?: string) => {
     const session = sessions.find((item) => item.field.key === fieldKey);
     if (!session || session.generating) return;
+    if (session.compositionTemplate) {
+      message.info(`「${session.field.label}」已拆成子项，请在具体子项上生成。`);
+      return;
+    }
     const activeContext = fieldContext?.fieldKey === fieldKey ? fieldContext : null;
 
     updateSession(fieldKey, (item) => ({ ...item, generating: true }));
@@ -563,19 +962,21 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setWholeGenerating(true);
     message.loading({ content: `正在生成${doc.name}全文`, key: 'whole-document' });
     try {
-      const generatedValues = await pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, false);
+      const generatedValues = await pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, false, {
+        doctorCode: patient.doctor,
+        doctorName: patient.doctor,
+        deptCode: patient.deptName,
+        clientId: 'medai-plugin',
+      });
       setSessions((current) => current.map((session) => {
         const nextValue = generatedValues.values?.[session.field.key];
         if (nextValue === undefined) return session;
-        return {
-          ...session,
-          value: valueToText(nextValue),
-        };
+        return applyRuntimeValueToSession(session, nextValue);
       }));
-      const generatedSessions = bodySessions.map((session) => ({
-        ...session,
-        value: valueToText(generatedValues.values?.[session.field.key] ?? session.value),
-      }));
+      const generatedSessions = bodySessions.map((session) => {
+        const nextValue = generatedValues.values?.[session.field.key];
+        return nextValue === undefined ? session : applyRuntimeValueToSession(session, nextValue);
+      });
       const missingFields = getMissingWholeRequiredFields(generatedSessions);
       if (missingFields.length) {
         message.warning({
@@ -661,6 +1062,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const handleVoiceSend = () => {
     if (!activeSession) {
       message.warning('请先选择一个正文编辑字段。');
+      return;
+    }
+    if (activeSession.compositionTemplate) {
+      message.warning(`「${activeSession.field.label}」已拆成子项，请在具体子项上生成。`);
       return;
     }
     if (!voiceText.trim()) {
@@ -785,6 +1190,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       message.warning('请先选择一个正文编辑字段。');
       return;
     }
+    if (activeSession.compositionTemplate) {
+      message.warning(`「${activeSession.field.label}」已拆成子项，请在具体子项上编辑。`);
+      return;
+    }
 
     if (voicePanelOpen) {
       closeVoicePanel();
@@ -905,27 +1314,75 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     // }
 
     updateSession(fieldKey, (item) => ({ ...item, applying: true }));
+    if (session.compositionTemplate) {
+      const applyContext: FieldAssistContext = {
+        ...buildContext(doc, patient, session, '当前组合字段文本回填'),
+        writebackUrl: fieldContext.writebackUrl,
+        sessionId: fieldContext.sessionId,
+        fieldValue: '',
+        selectedText: '',
+        prefix: '',
+        selectionStart: 0,
+        selectionEnd: 0,
+      };
+      const finalText = getSessionDisplayValue(session);
+      const effectiveDraft = session.draft ?? buildSuggestionDraft(applyContext, finalText, '当前组合字段文本回填');
+      try {
+        await applyFieldDraft({
+          context: applyContext,
+          response: effectiveDraft.response,
+          finalText,
+          mode: 'overwrite',
+          doctorName: patient.doctor,
+        });
+        if (!session.draft) {
+          addDraft(effectiveDraft);
+          updateSession(fieldKey, (item) => ({ ...item, draft: effectiveDraft }));
+        }
+        message.success(`已回填${session.field.label}`);
+      } catch (applyError) {
+        message.error(applyError instanceof Error ? applyError.message : '字段回填失败');
+      } finally {
+        updateSession(fieldKey, (item) => ({ ...item, applying: false }));
+      }
+      return;
+    }
+
     const applyContext = voiceBaseContextRef.current?.fieldKey === fieldKey
       ? voiceBaseContextRef.current
       : fieldContext;
+    const targetCompositionItemKey = applyContext.compositionItemKey && session.compositionTemplate
+      ? applyContext.compositionItemKey
+      : '';
+    const targetText = targetCompositionItemKey
+      ? session.compositionValues?.[targetCompositionItemKey] ?? ''
+      : getSessionDisplayValue(session);
     const finalText = applyContext === voiceBaseContextRef.current && finalVoiceDraftRef.current.trim()
       ? finalVoiceDraftRef.current.trim()
-      : session.value;
-    const effectiveDraft = session.draft
-      ?? buildSuggestionDraft(fieldContext, session.value, '当前字段文本回填');
+      : targetText;
+    const existingDraft = targetCompositionItemKey
+      ? session.compositionDrafts?.[targetCompositionItemKey]
+      : session.draft;
+    const effectiveDraft = existingDraft ?? buildSuggestionDraft(applyContext, targetText, '当前字段文本回填');
     try {
       await applyFieldDraft({
         context: applyContext,
         response: effectiveDraft.response,
         finalText,
-        mode: applyContext === voiceBaseContextRef.current
+        mode: targetCompositionItemKey
+          ? 'overwrite'
+          : applyContext === voiceBaseContextRef.current
           ? (applyContext.fieldValue.trim() ? 'replaceSelection' : 'overwrite')
           : undefined,
         doctorName: patient.doctor,
       });
-      if (!session.draft) {
+      if (!existingDraft) {
         addDraft(effectiveDraft);
-        updateSession(fieldKey, (item) => ({ ...item, draft: effectiveDraft }));
+        updateSession(fieldKey, (item) => (
+          targetCompositionItemKey
+            ? updateCompositionItemInSession(item, targetCompositionItemKey, finalText, effectiveDraft)
+            : { ...item, draft: effectiveDraft }
+        ));
       }
     } catch (applyError) {
       message.error(applyError instanceof Error ? applyError.message : '字段回填失败');
@@ -1036,7 +1493,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               <button
                 type="button"
                 onClick={handleWritebackWholeDocument}
-                disabled={wholeGenerating || wholeWriting || !sessions.some((session) => session.value.trim())}
+                disabled={wholeGenerating || wholeWriting || !sessions.some((session) => getSessionDisplayValue(session).trim())}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#1E3A8A] px-3 text-[12px] font-bold text-white hover:bg-[#172554] disabled:opacity-50"
               >
                 {wholeWriting ? <Loading3QuartersOutlined className="animate-spin" /> : <UploadOutlined />}
@@ -1049,9 +1506,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         <section className="min-h-0 flex-1 overflow-y-auto px-4 py-3 pb-3">
           <div className="mx-auto flex max-w-[980px] flex-col gap-4">
             {bodySessions.map((session) => {
-              const hasDraft = Boolean(session.draft);
-              const canWriteback = Boolean(hasDraft && fieldContext?.fieldKey === session.field.key);
-              const generatedAt = formatTime(session.draft?.createdAt);
+              const compositionTemplate = session.compositionTemplate;
+              const latestCompositionDraft = getLatestCompositionDraft(session);
+              const hasDraft = Boolean(session.draft || latestCompositionDraft);
+              const canWriteback = Boolean(fieldContext?.fieldKey === session.field.key);
+              const generatedAt = formatTime(session.draft?.createdAt ?? latestCompositionDraft?.createdAt);
+              const displayValue = getSessionDisplayValue(session);
               const active = activeSession?.field.key === session.field.key;
               return (
                 <article
@@ -1075,17 +1535,24 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 text-[12px] font-extrabold text-slate-800">
                         <span className="truncate">{session.field.label}</span>
+                        {compositionTemplate ? (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">组合</span>
+                        ) : null}
                         {active ? (
                           <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-[#1E3A8A]">当前编辑</span>
                         ) : null}
                       </div>
                       <div className="mt-0.5 text-[10px] font-medium text-slate-400">
                         {generatedAt ? `最近生成 ${generatedAt}` : ''}
-                        {fieldContext?.fieldKey === session.field.key ? ' HIS当前书写字段' : ''}
+                        {fieldContext?.fieldKey === session.field.key
+                          ? fieldContext.compositionItemLabel
+                            ? ` HIS当前书写子项：${fieldContext.compositionItemLabel}`
+                            : ' HIS当前书写字段'
+                          : ''}
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                      {!session.field.disableRegenerate && (
+                      {!compositionTemplate && !session.field.disableRegenerate && (
                         <button
                           type="button"
                           onClick={(event) => {
@@ -1111,26 +1578,95 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                         title={canWriteback ? '回填到 CS 当前字段' : '点击查看回填条件'}
                       >
                         {session.applying ? <Loading3QuartersOutlined className="animate-spin" /> : <UploadOutlined />}
-                        回填
+                        {compositionTemplate ? '回填全部' : '回填'}
                       </button>
                     </div>
                   </div>
 
                   <div className="space-y-3 px-3 py-3">
-                    <div className="max-w-[92%] rounded-lg rounded-bl-sm border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800">
-                      {session.value ? (
-                        <div className="whitespace-pre-wrap">
-                          {session.draft
-                            ? renderTextWithCitations(
-                              session.value || session.draft.generatedText || session.draft.response.generatedText || '',
-                              session.draft.response.evidenceSummary,
-                            )
-                            : session.value}
-                        </div>
-                      ) : (
-                        <span className="text-slate-400">这个字段还没有内容。</span>
-                      )}
-                    </div>
+                    {compositionTemplate ? (
+                      <div className="space-y-2">
+                        {sortedCompositionItems(compositionTemplate).map((item, index) => {
+                          const itemValue = session.compositionValues?.[item.itemKey] ?? '';
+                          const itemDraft = session.compositionDrafts?.[item.itemKey];
+                          const itemGenerating = Boolean(session.compositionGenerating?.[item.itemKey]);
+                          const itemGeneratedAt = formatTime(itemDraft?.createdAt);
+                          const itemActive = fieldContext?.fieldKey === session.field.key
+                            && fieldContext?.compositionItemKey === item.itemKey;
+                          const canGenerateItem = isAiCompositionItem(item) && item.renderRule?.disableRegenerate !== true;
+                          return (
+                            <div
+                              key={item.itemKey}
+                              className={[
+                                'rounded-md border bg-[#FBFDFF] px-3 py-2',
+                                itemActive ? 'border-blue-200 ring-1 ring-blue-100' : 'border-slate-200',
+                              ].join(' ')}
+                            >
+                              <div className="mb-1.5 flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                                    <span>{index + 1}. {item.itemLabel}</span>
+                                    {item.required ? <span className="text-rose-500">*</span> : null}
+                                    {itemActive ? (
+                                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-[#1E3A8A]">HIS当前子项</span>
+                                    ) : null}
+                                  </div>
+                                  {itemGeneratedAt ? (
+                                    <div className="mt-0.5 text-[10px] font-medium text-slate-400">
+                                      最近生成 {itemGeneratedAt}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                {canGenerateItem ? (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setActiveFieldKey(session.field.key);
+                                      void handleGenerateCompositionItem(
+                                        session.field.key,
+                                        item.itemKey,
+                                        `生成${session.field.label}-${item.itemLabel}`,
+                                      );
+                                    }}
+                                    disabled={itemGenerating}
+                                    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                                  >
+                                    {itemGenerating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}
+                                    {itemDraft ? '重新生成' : '生成'}
+                                  </button>
+                                ) : null}
+                              </div>
+                              <textarea
+                                value={itemValue}
+                                onChange={(event) => updateCompositionItemValue(session.field.key, item.itemKey, event.target.value)}
+                                readOnly={item.editable === false}
+                                className={[
+                                  'min-h-[72px] w-full resize-y rounded-md border border-slate-200 px-3 py-2 text-xs leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#1E3A8A]',
+                                  item.editable === false ? 'bg-slate-50 text-slate-500' : 'bg-white',
+                                ].join(' ')}
+                                placeholder="待填写"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="max-w-[92%] rounded-lg rounded-bl-sm border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800">
+                        {displayValue ? (
+                          <div className="whitespace-pre-wrap">
+                            {session.draft
+                              ? renderTextWithCitations(
+                                displayValue || session.draft.generatedText || session.draft.response.generatedText || '',
+                                session.draft.response.evidenceSummary,
+                              )
+                              : displayValue}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">这个字段还没有内容。</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </article>
               );
@@ -1218,7 +1754,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
             <button
               type="button"
               onClick={handleToggleRecording}
-              disabled={!activeSession}
+              disabled={!activeSession || Boolean(activeSession.compositionTemplate)}
               className={[
                 'inline-flex h-11 min-w-[88px] items-center justify-center gap-2 rounded-md border px-4 text-sm font-bold disabled:opacity-50',
                 recording
@@ -1234,7 +1770,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
             <button
               type="button"
               onClick={handleVoiceSend}
-              disabled={!activeSession || !voicePanelOpen || !voiceText.trim() || activeSession.generating}
+              disabled={!activeSession || Boolean(activeSession.compositionTemplate) || !voicePanelOpen || !voiceText.trim() || activeSession.generating}
               className="inline-flex h-11 min-w-[92px] items-center justify-center gap-2 rounded-md bg-[#1E3A8A] px-4 text-sm font-bold text-white hover:bg-[#172554] disabled:opacity-50"
             >
               {activeSession?.generating ? <Loading3QuartersOutlined className="animate-spin" /> : <SendOutlined />}

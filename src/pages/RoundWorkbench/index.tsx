@@ -89,6 +89,9 @@ interface AsrServerMessage {
   text?: string;
   is_final?: boolean;
   speaker?: string;
+  speaker_name?: string;
+  speaker_title?: string;
+  speaker_type?: string;
 }
 
 interface CurrentPatientState {
@@ -170,7 +173,7 @@ export default function RoundWorkbench() {
   const sendFinalTranscript = (text: string, speaker?: string, timestamp = Date.now()) => {
     if (!text.trim()) return;
 
-    setLiveSubtitle(text);
+    setLiveSubtitle(speaker ? `${speaker}：${text}` : text);
     finalVoiceDraftRef.current = `${finalVoiceDraftRef.current}${text}`;
 
     if (roundWsRef.current?.readyState === WebSocket.OPEN) {
@@ -280,9 +283,13 @@ export default function RoundWorkbench() {
       mediaStreamRef.current = stream;
 
       // 1.2 初始化与 ASR 服务的 WebSocket
+      const asrParams = new URLSearchParams({ mode: ASR_MODE });
+      if (roundContext.deptCode) {
+        asrParams.set('dept_code', roundContext.deptCode);
+      }
       const asrWsUrl = ASR_WS_URL.includes('?') 
-        ? `${ASR_WS_URL}&mode=${ASR_MODE}`
-        : `${ASR_WS_URL}?mode=${ASR_MODE}`;
+        ? `${ASR_WS_URL}&${asrParams.toString()}`
+        : `${ASR_WS_URL}?${asrParams.toString()}`;
       const asrWs = new WebSocket(asrWsUrl);
       asrWsRef.current = asrWs;
 
