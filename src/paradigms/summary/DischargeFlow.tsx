@@ -213,6 +213,16 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     }),
     [patient.age, patient.bedNo, patient.diagnosis, patient.gender, patient.id, patient.name],
   );
+  /** 医生/科室上下文：后端据此匹配 doctor/dept 级组合字段模板与配置默认值 */
+  const runtimeContext = useMemo(
+    () => ({
+      doctorCode: patient.doctor,
+      doctorName: patient.doctor,
+      deptCode: patient.deptName,
+      clientId: 'medai-plugin',
+    }),
+    [patient.doctor, patient.deptName],
+  );
   const [runtimeState, setRuntimeState] = useState<DischargeRuntimeState | null>(null);
   const [sections, setSections] = useState<ClinicalSection[]>([]);
   const [acceptedDiagnoses, setAcceptedDiagnoses] = useState<IcdItem[]>([]);
@@ -333,7 +343,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
         applyRuntimeState(runtime, { restoreDraft: true });
         setRuntimeLoading(false);
         setRuntimeValuesLoading(true);
-        return loadDischargeRuntimeValues(doc.code, patient.id, patientBrief, runtime.template, { skipGeneration: true });
+        return loadDischargeRuntimeValues(doc.code, patient.id, patientBrief, runtime.template, { skipGeneration: true, context: runtimeContext });
       })
       .then((runtime) => {
         if (cancelled || !runtime) return;
@@ -361,6 +371,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     patient.id,
     patientBrief,
     reloadToken,
+    runtimeContext,
   ]);
 
   const updateSection = useCallback((sectionKey: string, text: string) => {
@@ -484,7 +495,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
 
     try {
       clearDischargeRuntimeCache(doc.code, patient.id);
-      const runtime = await loadDischargeRuntime(doc.code, patient.id, patientBrief, { forceRefresh: true });
+      const runtime = await loadDischargeRuntime(doc.code, patient.id, patientBrief, { forceRefresh: true, context: runtimeContext });
       applyRuntimeState(runtime, { restoreDraft: false });
       bumpSectionResetKeys(runtime.sections.map((section) => section.key));
       message.success('已重新生成全部字段。');
@@ -503,6 +514,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     patient.id,
     patientBrief,
     resetEvidenceWorkspace,
+    runtimeContext,
     runtimeRegenerating,
     runtimeValuesLoading,
   ]);
@@ -530,7 +542,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
 
     setRegeneratingSectionKey(sectionKey);
     try {
-      const fieldState = await loadDischargeRuntimeField(doc.code, patient.id, sectionKey, runtimeState.template);
+      const fieldState = await loadDischargeRuntimeField(doc.code, patient.id, sectionKey, runtimeState.template, runtimeContext);
       const generatedValue = fieldState.values.values?.[sectionKey];
       setRuntimeState((current) => {
         if (!current) return current;
@@ -574,6 +586,7 @@ export default function DischargeFlow({ doc }: ParadigmProps) {
     mismatch,
     patient.id,
     regeneratingSectionKey,
+    runtimeContext,
     runtimeRegenerating,
     runtimeState,
     runtimeValuesLoading,

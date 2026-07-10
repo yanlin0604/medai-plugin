@@ -23,6 +23,7 @@ export async function generateFieldDraft(
     parentFieldKey: context.parentFieldKey,
     compositionItemKey: context.compositionItemKey,
     compositionItemLabel: context.compositionItemLabel,
+    compositionTemplateId: context.compositionTemplateId,
     doctorCode: context.doctorCode,
     doctorName: context.doctorName,
     deptCode: context.deptCode,

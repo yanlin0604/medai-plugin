@@ -219,7 +219,10 @@ describe('bubbleDischargeWriteback', () => {
       'DOC010',
       patient.id,
       expect.objectContaining({ admissionNo: patient.id }),
-      { forceRefresh: true },
+      expect.objectContaining({
+        forceRefresh: true,
+        context: expect.objectContaining({ doctorCode: patient.doctor, deptCode: patient.deptName }),
+      }),
     );
   });
 

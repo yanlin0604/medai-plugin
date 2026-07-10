@@ -355,24 +355,13 @@ export async function resolveRuntimeValues(
   skipGeneration = false,
   context: Omit<RuntimeDocValueGenerationRequest, 'patientIdHis' | 'skipGeneration'> = {},
 ): Promise<RuntimeDocValues> {
-  try {
-    return await requestRuntime<RuntimeDocValueBundleDto>(
-      http.post(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
-        patientIdHis,
-        skipGeneration,
-        ...context,
-      }),
-    );
-  } catch {
-    return {
-      docCode,
+  return requestRuntime<RuntimeDocValueBundleDto>(
+    http.post(`${RUNTIME_BASE_PATH}/documents/${encodePath(docCode)}/values`, {
       patientIdHis,
-      values: {},
-      icdCandidates: [],
-      pulledSources: [],
-      resolvedAt: new Date().toISOString(),
-    };
-  }
+      skipGeneration,
+      ...context,
+    }),
+  );
 }
 
 export async function getEvidence(request: RuntimeEvidenceQueryRequest): Promise<RuntimeEvidenceBundleDto> {

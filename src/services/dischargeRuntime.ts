@@ -32,8 +32,18 @@ export interface DischargeRuntimeFieldState {
 const MAX_META_CELLS_PER_ROW = 3;
 const runtimeCache = new Map<string, Promise<DischargeRuntimeState>>();
 
+/** 医生/科室上下文：后端据此匹配 doctor/dept/hospital 级组合字段模板，缺省时只能命中 system 级 */
+export interface DischargeRuntimeContext {
+  doctorCode?: string;
+  doctorName?: string;
+  deptCode?: string;
+  hospitalCode?: string;
+  clientId?: string;
+}
+
 interface LoadDischargeRuntimeOptions {
   forceRefresh?: boolean;
+  context?: DischargeRuntimeContext;
 }
 
 function runtimeCacheKey(docCode: string, patientIdHis: string): string {
@@ -70,7 +80,7 @@ export async function loadDischargeRuntime(
     const skipGeneration = !options.forceRefresh && hasDraft(docCode, patientIdHis);
     promise = Promise.all([
       pluginRuntimeApi.getRuntimeTemplate(docCode),
-      pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, skipGeneration),
+      pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, skipGeneration, options.context ?? {}),
     ])
       .then(([template, values]) => buildDischargeRuntime(template, values, patient))
       .catch((error) => {
@@ -97,9 +107,11 @@ export async function loadDischargeRuntimeValues(
   patientIdHis: string,
   patient: PatientBrief,
   template: RuntimeDocTemplateDto,
-  options: { skipGeneration?: boolean } = {},
+  options: { skipGeneration?: boolean; context?: DischargeRuntimeContext } = {},
 ): Promise<DischargeRuntimeState> {
-  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, options.skipGeneration);
+  const values = await pluginRuntimeApi.resolveRuntimeValues(
+    docCode, patientIdHis, options.skipGeneration, options.context ?? {},
+  );
   const runtime = buildDischargeRuntime(template, values, patient);
   runtimeCache.set(runtimeCacheKey(docCode, patientIdHis), Promise.resolve(runtime));
   return runtime;
@@ -110,8 +122,9 @@ export async function loadDischargeRuntimeField(
   patientIdHis: string,
   fieldKey: string,
   template: RuntimeDocTemplateDto,
+  context: DischargeRuntimeContext = {},
 ): Promise<DischargeRuntimeFieldState> {
-  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, false);
+  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, false, context);
   return buildDischargeRuntimeField(template, values, fieldKey);
 }
 
@@ -122,18 +135,11 @@ export function buildDischargeRuntime(
 ): DischargeRuntimeState {
   validateRuntimeConfig(template, values);
   const sortedFields = [...template.fields].sort(byFieldOrder);
-  console.log('[dischargeRuntime] sortedFields:', sortedFields.map(f => ({
-    fieldKey: f.fieldKey,
-    fieldLabel: f.fieldLabel,
-    renderRule: f.renderRule,
-    metaSlot: isDischargeMetaFieldKey(f.fieldKey) ? 'date' : undefined
-  })));
   const fieldValues = values.values ?? {};
   const sections = applyDischargeFieldAutomation(
     sortedFields.map((field) => toClinicalSection(field, fieldValues[field.fieldKey])),
   );
   const metaFields = sortedFields.filter(isMetaField);
-  console.log('[dischargeRuntime] metaFields:', metaFields.map(f => f.fieldKey));
   const metaFieldKeys = metaFields.map((field) => field.fieldKey);
   const readOnlyHints = Object.fromEntries(
     sortedFields
@@ -274,10 +280,6 @@ function toClinicalCalculation(calculation: RuntimeFieldCalculationDto | undefin
   };
 }
 
-function isDischargeMetaFieldKey(fieldKey: string): boolean {
-  return FORCED_META_FIELD_KEYS.has(fieldKey);
-}
-
 export function applyDischargeFieldAutomation(sections: ClinicalSection[]): ClinicalSection[] {
   const values = Object.fromEntries(sections.map((section) => [section.key, section.text]));
   return sections.map((section) => {
@@ -296,7 +298,11 @@ function calculateSectionText(
   return `${days}${calculation.suffix ?? '天'}`;
 }
 
-export function calculateHospitalDays(startDate: string, endDate: string, minDays = 1): number | null {
+export function calculateHospitalDays(
+  startDate: string | undefined,
+  endDate: string | undefined,
+  minDays = 1,
+): number | null {
   const start = parseDateOnly(startDate);
   const end = parseDateOnly(endDate);
   if (!start || !end) return null;
@@ -305,7 +311,8 @@ export function calculateHospitalDays(startDate: string, endDate: string, minDay
   return Math.max(minDays, diffDays);
 }
 
-function parseDateOnly(value: string): Date | null {
+function parseDateOnly(value: string | undefined | null): Date | null {
+  if (typeof value !== 'string') return null;
   const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
   const year = Number(match[1]);

@@ -212,6 +212,8 @@ export interface RuntimeFieldCompletionRequest {
   parentFieldKey?: string;
   compositionItemKey?: string;
   compositionItemLabel?: string;
+  /** 组合模板ID（可选：指定用哪个组合模板；不传按 scope 优先级自动选择） */
+  compositionTemplateId?: number;
   doctorCode?: string;
   doctorName?: string;
   deptCode?: string;
@@ -334,6 +336,8 @@ export interface RuntimeDocValueGenerationRequest {
   deptCode?: string;
   hospitalCode?: string;
   clientId?: string;
+  /** 字段级组合模板选择（fieldKey → templateId）；缺失自动选择，-1 表示不使用组合模板 */
+  compositionTemplateIds?: Record<string, number>;
 }
 
 export interface RuntimeFieldValueDto {

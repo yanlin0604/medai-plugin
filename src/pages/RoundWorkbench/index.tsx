@@ -120,15 +120,20 @@ export default function RoundWorkbench() {
   const [currentPatient, setCurrentPatient] = useState<CurrentPatientState | null>(null);
   const [liveSubtitle, setLiveSubtitle] = useState('');
   const [doctorName, setDoctorName] = useState('医生');
+  const [doctorTitle, setDoctorTitle] = useState('');
   const [deptName, setDeptName] = useState('');
 
   useEffect(() => {
     getHostSession().then((session) => {
       if (session && session.doctorName) {
-        setDoctorName(session.doctorName);
+        const parts = session.doctorName.trim().split(/\s+/);
+        setDoctorName(parts[0]);
+        setDoctorTitle(parts[1] || '');
         setDeptName(session.deptName || '');
       } else if (loggedPatient && loggedPatient.doctor) {
-        setDoctorName(loggedPatient.doctor);
+        const parts = loggedPatient.doctor.trim().split(/\s+/);
+        setDoctorName(parts[0]);
+        setDoctorTitle(parts[1] || '');
         setDeptName(loggedPatient.deptName || '');
       }
     });
@@ -241,10 +246,8 @@ export default function RoundWorkbench() {
             bedNo: patient.bedNo,
           })),
           pre_filled_fields: {},
-          doctor_code: loggedPatient?.doctor || doctorName,
-          doctor_name: doctorName || loggedPatient?.doctor || '',
-          dept_code: roundContext.deptCode || roundContext.deptName || '',
-          hospital_code: '',
+          doctor_name: doctorName,
+          doctor_title: doctorTitle,
         }));
 
         if (ROUND_MOCK_ASR_ENABLED) {

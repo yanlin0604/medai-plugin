@@ -1,4 +1,4 @@
-import type {
+ import type {
   RuntimeEvidenceWritebackMode,
   RuntimeFieldCompletionResponse,
 } from '../pluginRuntimeTypes';
@@ -23,6 +23,7 @@ export interface FieldAssistContext {
   parentFieldKey?: string;
   compositionItemKey?: string;
   compositionItemLabel?: string;
+  compositionTemplateId?: number;
   doctorCode?: string;
   doctorName?: string;
   deptCode?: string;
@@ -81,6 +82,7 @@ export function getFieldAssistSnapshotKey(context: FieldAssistContext) {
     context.parentFieldKey ?? '',
     context.compositionItemKey ?? '',
     context.compositionItemLabel ?? '',
+    context.compositionTemplateId ?? '',
     context.fieldValue,
     context.selectedText,
     context.prefix,

@@ -1,6 +1,10 @@
 import { saveDraft } from './draftService';
 import { submitDocument } from './emsBridge';
-import { loadDischargeRuntime, type DischargeRuntimeState } from './dischargeRuntime';
+import {
+  loadDischargeRuntime,
+  type DischargeRuntimeContext,
+  type DischargeRuntimeState,
+} from './dischargeRuntime';
 import { buildSubmitSnapshot, resolvePatientBrief } from './documentFlow';
 import { backendRuntimeVersionAdapter, type DocumentVersionAdapter } from './versionService';
 import type { DocumentPayload, FieldValue, Patient, SubmitResult } from './types';
@@ -66,6 +70,16 @@ export interface BubbleDischargeWritebackResult extends SubmitResult {
 
 function formatPatientInfo(patient: Patient): string {
   return `姓名：${patient.name}；性别：${patient.gender}；年龄：${patient.age}；床号：${patient.bedNo}；住院号：${patient.id}；科室：${patient.deptName}；入院日期：${patient.admissionDate}；主管医生：${patient.doctor}；诊断：${patient.diagnosis}`;
+}
+
+/** 医生/科室上下文：后端据此匹配 doctor/dept 级组合字段模板与配置默认值 */
+function toRuntimeContext(patient: Patient): DischargeRuntimeContext {
+  return {
+    doctorCode: patient.doctor,
+    doctorName: patient.doctor,
+    deptCode: patient.deptName,
+    clientId: 'medai-plugin',
+  };
 }
 
 function uniqueOrder(...groups: Array<Array<string | undefined>>): string[] {
@@ -153,7 +167,10 @@ export async function buildBubbleDischargeDraft(
       DISCHARGE_DOC_CODE,
       patient.id,
       resolvePatientBrief(patient),
-      deps.forceRefresh ? { forceRefresh: true } : undefined,
+      {
+        ...(deps.forceRefresh ? { forceRefresh: true } : {}),
+        context: toRuntimeContext(patient),
+      },
     );
     return buildRuntimeDraft(patient, docName, runtime);
   } catch (error) {

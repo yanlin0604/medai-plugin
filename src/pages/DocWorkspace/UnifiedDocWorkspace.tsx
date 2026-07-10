@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AudioOutlined,
@@ -13,6 +14,7 @@ import ParadigmShell from '../../paradigms/ParadigmShell';
 import type { DocDefinition } from '../../config/docRegistry';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
 import type {
+  RuntimeFieldCompositionDto,
   RuntimeFieldCompositionItemDto,
   RuntimeFieldCompositionTemplateDto,
 } from '../../services/pluginRuntimeTypes';
@@ -46,6 +48,7 @@ interface FieldSession {
   compositionGenerating?: Record<string, boolean>;
   generating: boolean;
   applying: boolean;
+  compositionTemplates?: RuntimeFieldCompositionTemplateDto[];
 }
 
 interface AsrServerMessage {
@@ -71,6 +74,8 @@ const EMPTY_SESSION_META = {
 } as const;
 const FIELD_CONTEXT_POLL_MS = 1800;
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
+// 演示模式：跳过一键回填的必填字段校验（生产环境不要设置该变量）
+const SKIP_WRITEBACK_VALIDATION = String(import.meta.env.VITE_SKIP_WRITEBACK_VALIDATION ?? '').trim() === '1';
 const ASR_MODE = '2';
 const DOC003_ROUND_FIELD_KEYS = ['subjective', 'objective', 'assessment', 'plan'];
 
@@ -199,8 +204,16 @@ function formatCompositionFieldValue(
   template: RuntimeFieldCompositionTemplateDto,
   values: Record<string, string>,
 ): string {
-  return sortedCompositionItems(template)
-    .map((item) => normalizeCompositionItemOutput(values[item.itemKey]))
+  const items = sortedCompositionItems(template);
+  return items
+    .map((item, index) => {
+      const lineTemplate = item.lineTemplate || '{{index}}. {{label}}：{{value}}';
+      const val = normalizeCompositionItemOutput(values[item.itemKey]);
+      return lineTemplate
+        .replace('{{index}}', String(index + 1))
+        .replace('{{label}}', item.itemLabel || '')
+        .replace('{{value}}', val);
+    })
     .join('\n');
 }
 
@@ -214,14 +227,26 @@ function getSessionDisplayValue(session: FieldSession): string {
 
 function attachCompositionTemplate(
   session: FieldSession,
-  compositionTemplate: RuntimeFieldCompositionTemplateDto,
+  composition: RuntimeFieldCompositionDto,
+  docCode: string,
 ): FieldSession {
-  const compositionValues = parseCompositionFieldValue(compositionTemplate, session.value);
+  const cacheKey = `medai:composition-choice:${docCode}:${session.field.key}`;
+  const cachedTemplateId = localStorage.getItem(cacheKey);
+
+  let selectedTemplate = composition.templates.find(t => String(t.templateId) === cachedTemplateId);
+  if (!selectedTemplate) {
+    selectedTemplate = composition.templates.find(t => t.templateId === composition.selectedTemplateId)
+      || composition.templates.find(t => t.defaultTemplate)
+      || composition.templates[0];
+  }
+
+  const compositionValues = parseCompositionFieldValue(selectedTemplate, session.value);
   return {
     ...session,
-    compositionTemplate,
+    compositionTemplate: selectedTemplate,
     compositionValues,
-    value: formatCompositionFieldValue(compositionTemplate, compositionValues),
+    compositionTemplates: composition.templates,
+    value: formatCompositionFieldValue(selectedTemplate, compositionValues),
   };
 }
 
@@ -315,29 +340,29 @@ async function loadFieldCompositionTemplates(
     deptCode?: string;
     clientId?: string;
   },
-): Promise<Map<string, RuntimeFieldCompositionTemplateDto>> {
+): Promise<Map<string, RuntimeFieldCompositionDto>> {
   const entries = await Promise.all(template.fields.map(async (field) => {
     try {
       const composition = await pluginRuntimeApi.getFieldComposition(docCode, field.key, params);
-      const compositionTemplate = composition.templates?.[0];
-      if (!compositionTemplate || !compositionTemplate.items?.length) return null;
-      return [field.key, compositionTemplate] as const;
+      if (!composition.templates || !composition.templates.length) return null;
+      return [field.key, composition] as const;
     } catch {
       return null;
     }
   }));
 
-  return new Map(entries.filter((entry): entry is readonly [string, RuntimeFieldCompositionTemplateDto] => Boolean(entry)));
+  return new Map(entries.filter((entry): entry is readonly [string, RuntimeFieldCompositionDto] => Boolean(entry)));
 }
 
 function attachCompositionTemplates(
   sessions: FieldSession[],
-  templatesByFieldKey: Map<string, RuntimeFieldCompositionTemplateDto>,
+  templatesByFieldKey: Map<string, RuntimeFieldCompositionDto>,
+  docCode: string,
 ): FieldSession[] {
   if (!templatesByFieldKey.size) return sessions;
   return sessions.map((session) => {
-    const compositionTemplate = templatesByFieldKey.get(session.field.key);
-    return compositionTemplate ? attachCompositionTemplate(session, compositionTemplate) : session;
+    const composition = templatesByFieldKey.get(session.field.key);
+    return composition ? attachCompositionTemplate(session, composition, docCode) : session;
   });
 }
 
@@ -471,6 +496,7 @@ function buildContext(
     fieldKey: session.field.key,
     fieldLabel: session.field.label,
     fieldValue: getSessionDisplayValue(session),
+    compositionTemplateId: session.compositionTemplate?.templateId ?? undefined,
     doctorCode: patient.doctor,
     doctorName: patient.doctor,
     deptCode: patient.deptName,
@@ -500,6 +526,7 @@ function buildCompositionItemContext(
     parentFieldKey: session.field.key,
     compositionItemKey: item.itemKey,
     compositionItemLabel: item.itemLabel,
+    compositionTemplateId: session.compositionTemplate?.templateId ?? undefined,
     fieldValue: session.compositionValues?.[item.itemKey] ?? '',
     doctorCode: patient.doctor,
     doctorName: patient.doctor,
@@ -692,6 +719,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               saved?.content,
             ),
             compositionTemplates,
+            doc.code,
           ),
           useFieldAssistStore.getState().drafts,
           patient.id,
@@ -815,6 +843,52 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
   const updateCompositionItemValue = (fieldKey: string, itemKey: string, nextText: string) => {
     updateSession(fieldKey, (session) => updateCompositionItemInSession(session, itemKey, nextText));
+  };
+
+  const handleSwitchCompositionTemplate = (fieldKey: string, templateId: number) => {
+    const session = sessions.find((item) => item.field.key === fieldKey);
+    if (!session || !session.compositionTemplates) return;
+
+    const newTemplate = session.compositionTemplates.find((t) => t.templateId === templateId);
+    if (!newTemplate) return;
+
+    const confirmSwitch = () => {
+      const keepContent = window.confirm(
+        '是否保留已填写的子项内容？\n点击“确定”保留相同名称的子项值，点击“取消”将使用新模板默认值重置。'
+      );
+
+      setSessions((current) => current.map((item) => {
+        if (item.field.key !== fieldKey) return item;
+
+        let nextValues: Record<string, string>;
+        if (keepContent) {
+          nextValues = { ...createDefaultCompositionValues(newTemplate) };
+          const oldItems = item.compositionTemplate ? sortedCompositionItems(item.compositionTemplate) : [];
+          const newItems = sortedCompositionItems(newTemplate);
+          
+          newItems.forEach(newItem => {
+            const matchedOldItem = oldItems.find(oi => oi.itemKey === newItem.itemKey || oi.itemLabel === newItem.itemLabel);
+            if (matchedOldItem && item.compositionValues?.[matchedOldItem.itemKey]) {
+              nextValues[newItem.itemKey] = item.compositionValues[matchedOldItem.itemKey];
+            }
+          });
+        } else {
+          nextValues = createDefaultCompositionValues(newTemplate);
+        }
+
+        const cacheKey = `medai:composition-choice:${doc.code}:${fieldKey}`;
+        localStorage.setItem(cacheKey, String(templateId));
+
+        return {
+          ...item,
+          compositionTemplate: newTemplate,
+          compositionValues: nextValues,
+          value: formatCompositionFieldValue(newTemplate, nextValues),
+        };
+      }));
+    };
+
+    confirmSwitch();
   };
 
   const handleGenerateCompositionItem = async (
@@ -962,11 +1036,19 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setWholeGenerating(true);
     message.loading({ content: `正在生成${doc.name}全文`, key: 'whole-document' });
     try {
+      const compositionTemplateIds: Record<string, number> = {};
+      sessions.forEach((s) => {
+        if (s.compositionTemplate && s.compositionTemplate.templateId != null) {
+          compositionTemplateIds[s.field.key] = s.compositionTemplate.templateId;
+        }
+      });
+
       const generatedValues = await pluginRuntimeApi.resolveRuntimeValues(doc.code, patient.id, false, {
         doctorCode: patient.doctor,
         doctorName: patient.doctor,
         deptCode: patient.deptName,
         clientId: 'medai-plugin',
+        compositionTemplateIds,
       });
       setSessions((current) => current.map((session) => {
         const nextValue = generatedValues.values?.[session.field.key];
@@ -1000,15 +1082,17 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const handleWritebackWholeDocument = async () => {
     if (wholeGenerating || wholeWriting) return;
     const snapshot = buildWholeDocumentSnapshot(sessions);
-    // if (!snapshot.content.trim()) {
-    //   message.warning('请先生成或填写病历内容，再执行一键回填。');
-    //   return;
-    // }
-    // const missingFields = getMissingWholeRequiredFields(bodySessions);
-    // if (missingFields.length) {
-    //   message.warning(`请先生成或填写：${missingFields.join('、')}，再执行一键回填。`);
-    //   return;
-    // }
+    if (!SKIP_WRITEBACK_VALIDATION) {
+      if (!snapshot.content.trim()) {
+        message.warning('请先生成或填写病历内容，再执行一键回填。');
+        return;
+      }
+      const missingFields = getMissingWholeRequiredFields(bodySessions);
+      if (missingFields.length) {
+        message.warning(`请先生成或填写：${missingFields.join('、')}，再执行一键回填。`);
+        return;
+      }
+    }
 
     setWholeWriting(true);
     message.loading({ content: `正在回填${doc.name}全文`, key: 'whole-writeback' });
@@ -1308,10 +1392,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       message.warning(`请先在 CS 端聚焦「${session.field.label}」字段，再执行回填。`);
       return;
     }
-    // if (!session.draft && !session.value.trim()) {
-    //   message.warning(`请先生成或填写「${session.field.label}」内容，再执行回填。`);
-    //   return;
-    // }
+    if (!SKIP_WRITEBACK_VALIDATION && !session.draft && !session.value.trim()) {
+      message.warning(`请先生成或填写「${session.field.label}」内容，再执行回填。`);
+      return;
+    }
 
     updateSession(fieldKey, (item) => ({ ...item, applying: true }));
     if (session.compositionTemplate) {
@@ -1586,6 +1670,22 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                   <div className="space-y-3 px-3 py-3">
                     {compositionTemplate ? (
                       <div className="space-y-2">
+                        {session.compositionTemplates && session.compositionTemplates.length > 1 && (
+                          <div className="flex items-center gap-2 pb-2 border-b border-dashed border-slate-100 mb-2">
+                            <span className="text-[11px] font-bold text-slate-500 shrink-0">组合模板：</span>
+                            <select
+                              value={compositionTemplate.templateId ?? ''}
+                              onChange={(event) => handleSwitchCompositionTemplate(session.field.key, Number(event.target.value))}
+                              className="h-7 max-w-[200px] rounded border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-700 outline-none focus:border-[#1E3A8A]"
+                            >
+                              {session.compositionTemplates.map((t) => (
+                                <option key={t.templateId ?? ''} value={t.templateId ?? ''}>
+                                  {t.templateName} {t.defaultTemplate ? ' (默认)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         {sortedCompositionItems(compositionTemplate).map((item, index) => {
                           const itemValue = session.compositionValues?.[item.itemKey] ?? '';
                           const itemDraft = session.compositionDrafts?.[item.itemKey];
