@@ -1670,7 +1670,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                   <div className="space-y-3 px-3 py-3">
                     {compositionTemplate ? (
                       <div className="space-y-2">
-                        {session.compositionTemplates && session.compositionTemplates.length > 1 && (
+                        {session.compositionTemplates && session.compositionTemplates.length >= 1 && (
                           <div className="flex items-center gap-2 pb-2 border-b border-dashed border-slate-100 mb-2">
                             <span className="text-[11px] font-bold text-slate-500 shrink-0">组合模板：</span>
                             <select
