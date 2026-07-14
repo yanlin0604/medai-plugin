@@ -72,6 +72,10 @@ pub struct FieldAssistContext {
     pub field_key: String,
     pub field_label: String,
     #[serde(default)]
+    pub data_element_code: Option<String>,
+    #[serde(default)]
+    pub data_element_name: Option<String>,
+    #[serde(default)]
     pub parent_field_key: Option<String>,
     #[serde(default)]
     pub composition_item_key: Option<String>,

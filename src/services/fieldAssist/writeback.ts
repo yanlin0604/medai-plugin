@@ -67,6 +67,8 @@ export function buildFieldWritebackPayload({
     patientId: context.patientId,
     docCode: context.docCode,
     fieldKey: context.fieldKey,
+    ...(context.dataElementCode ? { dataElementCode: context.dataElementCode } : {}),
+    ...(context.dataElementName ? { dataElementName: context.dataElementName } : {}),
     ...(context.parentFieldKey ? { parentFieldKey: context.parentFieldKey } : {}),
     ...(context.compositionItemKey ? { compositionItemKey: context.compositionItemKey } : {}),
     ...(context.compositionItemLabel ? { compositionItemLabel: context.compositionItemLabel } : {}),

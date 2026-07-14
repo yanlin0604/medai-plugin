@@ -20,6 +20,8 @@ export interface FieldAssistContext {
   docName: string;
   fieldKey: string;
   fieldLabel: string;
+  dataElementCode?: string;
+  dataElementName?: string;
   parentFieldKey?: string;
   compositionItemKey?: string;
   compositionItemLabel?: string;
@@ -56,6 +58,8 @@ export interface FieldWritebackPayload {
   patientId: string;
   docCode: string;
   fieldKey: string;
+  dataElementCode?: string;
+  dataElementName?: string;
   parentFieldKey?: string;
   compositionItemKey?: string;
   compositionItemLabel?: string;
@@ -79,6 +83,8 @@ export function getFieldAssistContextKey(
 export function getFieldAssistSnapshotKey(context: FieldAssistContext) {
   return [
     getFieldAssistContextKey(context),
+    context.dataElementCode ?? '',
+    context.dataElementName ?? '',
     context.parentFieldKey ?? '',
     context.compositionItemKey ?? '',
     context.compositionItemLabel ?? '',
