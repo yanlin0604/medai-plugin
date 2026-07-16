@@ -149,6 +149,18 @@ export const DOC_REGISTRY: DocDefinition[] = [
 
   // ---------- 按需书写病程（绿） ----------
   {
+    code: 'DOC004', id: 'doc-004', name: '主治医生查房记录', py: 'zzyscfjl',
+    paradigm: 'recording', group: 'onDemand', icon: 'ProfileOutlined',
+    prototype: 'ward_round_workbench.html',
+    dataSources: ['HIS', 'LIS', 'PACS', 'EMR', '录音'], inputMode: '语音+选项',
+  },
+  {
+    code: 'DOC017', id: 'doc-017', name: '主治医生首次查房记录', py: 'zzyscscfjl',
+    paradigm: 'recording', group: 'onDemand', icon: 'ProfileOutlined',
+    prototype: 'ward_round_workbench.html',
+    dataSources: ['HIS', 'LIS', 'PACS', 'EMR', '录音'], inputMode: '语音+选项',
+  },
+  {
     code: 'DOC005', id: 'doc-005', name: '疑难病例讨论记录', py: 'ynbltljl',
     paradigm: 'recording', group: 'onDemand', icon: 'GroupOutlined',
     prototype: 'meeting_workbench.html',

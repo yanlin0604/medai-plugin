@@ -12,6 +12,7 @@ function createContext(overrides: Partial<FieldAssistContext> = {}): FieldAssist
     docName: '入院记录',
     fieldKey: 'presentIllness',
     fieldLabel: '现病史',
+    assistantEnabled: true,
     fieldValue: '',
     selectedText: '',
     prefix: '',
@@ -107,4 +108,66 @@ describe('fieldAssist writeback', () => {
       generationId: 'gen-1',
     });
   });
+  it('整组合父字段仅接受 response 返回相同原生父字段', () => {
+    const context = createContext({
+      docCode: 'DOC010',
+      docName: '出院记录',
+      fieldKey: 'hm:DE06.00.287.00.005:c3df523fd52dad5bdb8fb4c0d4c68bac',
+    });
+    const response = createResponse({
+      docCode: 'DOC010',
+      documentType: '出院记录',
+      fieldKey: context.fieldKey,
+      parentFieldKey: context.fieldKey,
+    });
+
+    expect(() => buildFieldWritebackPayload({ context, response })).not.toThrow();
+    expect(() => buildFieldWritebackPayload({
+      context,
+      response: { ...response, parentFieldKey: 'wrong-parent' },
+    })).toThrow('生成结果与当前患者、文书或组合字段不匹配');
+  });
+
+  it('组合字段回填要求患者、文书、父字段和子项身份完全一致', () => {
+    const context = createContext({
+      patientId: 'P001',
+      docCode: 'DOC010',
+      docName: '出院记录',
+      fieldKey: 'medicationAdvice',
+      parentFieldKey: 'hm:DE06.00.287.00.005:c3df523fd52dad5bdb8fb4c0d4c68bac',
+      compositionItemKey: 'medicationAdvice',
+      compositionItemLabel: '用药指导',
+    });
+    const response = createResponse({
+      patientId: 'P001',
+      docCode: 'DOC010',
+      documentType: '出院记录',
+      fieldKey: 'medicationAdvice',
+      parentFieldKey: context.parentFieldKey,
+      compositionItemKey: 'medicationAdvice',
+      compositionItemLabel: '用药指导',
+    });
+
+    expect(buildFieldWritebackPayload({ context, response })).toEqual(expect.objectContaining({
+      patientId: 'P001',
+      docCode: 'DOC010',
+      fieldKey: 'medicationAdvice',
+      parentFieldKey: context.parentFieldKey,
+      compositionItemKey: 'medicationAdvice',
+    }));
+
+    expect(() => buildFieldWritebackPayload({
+      context,
+      response: { ...response, compositionItemKey: 'followupAdvice' },
+    })).toThrow('生成结果与当前患者、文书或组合字段不匹配');
+    expect(() => buildFieldWritebackPayload({
+      context,
+      response: { ...response, parentFieldKey: 'wrong-parent' },
+    })).toThrow('生成结果与当前患者、文书或组合字段不匹配');
+    expect(() => buildFieldWritebackPayload({
+      context,
+      response: { ...response, patientId: 'P002' },
+    })).toThrow('生成结果与当前患者、文书或组合字段不匹配');
+  });
+
 });

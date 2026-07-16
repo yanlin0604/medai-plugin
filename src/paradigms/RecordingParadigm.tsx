@@ -5,7 +5,7 @@ import SurgeryFlow from './recording/SurgeryFlow';
 
 const ADMISSION_DOC_CODE = 'DOC001';
 const SURGERY_DOC_CODES = new Set(['DOC013', 'D0C013']);
-const WORKBENCH_DOC_CODES = new Set(['DOC003', 'DOC004', 'DOC005', 'DOC012']);
+const WORKBENCH_DOC_CODES = new Set(['DOC003', 'DOC004', 'DOC017', 'DOC005', 'DOC012']);
 
 /**
  * 范式三·长录音互动（入院/日常病程/上级查房/疑难讨论/手术记录）。

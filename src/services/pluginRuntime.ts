@@ -241,6 +241,7 @@ export function toDocFieldDef(field: RuntimeDocFieldDto): DocFieldDef {
     staticText: field.staticText,
     dictatable: field.dictatable,
     disableRegenerate: field.renderRule?.disableRegenerate,
+    roundDriven: field.renderRule?.roundDriven,
   };
 }
 
@@ -318,7 +319,7 @@ export async function listRuntimeDocumentDefinitions(): Promise<RuntimeDocDefini
 export async function listRuntimeDocuments(): Promise<DocDefinition[]> {
   try {
     const definitions = await listRuntimeDocumentDefinitions();
-    const runtimeDocs = definitions.map(toDocDefinition).filter((doc) => doc.code !== 'DOC004');
+    const runtimeDocs = definitions.map(toDocDefinition);
     const runtimeCodes = new Set(runtimeDocs.map((doc) => doc.code));
     return dedupeDisplayDocuments([
       ...runtimeDocs,

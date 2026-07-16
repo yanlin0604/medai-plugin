@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildBubbleDischargeDraft, submitBubbleDischargeDraft } from './bubbleDischargeWriteback';
+import { HM_DISCHARGE_ORDERS_FIELD_KEY } from '../config/hmFieldKeys';
 import type { DischargeRuntimeState } from './dischargeRuntime';
 import type { ClinicalSection, DocDraft, Patient } from './types';
 import type { DocumentVersionAdapter, VersionSnapshotInput } from './versionService';
@@ -149,7 +150,7 @@ describe('bubbleDischargeWriteback', () => {
             source: 'manual',
             required: true,
           },
-          ...sections,
+          ...sections.filter(({ key }) => key !== 'admissionDate'),
           {
             key: 'admissionDiagnosis',
             title: '入院诊断',
@@ -183,9 +184,9 @@ describe('bubbleDischargeWriteback', () => {
             source: 'ai',
           },
           {
-            key: 'dischargeOrders',
+            key: HM_DISCHARGE_ORDERS_FIELD_KEY,
             title: '出院医嘱',
-            fieldKey: 'dischargeOrders',
+            fieldKey: HM_DISCHARGE_ORDERS_FIELD_KEY,
             text: '规律服药，门诊随访。',
             editable: true,
             source: 'ai',
@@ -195,7 +196,7 @@ describe('bubbleDischargeWriteback', () => {
     });
 
     expect(draft.draftValues.admissionDate).toBeUndefined();
-    expect(draft.draftValues.dischargeOrders).toBe('规律服药，门诊随访。');
+    expect(draft.draftValues[HM_DISCHARGE_ORDERS_FIELD_KEY]).toBe('规律服药，门诊随访。');
     expect(draft.missingFields).toEqual([]);
   });
 

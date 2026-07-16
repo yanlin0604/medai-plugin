@@ -1,6 +1,7 @@
 import type { DocVersion, SectionDiff } from './types';
 import { pluginRuntimeApi } from './pluginRuntime';
 import type { RuntimeCreateVersionRequest } from './pluginRuntimeTypes';
+import { HM_DISCHARGE_ORDERS_FIELD_KEY } from '../config/hmFieldKeys';
 
 const KEY_PREFIX = 'medai:versions:';
 const keyOf = (docCode: string, patientId: string) => `${KEY_PREFIX}${docCode}:${patientId}`;
@@ -41,7 +42,7 @@ const VERSION_FIELD_LABELS: Record<string, Record<string, string>> = {
     treatmentCourse: '诊疗经过',
     dischargeDiagnosis: '出院诊断',
     dischargeCondition: '出院情况',
-    dischargeOrders: '出院医嘱',
+    [HM_DISCHARGE_ORDERS_FIELD_KEY]: '出院医嘱',
     physicianSignature: '医师签名',
   },
 };

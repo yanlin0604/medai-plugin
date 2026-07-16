@@ -30,8 +30,22 @@ import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
 import type { Patient } from '../../stores/usePatientStore';
 import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../services/fieldAssist/contextBridge';
 import { getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
-import { renderTextWithCitations } from '../../components/fieldAssist/FieldAssistPanel';
+import { EvidenceCitationText } from '../../components/fieldAssist/EvidenceCitationText';
+import { buildCompositeEvidencePreview } from '../../services/fieldAssist/evidenceCitations';
 import RoundSegmentSelector from '../../components/RoundSegmentSelector';
+import {
+  createDefaultCompositionValues,
+  formatCompositionFieldValue,
+  getCompositionSourceLabel,
+  isAiCompositionItem,
+  isFixedCompositionItem,
+  mergeRuntimeCompositionValues,
+  parseCompositionFieldValue,
+  retainCompositionValuesByItemKey,
+  sortedCompositionItems,
+} from './compositionFieldState';
+import { selectRoundDrivenSessions } from './roundDrivenFields';
+import { isRoundRecordDocCode } from '../../config/roundDocuments';
 
 interface Props {
   doc: DocDefinition;
@@ -49,6 +63,7 @@ interface FieldSession {
   generating: boolean;
   applying: boolean;
   compositionTemplates?: RuntimeFieldCompositionTemplateDto[];
+  compositionWarning?: string;
 }
 
 interface AsrServerMessage {
@@ -62,6 +77,7 @@ type AudioContextWindow = Window & typeof globalThis & {
 
 const EMPTY_SESSION_META = {
   source: 'assistant-workbench',
+  assistantEnabled: true,
   selectedText: '',
   prefix: '',
   selectionStart: 0,
@@ -77,7 +93,6 @@ const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 // 演示模式：跳过一键回填的必填字段校验（生产环境不要设置该变量）
 const SKIP_WRITEBACK_VALIDATION = String(import.meta.env.VITE_SKIP_WRITEBACK_VALIDATION ?? '').trim() === '1';
 const ASR_MODE = '2';
-const DOC003_ROUND_FIELD_KEYS = ['subjective', 'objective', 'assessment', 'plan'];
 
 function buildAsrWsUrl(baseUrl: string, mode: string) {
   const separator = baseUrl.includes('?') ? '&' : '?';
@@ -115,108 +130,6 @@ function buildInitialSessions(template: DocTemplate, values: Record<string, unkn
   }));
 }
 
-function sortedCompositionItems(
-  template: RuntimeFieldCompositionTemplateDto,
-): RuntimeFieldCompositionItemDto[] {
-  return [...(template.items ?? [])].sort((left, right) => (left.itemOrder ?? 0) - (right.itemOrder ?? 0));
-}
-
-function normalizeCompositionLabel(value: string): string {
-  return valueToText(value).replace(/\s+/g, '');
-}
-
-function createDefaultCompositionValues(
-  template: RuntimeFieldCompositionTemplateDto,
-): Record<string, string> {
-  return sortedCompositionItems(template).reduce<Record<string, string>>((result, item) => {
-    result[item.itemKey] = item.defaultText || '';
-    return result;
-  }, {});
-}
-
-function parseCompositionFieldValue(
-  template: RuntimeFieldCompositionTemplateDto,
-  value?: string,
-): Record<string, string> {
-  const values = createDefaultCompositionValues(template);
-  const text = valueToText(value);
-  if (!text) return values;
-
-  const items = sortedCompositionItems(template);
-  const itemByLabel = new Map(items.map((item) => [normalizeCompositionLabel(item.itemLabel), item]));
-  const lines = text.split(/\r?\n/);
-  const hasLabelLine = lines.some((line) => {
-    const match = /^(?:\d+[.、]\s*)?([^：:]+)[：:]\s*(.*)$/.exec(line.trim());
-    return Boolean(match && itemByLabel.has(normalizeCompositionLabel(match[1])));
-  });
-
-  if (!hasLabelLine) {
-    const positionalValues = { ...values };
-    lines.forEach((line, index) => {
-      const item = items[index] ?? items[items.length - 1];
-      if (!item) return;
-      const textLine = line.trim();
-      positionalValues[item.itemKey] = index < items.length
-        ? textLine
-        : [positionalValues[item.itemKey], textLine].filter(Boolean).join('；');
-    });
-    return positionalValues;
-  }
-
-  let activeItemKey = '';
-  const unmatchedLines: string[] = [];
-
-  lines.forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-
-    const match = /^(?:\d+[.、]\s*)?([^：:]+)[：:]\s*(.*)$/.exec(trimmed);
-    const item = match ? itemByLabel.get(normalizeCompositionLabel(match[1])) : undefined;
-    if (item) {
-      activeItemKey = item.itemKey;
-      values[item.itemKey] = match?.[2]?.trim() || '';
-      return;
-    }
-
-    if (activeItemKey) {
-      values[activeItemKey] = [values[activeItemKey], trimmed].filter(Boolean).join('\n');
-    } else {
-      unmatchedLines.push(trimmed);
-    }
-  });
-
-  if (unmatchedLines.length > 0 && items[0]) {
-    values[items[0].itemKey] = [values[items[0].itemKey], ...unmatchedLines].filter(Boolean).join('\n');
-  }
-
-  return values;
-}
-
-function normalizeCompositionItemOutput(value: unknown): string {
-  return valueToText(value)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join('；');
-}
-
-function formatCompositionFieldValue(
-  template: RuntimeFieldCompositionTemplateDto,
-  values: Record<string, string>,
-): string {
-  const items = sortedCompositionItems(template);
-  return items
-    .map((item, index) => {
-      const lineTemplate = item.lineTemplate || '{{index}}. {{label}}：{{value}}';
-      const val = normalizeCompositionItemOutput(values[item.itemKey]);
-      return lineTemplate
-        .replace('{{index}}', String(index + 1))
-        .replace('{{label}}', item.itemLabel || '')
-        .replace('{{value}}', val);
-    })
-    .join('\n');
-}
-
 function getSessionDisplayValue(session: FieldSession): string {
   if (!session.compositionTemplate) return session.value;
   return formatCompositionFieldValue(
@@ -240,13 +153,14 @@ function attachCompositionTemplate(
       || composition.templates[0];
   }
 
-  const compositionValues = parseCompositionFieldValue(selectedTemplate, session.value);
+  const parsed = parseCompositionFieldValue(selectedTemplate, session.value);
   return {
     ...session,
     compositionTemplate: selectedTemplate,
-    compositionValues,
+    compositionValues: parsed.values,
     compositionTemplates: composition.templates,
-    value: formatCompositionFieldValue(selectedTemplate, compositionValues),
+    compositionWarning: parsed.complete ? undefined : parsed.warnings.join(' '),
+    value: formatCompositionFieldValue(selectedTemplate, parsed.values),
   };
 }
 
@@ -271,6 +185,7 @@ function updateCompositionItemInSession(
     value: formatCompositionFieldValue(session.compositionTemplate, nextValues),
     compositionValues: nextValues,
     compositionDrafts: nextDrafts,
+    compositionWarning: undefined,
   };
 }
 
@@ -283,29 +198,21 @@ function applyRuntimeValueToSession(session: FieldSession, value: unknown): Fiel
     };
   }
 
-  const compositionValues = parseCompositionFieldValue(session.compositionTemplate, nextValue);
+  const merged = mergeRuntimeCompositionValues(
+    session.compositionTemplate,
+    session.compositionValues,
+    nextValue,
+  );
   return {
     ...session,
-    compositionValues,
-    value: formatCompositionFieldValue(session.compositionTemplate, compositionValues),
+    compositionValues: merged.values,
+    compositionWarning: merged.complete ? undefined : merged.warnings.join(' '),
+    value: formatCompositionFieldValue(session.compositionTemplate, merged.values),
   };
 }
 
-function isAiCompositionItem(item: RuntimeFieldCompositionItemDto): boolean {
-  return String(item.sourceType).toLowerCase() === 'ai';
-}
-
-function getCompositionSourceLabel(item: RuntimeFieldCompositionItemDto): string {
-  switch (String(item.sourceType).toLowerCase()) {
-    case 'ai':
-      return 'AI';
-    case 'fixed':
-      return '固定';
-    case 'manual':
-      return '手填';
-    default:
-      return item.sourceType || '配置';
-  }
+function itemValueForPreview(session: FieldSession, itemKey: string): string {
+  return session.compositionValues?.[itemKey] ?? '';
 }
 
 function getLatestCompositionDraft(session: FieldSession): FieldAssistDraft | undefined {
@@ -317,7 +224,7 @@ function getLatestCompositionDraft(session: FieldSession): FieldAssistDraft | un
 }
 
 function resolveInitialValues(docCode: string, patientId: string) {
-  if (docCode === 'DOC003') {
+  if (isRoundRecordDocCode(docCode)) {
     return Promise.resolve({
       docCode,
       patientIdHis: patientId,
@@ -442,25 +349,14 @@ function mergeLatestDraftsIntoSessions(
       const nextText = parentDraft.generatedText || parentDraft.response.generatedText || nextSession.value;
       nextSession = nextSession.compositionTemplate
         ? {
-          ...nextSession,
+          ...applyRuntimeValueToSession(nextSession, nextText),
           draft: parentDraft,
-          compositionValues: parseCompositionFieldValue(nextSession.compositionTemplate, nextText),
         }
         : {
           ...nextSession,
           draft: parentDraft,
           value: nextText,
         };
-
-      if (nextSession.compositionTemplate) {
-        nextSession = {
-          ...nextSession,
-          value: formatCompositionFieldValue(
-            nextSession.compositionTemplate,
-            nextSession.compositionValues ?? createDefaultCompositionValues(nextSession.compositionTemplate),
-          ),
-        };
-      }
     }
 
     if (nextSession.compositionTemplate) {
@@ -526,6 +422,7 @@ function buildCompositionItemContext(
     parentFieldKey: session.field.key,
     compositionItemKey: item.itemKey,
     compositionItemLabel: item.itemLabel,
+    compositionSourceType: item.sourceType,
     compositionTemplateId: session.compositionTemplate?.templateId ?? undefined,
     fieldValue: session.compositionValues?.[item.itemKey] ?? '',
     doctorCode: patient.doctor,
@@ -562,7 +459,6 @@ const WHOLE_REQUIRED_FIELD_KEYS = new Set([
   'treatmentCourse',
   'dischargeDiagnosis',
   'dischargeCondition',
-  'dischargeOrders',
 ]);
 const WHOLE_REQUIRED_FIELD_LABELS = new Set([
   '入院情况',
@@ -732,7 +628,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         setRecording(false);
         setLoading(false);
 
-        if (doc.code === 'DOC003') {
+        if (isRoundRecordDocCode(doc.code)) {
           pluginRuntimeApi.getRoundPendingStatus(patient.id, patient.doctor)
             .then((res) => {
               if (cancelled) return;
@@ -761,7 +657,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   }, [doc.code, patient.deptName, patient.doctor, patient.id]);
 
   const handleRefreshRoundSegments = async () => {
-    if (doc.code !== 'DOC003' || refreshingSegments) return;
+    if (!isRoundRecordDocCode(doc.code) || refreshingSegments) return;
     setRefreshingSegments(true);
     try {
       const res = await pluginRuntimeApi.getRoundPendingStatus(patient.id, patient.doctor);
@@ -854,7 +750,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
     const confirmSwitch = () => {
       const keepContent = window.confirm(
-        '是否保留已填写的子项内容？\n点击“确定”保留相同名称的子项值，点击“取消”将使用新模板默认值重置。'
+        '是否保留已填写的子项内容？\n点击“确定”仅按相同 itemKey 保留子项值，点击“取消”将使用新模板默认值重置。'
       );
 
       setSessions((current) => current.map((item) => {
@@ -862,16 +758,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
         let nextValues: Record<string, string>;
         if (keepContent) {
-          nextValues = { ...createDefaultCompositionValues(newTemplate) };
-          const oldItems = item.compositionTemplate ? sortedCompositionItems(item.compositionTemplate) : [];
-          const newItems = sortedCompositionItems(newTemplate);
-          
-          newItems.forEach(newItem => {
-            const matchedOldItem = oldItems.find(oi => oi.itemKey === newItem.itemKey || oi.itemLabel === newItem.itemLabel);
-            if (matchedOldItem && item.compositionValues?.[matchedOldItem.itemKey]) {
-              nextValues[newItem.itemKey] = item.compositionValues[matchedOldItem.itemKey];
-            }
-          });
+          nextValues = retainCompositionValuesByItemKey(newTemplate, item.compositionValues);
         } else {
           nextValues = createDefaultCompositionValues(newTemplate);
         }
@@ -883,6 +770,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
           ...item,
           compositionTemplate: newTemplate,
           compositionValues: nextValues,
+          compositionWarning: undefined,
           value: formatCompositionFieldValue(newTemplate, nextValues),
         };
       }));
@@ -925,10 +813,15 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         transcriptText,
       );
       addDraft(draft);
+      const generatedText = (draft.generatedText || draft.response.generatedText || '').trim();
+      if (!generatedText) {
+        message.warning(`${session.field.label}-${compositionItem.itemLabel}未生成有效内容，已保留原值。`);
+        return;
+      }
       updateSession(fieldKey, (item) => updateCompositionItemInSession(
         item,
         itemKey,
-        draft.generatedText || draft.response.generatedText,
+        generatedText,
         draft,
       ));
       message.success(`已生成${session.field.label}-${compositionItem.itemLabel}`);
@@ -982,12 +875,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     segmentText: string,
     currentSessions: FieldSession[],
     overwriteExisting: boolean,
-  ): Promise<number> => {
-    const targetSessions = currentSessions.filter((session) =>
-      DOC003_ROUND_FIELD_KEYS.includes(session.field.key) && (overwriteExisting || !session.value.trim()),
-    );
+  ): Promise<{ targetCount: number; generatedCount: number }> => {
+    const targetSessions = selectRoundDrivenSessions(currentSessions, overwriteExisting);
 
-    if (targetSessions.length === 0) return 0;
+    if (targetSessions.length === 0) return { targetCount: 0, generatedCount: 0 };
 
     setSessions((prev) => prev.map((session) => (
       targetSessions.some((target) => target.field.key === session.field.key)
@@ -1026,7 +917,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       }
     }));
 
-    return results.filter(Boolean).length;
+    return { targetCount: targetSessions.length, generatedCount: results.filter(Boolean).length };
   };
 
   const handleGenerateWholeDocument = async () => {
@@ -1555,7 +1446,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {doc.name.includes('病程') && (
+              {isRoundRecordDocCode(doc.code) && (
                 <button
                   type="button"
                   onClick={() => setSegmentSelectorOpen(true)}
@@ -1596,6 +1487,18 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               const canWriteback = Boolean(fieldContext?.fieldKey === session.field.key);
               const generatedAt = formatTime(session.draft?.createdAt ?? latestCompositionDraft?.createdAt);
               const displayValue = getSessionDisplayValue(session);
+              const compositionEvidencePreview = compositionTemplate
+                ? buildCompositeEvidencePreview(sortedCompositionItems(compositionTemplate).map((item) => {
+                  const itemDraft = session.compositionDrafts?.[item.itemKey];
+                  return {
+                    itemKey: item.itemKey,
+                    itemLabel: item.itemLabel,
+                    text: itemDraft?.generatedText || itemValueForPreview(session, item.itemKey),
+                    evidenceSummary: itemDraft?.response.evidenceSummary,
+                    itemOrder: item.itemOrder,
+                  };
+                }))
+                : null;
               const active = activeSession?.field.key === session.field.key;
               return (
                 <article
@@ -1686,6 +1589,11 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                             </select>
                           </div>
                         )}
+                        {session.compositionWarning ? (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-700">
+                            {session.compositionWarning} 请按当前组合模板逐项核对后再回填。
+                          </div>
+                        ) : null}
                         {sortedCompositionItems(compositionTemplate).map((item, index) => {
                           const itemValue = session.compositionValues?.[item.itemKey] ?? '';
                           const itemDraft = session.compositionDrafts?.[item.itemKey];
@@ -1706,6 +1614,9 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-slate-700">
                                     <span>{index + 1}. {item.itemLabel}</span>
+                                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                                      {getCompositionSourceLabel(item)}
+                                    </span>
                                     {item.required ? <span className="text-rose-500">*</span> : null}
                                     {itemActive ? (
                                       <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-[#1E3A8A]">HIS当前子项</span>
@@ -1740,26 +1651,51 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                               <textarea
                                 value={itemValue}
                                 onChange={(event) => updateCompositionItemValue(session.field.key, item.itemKey, event.target.value)}
-                                readOnly={item.editable === false}
+                                readOnly={isFixedCompositionItem(item)}
                                 className={[
                                   'min-h-[72px] w-full resize-y rounded-md border border-slate-200 px-3 py-2 text-xs leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#1E3A8A]',
-                                  item.editable === false ? 'bg-slate-50 text-slate-500' : 'bg-white',
+                                  isFixedCompositionItem(item) ? 'bg-slate-50 text-slate-500' : 'bg-white',
                                 ].join(' ')}
                                 placeholder="待填写"
                               />
+                              {itemDraft?.response.evidenceSummary?.length && itemDraft.generatedText ? (
+                                <div className="mt-2 rounded border border-blue-100 bg-blue-50/40 px-2 py-1.5 text-[11px] leading-5 text-slate-700">
+                                  <span className="font-semibold text-blue-800">生成证据：</span>
+                                  <EvidenceCitationText
+                                    text={itemDraft.generatedText}
+                                    evidenceSummary={itemDraft.response.evidenceSummary}
+                                  />
+                                </div>
+                              ) : null}
                             </div>
                           );
                         })}
+                        {compositionEvidencePreview?.evidenceSummary.length ? (
+                          <div className="mt-3 rounded-md border border-blue-100 bg-blue-50/40 px-3 py-2">
+                            <div className="mb-1.5 text-[11px] font-bold text-blue-800">组合整体预览（证据已统一编号）</div>
+                            <div className="space-y-1.5 text-xs leading-5 text-slate-700">
+                              {compositionEvidencePreview.sections.map((section) => (
+                                <div key={section.itemKey}>
+                                  <span className="font-semibold">{section.itemLabel}：</span>
+                                  <EvidenceCitationText
+                                    text={section.text}
+                                    evidenceSummary={compositionEvidencePreview.evidenceSummary}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="max-w-[92%] rounded-lg rounded-bl-sm border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800">
                         {displayValue ? (
                           <div className="whitespace-pre-wrap">
                             {session.draft
-                              ? renderTextWithCitations(
-                                displayValue || session.draft.generatedText || session.draft.response.generatedText || '',
-                                session.draft.response.evidenceSummary,
-                              )
+                              ? <EvidenceCitationText
+                                text={displayValue || session.draft.generatedText || session.draft.response.generatedText || ''}
+                                evidenceSummary={session.draft.response.evidenceSummary}
+                              />
                               : displayValue}
                           </div>
                         ) : (
@@ -1890,7 +1826,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         onRefresh={handleRefreshRoundSegments}
         refreshing={refreshingSegments}
         onImport={async ({ selectedTexts, assignedIds, unassignedIds }) => {
-          if (!selectedTexts.trim()) return;
+          if (!selectedTexts.trim()) {
+            message.warning('所选查房片段没有可提取的文字内容');
+            return;
+          }
 
           try {
             if (unassignedIds.length > 0) {
@@ -1926,9 +1865,13 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               });
             }
 
-            const generatedCount = await generateRoundDrivenFields(selectedTexts, sessions, true);
+            const { targetCount, generatedCount } = await generateRoundDrivenFields(selectedTexts, sessions, true);
+            if (targetCount === 0) {
+              message.warning('当前文书模板没有配置可由查房记录驱动的字段，请确认模板配置已更新并刷新页面');
+              return;
+            }
             if (generatedCount === 0) {
-              message.warning('当前没有可重新生成的查房记录字段');
+              message.error('查房记录字段生成失败，请检查 AI 服务或网络连接后重试');
               return;
             }
 
@@ -1952,6 +1895,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
             message.success('已根据所选查房片段重新生成查房记录字段');
           } catch (err) {
             console.error('导入并提取查房记录失败:', err);
+            message.error(err instanceof Error ? err.message : '导入并提取查房记录失败');
           }
         }}
       />

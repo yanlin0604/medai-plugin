@@ -178,7 +178,7 @@ export function isAdmissionMetaSection(section: ClinicalSection, metaFieldKeys: 
 function toClinicalSection(field: RuntimeDocFieldDto, value?: RuntimeFieldValueDto): ClinicalSection {
   return {
     key: field.fieldKey,
-    title: field.sectionName || field.fieldLabel,
+    title: field.fieldLabel || field.sectionName,
     text: resolveFieldText(field, value),
     fieldKey: field.writebackFieldKey || field.fieldKey,
     editable: field.inputType !== 'static',

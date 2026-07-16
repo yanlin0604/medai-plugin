@@ -4,9 +4,11 @@ import type {
   RuntimeEvidenceWritebackMode,
   RuntimeFieldCompletionResponse,
 } from './pluginRuntimeTypes';
+import { stripEvidenceCitationMarkers } from './fieldAssist/evidenceCitations';
+
+export { stripEvidenceCitationMarkers } from './fieldAssist/evidenceCitations';
 
 const WRITEBACK_MODES: RuntimeEvidenceWritebackMode[] = ['fill', 'append', 'overwrite'];
-const CITATION_MARKER_PATTERN = /\s*[\[【][a-zA-Z0-9\-_,，\s]+[\]】]\s*/g;
 
 export function isRuntimeEvidenceWritebackMode(value: unknown): value is RuntimeEvidenceWritebackMode {
   return typeof value === 'string' && WRITEBACK_MODES.includes(value as RuntimeEvidenceWritebackMode);
@@ -36,14 +38,6 @@ export function resolveCompletionWritebackMode(
 ): RuntimeEvidenceWritebackMode {
   const fallback: RuntimeEvidenceWritebackMode = currentText.trim() ? 'append' : 'fill';
   return normalizeEvidenceWritebackMode(response?.recommendedWritebackMode, fallback);
-}
-
-export function stripEvidenceCitationMarkers(text: string): string {
-  return text
-    .replace(CITATION_MARKER_PATTERN, ' ')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 export function applyFieldCompletionText(

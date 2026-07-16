@@ -8,6 +8,7 @@ import {
 import { buildSubmitSnapshot, resolvePatientBrief } from './documentFlow';
 import { backendRuntimeVersionAdapter, type DocumentVersionAdapter } from './versionService';
 import type { DocumentPayload, FieldValue, Patient, SubmitResult } from './types';
+import { HM_DISCHARGE_ORDERS_FIELD_KEY } from '../config/hmFieldKeys';
 
 const DISCHARGE_DOC_CODE = 'DOC010';
 const CHANGE_SUMMARY = '助手气泡回写出院记录';
@@ -22,7 +23,7 @@ const SHELL_FIELD_LABELS: Record<string, string> = {
   treatmentCourse: '诊疗经过',
   dischargeDiagnosis: '出院诊断',
   dischargeCondition: '出院情况',
-  dischargeOrders: '出院医嘱',
+  [HM_DISCHARGE_ORDERS_FIELD_KEY]: '出院医嘱',
   physicianSignature: '医师签名',
 };
 
@@ -32,7 +33,7 @@ const BUBBLE_REQUIRED_SECTION_KEYS = new Set([
   'treatmentCourse',
   'dischargeDiagnosis',
   'dischargeCondition',
-  'dischargeOrders',
+  HM_DISCHARGE_ORDERS_FIELD_KEY,
 ]);
 const BUBBLE_REQUIRED_SECTION_TITLES = new Set([
   '入院情况',

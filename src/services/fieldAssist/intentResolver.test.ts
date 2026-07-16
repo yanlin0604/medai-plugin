@@ -12,6 +12,7 @@ function createContext(overrides: Partial<FieldAssistContext> = {}): FieldAssist
     docName: '入院记录',
     fieldKey: 'presentIllness',
     fieldLabel: '现病史',
+    assistantEnabled: true,
     fieldValue: '',
     selectedText: '',
     prefix: '',

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { normalizeEvidenceWritebackMode, stripEvidenceCitationMarkers } from '../evidenceCompletion';
+import { normalizeEvidenceWritebackMode } from '../evidenceCompletion';
+import { stripEvidenceCitationMarkers } from './evidenceCitations';
 import { pluginRuntimeApi } from '../pluginRuntime';
 import { isTauriRuntime } from '../windowMode';
 import type {
@@ -55,12 +56,29 @@ export function resolveFieldWritebackMode(
   return context.fieldValue.trim() ? 'append' : 'fill';
 }
 
+export function assertFieldResponseIdentity(
+  context: Pick<FieldAssistContext, 'patientId' | 'docCode' | 'fieldKey' | 'parentFieldKey' | 'compositionItemKey'>,
+  response: Pick<RuntimeFieldCompletionResponse, 'patientId' | 'docCode' | 'fieldKey' | 'parentFieldKey' | 'compositionItemKey'>,
+): void {
+  const expectedParentFieldKey = context.parentFieldKey
+    ?? (response.parentFieldKey ? context.fieldKey : '');
+  const matches = context.patientId === response.patientId
+    && context.docCode === response.docCode
+    && context.fieldKey === response.fieldKey
+    && expectedParentFieldKey === (response.parentFieldKey ?? '')
+    && (context.compositionItemKey ?? '') === (response.compositionItemKey ?? '');
+  if (!matches) {
+    throw new Error('生成结果与当前患者、文书或组合字段不匹配，已阻止回填');
+  }
+}
+
 export function buildFieldWritebackPayload({
   context,
   response,
   finalText,
   mode,
 }: ApplyFieldDraftOptions): FieldWritebackPayload {
+  assertFieldResponseIdentity(context, response);
   const writebackMode = resolveFieldWritebackMode(context, mode ?? response.recommendedWritebackMode);
   return {
     kind: 'field',

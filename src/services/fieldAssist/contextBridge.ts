@@ -39,6 +39,7 @@ export function isUsableFieldAssistContext(
 ): context is FieldAssistContext {
   if (!context) return false;
   if (context.source !== 'demo-cs') return false;
+  if (typeof context.assistantEnabled !== 'boolean') return false;
   if (!context.patientId || !context.docCode || !context.fieldKey || !context.sessionId) return false;
   if (!context.writebackUrl) return false;
   if (isFieldAssistContextStale(context, now)) return false;

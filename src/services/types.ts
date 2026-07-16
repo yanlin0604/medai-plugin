@@ -6,6 +6,7 @@
 // 前端无需改动（依赖倒置：UI 依赖抽象契约，而非具体数据来源）。
 
 import type { Patient } from '../stores/usePatientStore';
+import type { RoundRecordDocCode } from '../config/roundDocuments';
 import type { PatientBrief } from '../components/clinical/EmrContextCard';
 import type { TranscriptSegment } from '../components/clinical/TranscriptCard';
 import type { IcdItem } from '../components/clinical/IcdRecommend';
@@ -115,6 +116,8 @@ export interface DocFieldDef {
   metaSlot?: string;
   /** 是否禁用单字段重新生成 */
   disableRegenerate?: boolean;
+  /** 是否由查房记录驱动生成 */
+  roundDriven?: boolean;
 }
 
 /** 文书模板（后台按 docCode 下发） */
@@ -239,7 +242,7 @@ export interface RoundPatient {
   age: string;
   bedNo: string;
   diagnosis: string;
-  targetDocCodes: Array<'DOC003' | 'DOC004'>;
+  targetDocCodes: RoundRecordDocCode[];
   identifiers: {
     admissionNo: string;
     displayName: string;
@@ -250,7 +253,7 @@ export interface RoundPatient {
 export interface RoundVoiceSegment {
   id: string;
   patientId: string | null;
-  targetDocCode: 'DOC003' | 'DOC004';
+  targetDocCode: RoundRecordDocCode;
   startedAt: string;
   endedAt?: string;
   originalText: string;

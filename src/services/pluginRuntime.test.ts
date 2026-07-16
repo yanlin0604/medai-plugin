@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HM_DISCHARGE_ORDERS_FIELD_KEY } from '../config/hmFieldKeys';
 import {
+  listRuntimeDocuments,
   pluginRuntimeApi,
   toDocDefinition,
   toDocFieldDef,
@@ -82,6 +84,30 @@ describe('pluginRuntime adapters', () => {
     expect(doc.inputMode).toBe('选项+模板');
   });
 
+  it('keeps backend-provided DOC004 and DOC017 in the assistant document list', async () => {
+    mockHttp.get.mockReturnValueOnce(ok([
+      {
+        docCode: 'DOC004',
+        docName: '后台配置的主治医生查房记录',
+        interactionParadigm: 'recording',
+        templateVersion: 'v1',
+      },
+      {
+        docCode: 'DOC017',
+        docName: '后台配置的主治医生首次查房记录',
+        interactionParadigm: 'recording',
+        templateVersion: 'v1',
+      },
+    ]));
+
+    const documents = await listRuntimeDocuments();
+
+    expect(documents.filter(({ code }) => ['DOC004', 'DOC017'].includes(code))).toMatchObject([
+      { code: 'DOC004', name: '后台配置的主治医生查房记录' },
+      { code: 'DOC017', name: '后台配置的主治医生首次查房记录' },
+    ]);
+  });
+
   it('sorts template fields and options by backend order', () => {
     const template = toDocTemplate({
       docCode: 'DOC888',
@@ -110,7 +136,10 @@ describe('pluginRuntime adapters', () => {
   });
 
   it('maps field, ICD and version DTOs to frontend contracts', () => {
-    expect(toDocFieldDef(field({ sourceType: 'icd' })).source).toBe('ai');
+    expect(toDocFieldDef(field({ sourceType: 'icd', renderRule: { roundDriven: true } }))).toMatchObject({
+      source: 'ai',
+      roundDriven: true,
+    });
     expect(toIcdItem({ diagnosisName: '冠心病', icdCode: 'I25.101', confidence: 0.91 })).toEqual({
       name: '冠心病',
       code: 'I25.101',
@@ -239,7 +268,7 @@ describe('pluginRuntime adapters', () => {
       patientId: 'ZY001',
       docCode: 'DOC010',
       docName: '出院记录',
-      fieldKey: 'dischargeOrders',
+      fieldKey: HM_DISCHARGE_ORDERS_FIELD_KEY,
       fieldLabel: '出院医嘱',
       prefix: '规律',
       assistType: 'term' as const,

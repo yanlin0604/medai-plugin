@@ -187,7 +187,7 @@ function toClinicalSection(field: RuntimeDocFieldDto, value?: RuntimeFieldValueD
   const daysField = field.fieldKey === 'hospitalDays';
   return {
     key: field.fieldKey,
-    title: field.sectionName || field.fieldLabel,
+    title: field.fieldLabel || field.sectionName,
     text: resolveFieldText(field, value),
     fieldKey: field.writebackFieldKey || field.fieldKey,
     editable: daysField ? false : dateField ? true : field.inputType !== 'static',

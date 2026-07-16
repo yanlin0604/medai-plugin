@@ -76,6 +76,7 @@ export interface RuntimeFieldRenderRuleDto {
   prompt?: RuntimeFieldPromptRuleDto;
   completionMode?: string;
   disableRegenerate?: boolean;
+  roundDriven?: boolean;
 }
 
 export interface RuntimeFieldCalculationDto {

@@ -25,7 +25,7 @@ interface RoundSegmentSelectorProps {
   patientName: string;
   onRefresh?: () => void;
   refreshing?: boolean;
-  onImport: (payload: { selectedTexts: string; assignedIds: number[]; unassignedIds: number[] }) => void;
+  onImport: (payload: { selectedTexts: string; assignedIds: number[]; unassignedIds: number[] }) => void | Promise<void>;
   assignedSegments?: Array<{
     id: number;
     transcribeText: string;
@@ -177,7 +177,7 @@ export default function RoundSegmentSelector({
     );
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (selectedBlockIds.length === 0) return;
     setGenerating(true);
 
@@ -195,13 +195,14 @@ export default function RoundSegmentSelector({
       .flatMap((block) => block.segments.map((seg) => seg.text))
       .join('\n');
 
-    setTimeout(() => {
-      setGenerating(false);
-      onImport({ selectedTexts, assignedIds, unassignedIds });
+    try {
+      await onImport({ selectedTexts, assignedIds, unassignedIds });
       setSelectedBlockIds([]);
       setExpandedBlockIds([]);
       onClose();
-    }, 1000);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (

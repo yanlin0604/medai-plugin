@@ -18,6 +18,7 @@ import {
 import { message } from 'antd';
 import appIcon from '../../../src-tauri/icons/app-icon-64.png';
 import { getDocByCode } from '../../config/docRegistry';
+import { isRoundRecordDocCode } from '../../config/roundDocuments';
 import { collapseAssistantWindow, expandAssistantWindow, showAssistBubbleWindow } from '../../services/windowMode';
 import { pluginRuntimeApi, type RoundPendingSegment } from '../../services/pluginRuntime';
 import { BubbleEmrContext, useBubbleStore, getBubbleContextKey } from '../../stores/useBubbleStore';
@@ -45,14 +46,19 @@ import {
   getLatestFieldAssistContext,
   isUsableFieldAssistContext,
 } from '../../services/fieldAssist/contextBridge';
-import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
+import {
+  buildSuggestionDraft,
+  canGenerateField,
+  generateFieldDraft,
+  getFieldGenerationUnavailableMessage,
+} from '../../services/fieldAssist/generation';
 import { resolveFieldAssistIntent, shouldAutoGenerateField } from '../../services/fieldAssist/intentResolver';
 import { applyFieldDraft, insertTextIntoFieldContext } from '../../services/fieldAssist/writeback';
 import type { FieldAssistContext, FieldAssistDraft, FieldAssistIntent } from '../../services/fieldAssist/types';
 import { getFieldAssistContextKey, getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
 import { BrowserAsrSession } from '../../services/asr/browserAsrSession';
 import type { AsrServerMessage } from '../../services/asr/types';
-import { renderTextWithCitations } from '../fieldAssist/FieldAssistPanel';
+import { EvidenceCitationText } from '../fieldAssist/EvidenceCitationText';
 
 interface BubbleShellProps {
   onExpand?: (context: BubbleEmrContext | null) => void;
@@ -74,6 +80,7 @@ const FIELD_AUTO_GENERATE_DELAY_MS = 450;
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const ASR_MODE = '2';
 const ROUND_TRANSCRIPT_FIELD_KEYS = new Set(['subjective', 'objective', 'assessment', 'plan']);
+const ROUND_RECORD_FIELD_LABEL = '查房记录';
 
 function getFieldContextSnapshotKey(context: FieldAssistContext) {
   return getFieldAssistSnapshotKey(context);
@@ -94,7 +101,11 @@ function getEditContextSnapshotKey(context: BsEditAssistContext) {
 }
 
 function isRoundDrivenFieldContext(context: FieldAssistContext | null): context is FieldAssistContext {
-  return Boolean(context && context.docCode === 'DOC003' && ROUND_TRANSCRIPT_FIELD_KEYS.has(context.fieldKey));
+  if (!context || !isRoundRecordDocCode(context.docCode)) return false;
+  if (context.docCode === 'DOC003') {
+    return ROUND_TRANSCRIPT_FIELD_KEYS.has(context.fieldKey);
+  }
+  return context.fieldLabel === ROUND_RECORD_FIELD_LABEL;
 }
 
 function buildRoundTranscriptText(segments: RoundPendingSegment[]) {
@@ -158,8 +169,8 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     [contextKey],
   );
   const shouldAutoGenerateCurrentField = useMemo(() => {
-    if (!fieldContext) return false;
-    if (fieldContext.docCode === 'DOC003' && !ROUND_TRANSCRIPT_FIELD_KEYS.has(fieldContext.fieldKey)) {
+    if (!fieldContext || !canGenerateField(fieldContext)) return false;
+    if (isRoundRecordDocCode(fieldContext.docCode) && !isRoundDrivenFieldContext(fieldContext)) {
       return false;
     }
     return shouldAutoGenerateField(fieldContext, fieldDraft);
@@ -209,7 +220,9 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const fieldContextKey = fieldContext ? getFieldAssistContextKey(fieldContext) : '';
 
   useEffect(() => {
-    const fieldSuggestionAssistType = getSuggestionAssistType(fieldIntent);
+    const fieldSuggestionAssistType = fieldContext && canGenerateField(fieldContext)
+      ? getSuggestionAssistType(fieldIntent)
+      : null;
     const suggestionAssistType = editContext
       ? resolveEditAssistType(editContext)
       : fieldSuggestionAssistType ?? undefined;
@@ -404,6 +417,13 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setCopiedSuggestionId('');
     closeVoicePanel();
     setVoiceText('');
+
+    if (fieldContext && !canGenerateField(fieldContext)) {
+      setFieldStatusText(getFieldGenerationUnavailableMessage(fieldContext));
+      setFieldDraft(null);
+      setFieldDraftStatus('idle');
+      return;
+    }
 
     if (fieldContextKey) {
       const drafts = useFieldAssistStore.getState().drafts;
@@ -832,6 +852,10 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const handleRegenerateField = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (!fieldContext || fieldDraftStatus === 'generating' || fieldDraftStatus === 'writing') return;
+    if (!canGenerateField(fieldContext)) {
+      setFieldStatusText(getFieldGenerationUnavailableMessage(fieldContext));
+      return;
+    }
     const requestContextKey = fieldContextKey;
     setFieldDraftStatus('generating');
     setFieldStatusText('正在重新生成');
@@ -927,10 +951,13 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               : '待书写';
 
   if (fieldContext) {
-    const hasSuggestionIntent = Boolean(getSuggestionAssistType(fieldIntent));
+    const fieldGenerationAvailable = canGenerateField(fieldContext);
+    const hasSuggestionIntent = fieldGenerationAvailable
+      && Boolean(getSuggestionAssistType(fieldIntent));
     const currentFieldDraft = fieldDraft?.contextKey === fieldContextKey ? fieldDraft : null;
     const fieldSuggestions = hasSuggestionIntent ? suggestions : [];
     const isFieldBusy = fieldDraftStatus === 'generating' || fieldDraftStatus === 'writing';
+    const fieldGenerationUnavailableText = getFieldGenerationUnavailableMessage(fieldContext);
     const canApplyField = Boolean(currentFieldDraft) && fieldDraftStatus === 'ready';
     const fieldActionLabel = fieldDraftStatus === 'writing'
       ? '正在回填'
@@ -991,12 +1018,16 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     ) : null;
 
     if (isFieldBusy || (fieldDraftStatus === 'idle' && shouldAutoGenerateCurrentField) || isManuallyCollapsed) {
-      const collapsedTitle = isWorking
-        ? `${detectedContext?.patientName ?? fieldContext.patientName} · ${draftStatusLabel}`
-        : `${fieldContext.patientName} · ${fieldActionLabel}`;
-      const collapsedSubtitle = isWorking
-        ? (statusText || detectedContext?.docName || fieldContext.docName)
-        : fieldActionText;
+      const collapsedTitle = !fieldGenerationAvailable
+        ? `${fieldContext.patientName} · 手动编辑`
+        : isWorking
+          ? `${detectedContext?.patientName ?? fieldContext.patientName} · ${draftStatusLabel}`
+          : `${fieldContext.patientName} · ${fieldActionLabel}`;
+      const collapsedSubtitle = !fieldGenerationAvailable
+        ? fieldGenerationUnavailableText
+        : isWorking
+          ? (statusText || detectedContext?.docName || fieldContext.docName)
+          : fieldActionText;
 
       return (
         <div
@@ -1121,10 +1152,12 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
           <div data-tauri-drag-region className="flex items-start justify-between gap-2">
             <div data-tauri-drag-region className="min-w-0">
               <div data-tauri-drag-region className="text-[11px] font-bold text-emerald-700 truncate">
-                {fieldContext.fieldLabel} · {fieldIntent === 'rewrite' ? '改写选区' : fieldIntent === 'continue' ? '输入候选' : '字段生成'}
+                {fieldContext.fieldLabel} · {!fieldGenerationAvailable ? '手动编辑' : fieldIntent === 'rewrite' ? '改写选区' : fieldIntent === 'continue' ? '输入候选' : '字段生成'}
               </div>
               <div data-tauri-drag-region className="mt-0.5 text-[9px] font-medium text-slate-500 truncate">
-                {fieldContext.selectedText || fieldContext.prefix || fieldStatusText || fieldActionText}
+                {!fieldGenerationAvailable
+                  ? fieldGenerationUnavailableText
+                  : fieldContext.selectedText || fieldContext.prefix || fieldStatusText || fieldActionText}
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
@@ -1268,7 +1301,7 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
               </div>
               {(fieldDraftStatus === 'ready' || fieldDraftStatus === 'written') && fieldDraft?.generatedText ? (
                 <div className="text-[11px] leading-[1.6] text-slate-700 whitespace-pre-wrap break-all">
-                  {renderTextWithCitations(fieldDraft.generatedText, fieldDraft.response.evidenceSummary)}
+                  <EvidenceCitationText text={fieldDraft.generatedText} evidenceSummary={fieldDraft.response.evidenceSummary} />
                 </div>
               ) : (
                 <div className="text-[11px] text-slate-500">
@@ -1281,9 +1314,11 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
                 type="button"
                 data-tauri-drag-region="false"
                 onClick={handleRegenerateField}
-                disabled={isFieldBusy}
-                className="h-7 px-2.5 shrink-0 inline-flex items-center gap-1 border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 text-[11px] font-bold"
-                title="重新生成当前字段"
+                disabled={isFieldBusy || !fieldGenerationAvailable}
+                className="h-7 px-2.5 shrink-0 inline-flex items-center gap-1 border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 text-[11px] font-bold"
+                title={fieldGenerationAvailable
+                  ? '重新生成当前字段'
+                  : fieldGenerationUnavailableText}
               >
                 <ReloadOutlined className="text-[10px]" />
                 重新生成

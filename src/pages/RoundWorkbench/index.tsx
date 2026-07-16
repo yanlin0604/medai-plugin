@@ -11,6 +11,7 @@ import { usePatientStore } from '../../stores/usePatientStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { getHostSession } from '../../services/emsBridge';
 import { pluginRuntimeApi, type RoundRosterPatient } from '../../services/pluginRuntime';
+import { isRoundRecordDocCode } from '../../config/roundDocuments';
 
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
@@ -112,7 +113,8 @@ const formatBedNoLabel = (bedNo: string) => {
 
 export default function RoundWorkbench() {
   const navigate = useNavigate();
-  const { currentPatient: loggedPatient } = usePatientStore();
+  const { currentPatient: loggedPatient, selectedDoc } = usePatientStore();
+  const targetDocCode = isRoundRecordDocCode(selectedDoc?.code ?? '') ? selectedDoc?.code ?? 'DOC003' : 'DOC003';
   const authUserInfo = useAuthStore((state) => state.userInfo);
   const [seconds, setSeconds] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
@@ -236,7 +238,7 @@ export default function RoundWorkbench() {
         roundWs.send(JSON.stringify({
           action: 'init_session',
           session_id: sessionIdRef.current,
-          doc_code: 'DOC003',
+          doc_code: targetDocCode,
           patient_mode: 'existing',
           workflow_type: 'round',
           enable_patient_routing: true,

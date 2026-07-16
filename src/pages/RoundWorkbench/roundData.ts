@@ -1,9 +1,10 @@
 import type { DocDefinition } from '../../config/docRegistry';
 import type { RoundPatient, RoundVoiceSegment } from '../../services/types';
+import { ROUND_RECORD_DOC_CODES, type RoundRecordDocCode } from '../../config/roundDocuments';
 
-export type RoundDocCode = 'DOC003';
+export type RoundDocCode = RoundRecordDocCode;
 
-export const ROUND_DOC_CODES: RoundDocCode[] = ['DOC003'];
+export const ROUND_DOC_CODES: RoundDocCode[] = [...ROUND_RECORD_DOC_CODES];
 
 export interface RoundDocOption {
   code: RoundDocCode;

@@ -1,3 +1,4 @@
+import { HM_DISCHARGE_ORDERS_FIELD_KEY } from '../config/hmFieldKeys';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchEditAssistSuggestions,
@@ -21,7 +22,7 @@ const baseContext: BsEditAssistContext = {
   patientName: '陈建国',
   docCode: 'DOC010',
   docName: '出院记录',
-  fieldKey: 'dischargeOrders',
+  fieldKey: HM_DISCHARGE_ORDERS_FIELD_KEY,
   fieldLabel: '出院医嘱',
   fieldValue: '',
   selectedText: '',

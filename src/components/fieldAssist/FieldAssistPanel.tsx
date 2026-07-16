@@ -12,12 +12,16 @@ import {
   SendOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import { message, Popover, Tag } from 'antd';
+import { message } from 'antd';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
-import type { RuntimeEvidenceSummaryDto } from '../../services/pluginRuntimeTypes';
+import { EvidenceCitationText } from './EvidenceCitationText';
 import { usePatientStore } from '../../stores/usePatientStore';
 import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../services/fieldAssist/contextBridge';
-import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
+import {
+  buildSuggestionDraft,
+  FIELD_GENERATION_UNAVAILABLE_MESSAGE,
+  generateFieldDraft,
+} from '../../services/fieldAssist/generation';
 import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import type { FieldAssistDraft } from '../../services/fieldAssist/types';
 import { getFieldAssistContextKey, getFieldAssistSnapshotKey, getFieldIdentityKey } from '../../services/fieldAssist/types';
@@ -36,90 +40,6 @@ function getDraftTitle(draft: FieldAssistDraft) {
   if (draft.instruction?.includes('语音原文')) return '语音原文';
   if (draft.source === 'suggestion') return '候选回填';
   return '字段生成';
-}
-
-export function renderTextWithCitations(text: string, evidenceSummary?: RuntimeEvidenceSummaryDto[]) {
-  if (!text) return null;
-  const parts = text.split(/(\[[a-zA-Z0-9\-_,，\s]+\])/g);
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (/^\[[a-zA-Z0-9\-_,，\s]+\]$/.test(part)) {
-          const match = part.match(/[a-zA-Z0-9\-_]+/g);
-          if (!match || !evidenceSummary?.length) return <span key={i}>{part}</span>;
-          
-          return (
-            <span key={i} className="inline-flex items-center">
-              {match.map((idStr, j) => {
-                let evidence: RuntimeEvidenceSummaryDto | undefined;
-                let displayNum = idStr;
-                
-                if (/^\d+$/.test(idStr)) {
-                  const idx = parseInt(idStr, 10) - 1;
-                  evidence = evidenceSummary[idx];
-                } else {
-                  const idx = evidenceSummary.findIndex(e => e.evidenceId === idStr);
-                  if (idx !== -1) {
-                    evidence = evidenceSummary[idx];
-                    displayNum = String(idx + 1);
-                  } else {
-                    const partialIdx = evidenceSummary.findIndex(e => e.evidenceId?.includes(idStr));
-                    if (partialIdx !== -1) {
-                      evidence = evidenceSummary[partialIdx];
-                      displayNum = String(partialIdx + 1);
-                    }
-                  }
-                }
-                
-                if (!evidence) return <span key={`${i}-${j}`}>[{idStr}]</span>;
-                const displaySourceSystem = evidence.sourceSystem?.toLowerCase() === 'cs-demo' 
-                  ? '病历系统' 
-                  : evidence.sourceSystem;
-                
-                const content = (
-                  <div className="w-[360px] max-w-[85vw] flex flex-col text-[12px] leading-relaxed max-h-[60vh]">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2 shrink-0">
-                      <div className="font-bold text-slate-800 flex-1 truncate mr-2" title={evidence.title}>{evidence.title || '证据来源'}</div>
-                      {displaySourceSystem && (
-                        <div className="text-[11px] text-slate-400 shrink-0">{displaySourceSystem}</div>
-                      )}
-                    </div>
-                    
-                    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar pr-2 pb-1" onWheel={(e) => e.stopPropagation()}>
-                      {evidence.summary && (
-                        <div className="rounded-md bg-blue-50/80 p-2.5 text-blue-900 font-medium whitespace-pre-wrap border border-blue-100/50 shadow-sm leading-[1.6]">
-                          {evidence.summary}
-                        </div>
-                      )}
-                      
-                      {evidence.originalText && evidence.originalText.trim() !== (evidence.summary || '').trim() && (
-                        <details className="mt-3 text-[11px] text-slate-500 pb-1">
-                          <summary className="cursor-pointer hover:text-slate-700 select-none font-medium mb-1.5 outline-none transition-colors">
-                            展开完整上下文
-                          </summary>
-                          <div className="whitespace-pre-wrap pl-2.5 border-l-2 border-slate-200 mt-2 py-0.5">
-                            {evidence.originalText}
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  </div>
-                );
-                return (
-                  <Popover key={`${i}-${j}`} content={content} trigger="click">
-                    <Tag color="blue" className="mx-[1px] px-1 py-0 cursor-pointer hover:bg-blue-100 border-blue-200 leading-tight" title="点击查看出处">
-                      {displayNum}
-                    </Tag>
-                  </Popover>
-                );
-              })}
-            </span>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
 }
 
 export default function FieldAssistPanel() {
@@ -185,6 +105,10 @@ export default function FieldAssistPanel() {
 
   const handleGenerate = async (nextInstruction?: string) => {
     if (!context || generating) return;
+    if (!context.assistantEnabled) {
+      message.info(context.assistantDisabledReason || FIELD_GENERATION_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setGenerating(true);
     try {
       const draft = await generateFieldDraft(context, nextInstruction);
@@ -241,6 +165,10 @@ export default function FieldAssistPanel() {
 
   const handleGenerateFromVoice = async () => {
     if (!context || generating) return;
+    if (!context.assistantEnabled) {
+      message.info(context.assistantDisabledReason || FIELD_GENERATION_UNAVAILABLE_MESSAGE);
+      return;
+    }
     const text = voiceText.trim();
     if (!text) {
       message.warning('请先确认语音转写文本');
@@ -277,6 +205,7 @@ export default function FieldAssistPanel() {
 
   const selectedDocName = selectedDoc?.name ?? context?.docName ?? '未选中文书';
   const selectedPatientName = currentPatient?.name ?? context?.patientName ?? '未选中患者';
+  const assistantDisabledMessage = context?.assistantDisabledReason || FIELD_GENERATION_UNAVAILABLE_MESSAGE;
 
   if (!context) {
     return (
@@ -356,19 +285,36 @@ export default function FieldAssistPanel() {
           </div>
         </div>
 
+        {!context.assistantEnabled && currentDrafts.length > 0 ? (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">
+            <InfoCircleOutlined className="mr-1.5" />
+            {assistantDisabledMessage}
+          </div>
+        ) : null}
+
         {currentDrafts.length === 0 && !generating ? (
           <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-center shadow-sm">
-            <EditOutlined className="text-lg text-slate-400" />
-            <div className="mt-2 text-sm font-bold text-slate-700">这个字段还没有生成内容</div>
-            <div className="mt-1 text-xs text-slate-400">直接生成，或在底部输入要求后发送。</div>
-            <button
-              type="button"
-              onClick={() => void handleGenerate('生成当前字段')}
-              className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-600 px-4 text-xs font-bold text-white hover:bg-emerald-700"
-            >
-              <SendOutlined />
-              生成当前字段
-            </button>
+            {context.assistantEnabled ? (
+              <>
+                <EditOutlined className="text-lg text-slate-400" />
+                <div className="mt-2 text-sm font-bold text-slate-700">这个字段还没有生成内容</div>
+                <div className="mt-1 text-xs text-slate-400">直接生成，或在底部输入要求后发送。</div>
+                <button
+                  type="button"
+                  onClick={() => void handleGenerate('生成当前字段')}
+                  className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-600 px-4 text-xs font-bold text-white hover:bg-emerald-700"
+                >
+                  <SendOutlined />
+                  生成当前字段
+                </button>
+              </>
+            ) : (
+              <>
+                <InfoCircleOutlined className="text-lg text-amber-500" />
+                <div className="mt-2 text-sm font-bold text-slate-700">当前字段请手动编辑</div>
+                <div className="mt-1 text-xs leading-5 text-slate-500">{assistantDisabledMessage}</div>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -398,7 +344,7 @@ export default function FieldAssistPanel() {
                   </div>
                 ) : null}
                 <p className="m-0 whitespace-pre-wrap text-sm leading-6 text-slate-800">
-                  {renderTextWithCitations(draft.generatedText || draft.response.generatedText || '', draft.response.evidenceSummary)}
+                  {<EvidenceCitationText text={draft.generatedText || draft.response.generatedText || ''} evidenceSummary={draft.response.evidenceSummary} />}
                 </p>
                 {(draft.response.evidenceSummary ?? []).length > 0 ? (
                   <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-[11px] leading-5 text-[#1E3A8A]">
@@ -416,7 +362,7 @@ export default function FieldAssistPanel() {
                   <button
                     type="button"
                     onClick={() => void handleGenerate('重新生成当前字段')}
-                    disabled={generating || Boolean(applyingId)}
+                    disabled={generating || Boolean(applyingId) || !context.assistantEnabled}
                     className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                   >
                     {generating ? <Loading3QuartersOutlined className="animate-spin" /> : <ReloadOutlined />}
@@ -474,8 +420,9 @@ export default function FieldAssistPanel() {
             <button
               type="button"
               onClick={() => void handleGenerateFromVoice()}
-              disabled={generating}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+              disabled={generating || !context.assistantEnabled}
+              title={context.assistantEnabled ? '根据语音生成字段' : assistantDisabledMessage}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {generating ? <Loading3QuartersOutlined className="animate-spin" /> : <EditOutlined />}
               生成字段
@@ -509,13 +456,15 @@ export default function FieldAssistPanel() {
           <input
             value={instruction}
             onChange={(event) => setInstruction(event.target.value)}
-            className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-            placeholder="补充要求，例如：更简洁、补充依据"
+            disabled={!context.assistantEnabled}
+            className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+            placeholder={context.assistantEnabled ? '补充要求，例如：更简洁、补充依据' : assistantDisabledMessage}
           />
           <button
             type="submit"
-            disabled={generating}
-            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-md bg-slate-900 px-4 text-xs font-bold text-white hover:bg-slate-700 disabled:opacity-50"
+            disabled={generating || !context.assistantEnabled}
+            title={context.assistantEnabled ? '发送生成要求' : assistantDisabledMessage}
+            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-md bg-slate-900 px-4 text-xs font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <SendOutlined />
             发送

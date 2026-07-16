@@ -20,11 +20,14 @@ export interface FieldAssistContext {
   docName: string;
   fieldKey: string;
   fieldLabel: string;
+  assistantEnabled: boolean;
+  assistantDisabledReason?: string;
   dataElementCode?: string;
   dataElementName?: string;
   parentFieldKey?: string;
   compositionItemKey?: string;
   compositionItemLabel?: string;
+  compositionSourceType?: 'fixed' | 'ai' | 'manual' | (string & {});
   compositionTemplateId?: number;
   doctorCode?: string;
   doctorName?: string;
@@ -83,11 +86,14 @@ export function getFieldAssistContextKey(
 export function getFieldAssistSnapshotKey(context: FieldAssistContext) {
   return [
     getFieldAssistContextKey(context),
+    String(context.assistantEnabled),
+    context.assistantDisabledReason ?? '',
     context.dataElementCode ?? '',
     context.dataElementName ?? '',
     context.parentFieldKey ?? '',
     context.compositionItemKey ?? '',
     context.compositionItemLabel ?? '',
+    context.compositionSourceType ?? '',
     context.compositionTemplateId ?? '',
     context.fieldValue,
     context.selectedText,

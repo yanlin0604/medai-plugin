@@ -24,6 +24,16 @@ const baseContext: EmrContext = {
 };
 
 describe('activateEmrContext', () => {
+  it.each(['DOC004', 'DOC017'] as const)('activates %s from CS context without filtering it out', (docCode) => {
+    const selectPatient = vi.fn();
+    const selectDoc = vi.fn();
+
+    const activation = activateEmrContext({ ...baseContext, docCode, docName: docCode === 'DOC004' ? '主治医生查房记录' : '主治医生首次查房记录' }, selectPatient, selectDoc);
+
+    expect(activation?.docCode).toBe(docCode);
+    expect(selectDoc).toHaveBeenCalledWith(expect.objectContaining({ code: docCode }));
+  });
+
   it('keeps the EMR reported document name for registered document codes', () => {
     const selectPatient = vi.fn();
     const selectDoc = vi.fn();

@@ -157,8 +157,24 @@ describe('dischargeRuntime', () => {
     expect(isDischargeMetaSection(runtime.sections[0], runtime.metaFieldKeys)).toBe(true);
     expect(runtime.sections[0]).toMatchObject({ inputType: 'date', editable: true });
     expect(runtime.metaRows[2][0]).toEqual({ label: '入院日期', value: '2026-06-01' });
-    expect(runtime.readOnlyHints.admissionDate).toBe('');
+    expect(runtime.readOnlyHints.admissionDate).toBeUndefined();
     expect(runtime.icdCandidates[0]).toMatchObject({ code: 'I25.101', confidence: 96 });
+  });
+
+  it('字段卡片标题优先使用字段名称而不是文书分组名称', () => {
+    const runtime = buildDischargeRuntime(
+      template([field({
+        fieldKey: 'treatmentCourse',
+        fieldLabel: '诊疗经过',
+        sectionName: '出院记录',
+        inputType: 'text',
+        writebackFieldKey: 'bs.treatment_course',
+      })]),
+      values(),
+      patient,
+    );
+
+    expect(runtime.sections[0].title).toBe('诊疗经过');
   });
 
   it('blocks missing or inconsistent backend template configuration', () => {

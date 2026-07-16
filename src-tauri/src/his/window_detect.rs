@@ -71,6 +71,9 @@ pub struct FieldAssistContext {
     pub doc_name: String,
     pub field_key: String,
     pub field_label: String,
+    pub assistant_enabled: bool,
+    #[serde(default)]
+    pub assistant_disabled_reason: Option<String>,
     #[serde(default)]
     pub data_element_code: Option<String>,
     #[serde(default)]
@@ -81,6 +84,10 @@ pub struct FieldAssistContext {
     pub composition_item_key: Option<String>,
     #[serde(default)]
     pub composition_item_label: Option<String>,
+    #[serde(default)]
+    pub composition_source_type: Option<String>,
+    #[serde(default)]
+    pub composition_template_id: Option<i64>,
     #[serde(default)]
     pub doctor_code: Option<String>,
     #[serde(default)]
