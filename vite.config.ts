@@ -18,5 +18,12 @@ export default defineConfig(async () => ({
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 5174 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
+    proxy: {
+      "/medai-admin": {
+        target: "http://47.113.122.118:9118",
+        changeOrigin: true,
+        ws: true,
+      },
+    },
   },
 }));

@@ -1,4 +1,5 @@
-import axios, { type AxiosResponse } from 'axios';
+import { invoke } from '@tauri-apps/api/core';
+import axios, { type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
 import {
   DOC_REGISTRY,
   getDocByCode,
@@ -45,6 +46,7 @@ import type {
   RuntimeWritebackAuditResponse,
 } from './pluginRuntimeTypes';
 import { buildGenericDocTemplate, docTemplates } from './samples/templates';
+import { isTauriRuntime } from './windowMode';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 const RUNTIME_SUCCESS_CODE = 200;
@@ -75,11 +77,94 @@ const DOC_DISPLAY_ALIAS_CODES: Record<string, string> = {
   DOC050: 'DOC009',
 };
 
+interface TauriRuntimeProxyResponse {
+  status: number;
+  status_text: string;
+  headers: Record<string, string>;
+  data: unknown;
+}
+
+function stringifyHeaderValue(value: unknown): string | null {
+  if (value == null) return null;
+  if (Array.isArray(value)) return value.map(String).join(', ');
+  return String(value);
+}
+
+function toHeaderRecord(headers: InternalAxiosRequestConfig['headers']): Record<string, string> {
+  const headerEntries = typeof headers?.toJSON === 'function'
+    ? Object.entries(headers.toJSON())
+    : Object.entries(headers ?? {});
+
+  return Object.fromEntries(
+    headerEntries
+      .map(([key, value]) => [key, stringifyHeaderValue(value)] as const)
+      .filter((entry): entry is [string, string] => Boolean(entry[1])),
+  );
+}
+
+function appendParams(url: string, params: unknown): string {
+  if (!params || typeof params !== 'object') return url;
+  const [path, hash = ''] = url.split('#');
+  const [basePath, query = ''] = path.split('?');
+  const searchParams = new URLSearchParams(query);
+
+  Object.entries(params as Record<string, unknown>).forEach(([key, value]) => {
+    if (value == null) return;
+    const values = Array.isArray(value) ? value : [value];
+    values.forEach((item) => {
+      if (item != null) searchParams.append(key, String(item));
+    });
+  });
+
+  const queryString = searchParams.toString();
+  return `${basePath}${queryString ? `?${queryString}` : ''}${hash ? `#${hash}` : ''}`;
+}
+
+function parseRequestBody(data: unknown): unknown {
+  if (typeof data !== 'string') return data;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return data;
+  }
+}
+
+function buildRuntimeRequestUrl(config: InternalAxiosRequestConfig): string {
+  const baseUrl = String(config.baseURL ?? '').replace(/\/+$/, '');
+  const requestUrl = String(config.url ?? '');
+  const url = /^https?:\/\//i.test(requestUrl)
+    ? requestUrl
+    : `${baseUrl}${requestUrl.startsWith('/') ? '' : '/'}${requestUrl}`;
+
+  return appendParams(url, config.params);
+}
+
+const tauriRuntimeAdapter: AxiosAdapter = async (config) => {
+  const response = await invoke<TauriRuntimeProxyResponse>('runtime_http_request', {
+    request: {
+      method: String(config.method ?? 'GET').toUpperCase(),
+      url: buildRuntimeRequestUrl(config),
+      headers: toHeaderRecord(config.headers),
+      body: parseRequestBody(config.data) ?? null,
+    },
+  });
+
+  return {
+    data: response.data,
+    status: response.status,
+    statusText: response.status_text,
+    headers: response.headers,
+    config,
+    request: null,
+  };
+};
+
 const http = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'X-Plugin-Key': import.meta.env.VITE_PLUGIN_API_KEY ?? 'test-plugin-key-123456',
   },
+  ...(isTauriRuntime() ? { adapter: tauriRuntimeAdapter } : {}),
 });
 
 function isRuntimeApiResponse(value: unknown): value is RuntimeApiResponse<unknown> {

@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:* ws://localhost:* http://192.168.1.88:8080 ws://192.168.1.88:8081 http: https: ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* http://192.168.1.88:8080 ws://192.168.1.88:8080 ws://192.168.2.43:8000 http://47.113.122.118:9118 ws://47.113.122.118:9118; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",

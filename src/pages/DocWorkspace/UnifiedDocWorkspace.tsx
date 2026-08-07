@@ -21,7 +21,7 @@ import type {
 import type { DocFieldDef, DocTemplate, FieldValue } from '../../services/types';
 import type { FieldAssistContext, FieldAssistDraft } from '../../services/fieldAssist/types';
 import { buildSuggestionDraft, generateFieldDraft } from '../../services/fieldAssist/generation';
-import { applyFieldDraft, insertTextIntoFieldContext } from '../../services/fieldAssist/writeback';
+import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import { submitDocument } from '../../services/emsBridge';
 import { loadDraft, saveDraft } from '../../services/draftService';
 import { stripCitations } from '../../services/documentFlow';
@@ -71,6 +71,11 @@ interface AsrServerMessage {
   is_final?: boolean;
 }
 
+interface VoiceTextSelection {
+  start: number;
+  end: number;
+}
+
 type AudioContextWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
@@ -97,6 +102,26 @@ const ASR_MODE = '2';
 function buildAsrWsUrl(baseUrl: string, mode: string) {
   const separator = baseUrl.includes('?') ? '&' : '?';
   return `${baseUrl}${separator}mode=${encodeURIComponent(mode)}`;
+}
+
+function clampTextOffset(value: number, max: number) {
+  if (!Number.isFinite(value)) return max;
+  return Math.max(0, Math.min(max, Math.trunc(value)));
+}
+
+function normalizeTextSelection(selection: VoiceTextSelection, textLength: number): VoiceTextSelection {
+  const anchor = clampTextOffset(selection.start, textLength);
+  const focus = clampTextOffset(selection.end, textLength);
+  return {
+    start: Math.min(anchor, focus),
+    end: Math.max(anchor, focus),
+  };
+}
+
+function adjustOffsetAfterRangeRemoval(offset: number, range: VoiceTextSelection) {
+  if (offset <= range.start) return offset;
+  if (offset >= range.end) return offset - (range.end - range.start);
+  return range.start;
 }
 
 function valueToText(value: unknown): string {
@@ -565,6 +590,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const voiceTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const voiceTextRef = useRef('');
+  const voiceSelectionRef = useRef<VoiceTextSelection>({ start: 0, end: 0 });
+  const voicePartialRangeRef = useRef<VoiceTextSelection | null>(null);
   const voiceFieldKeyRef = useRef('');
   const finalVoiceDraftRef = useRef('');
   const voiceBaseContextRef = useRef<FieldAssistContext | null>(null);
@@ -585,6 +614,10 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     () => compactTopMetaItems(topSessions),
     [topSessions],
   );
+
+  useEffect(() => {
+    voiceTextRef.current = voiceText;
+  }, [voiceText]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1050,16 +1083,76 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     void handleGenerate(activeSession.field.key, `根据语音转写生成${activeSession.field.label}`, voiceText.trim());
   };
 
-  const writeVoiceTranscript = (fieldKey: string, transcriptDraft: string) => {
-    const baseContext = voiceBaseContextRef.current;
-    const nextText = baseContext
-      ? insertTextIntoFieldContext(baseContext, transcriptDraft).text
-      : transcriptDraft;
+  const setVoiceDraftText = (fieldKey: string, nextText: string, selection?: VoiceTextSelection) => {
+    voiceTextRef.current = nextText;
     setVoiceText(nextText);
+    if (selection) {
+      const nextSelection = normalizeTextSelection(selection, nextText.length);
+      voiceSelectionRef.current = nextSelection;
+      window.setTimeout(() => {
+        const textarea = voiceTextAreaRef.current;
+        if (!textarea) return;
+        const currentSelection = normalizeTextSelection(voiceSelectionRef.current, textarea.value.length);
+        textarea.setSelectionRange(currentSelection.start, currentSelection.end);
+      }, 0);
+    }
     updateSession(fieldKey, (item) => ({
       ...item,
       value: nextText,
     }));
+  };
+
+  const updateVoiceSelectionFromElement = (element: HTMLTextAreaElement | null = voiceTextAreaRef.current) => {
+    if (!element) return;
+    voiceSelectionRef.current = normalizeTextSelection({
+      start: element.selectionStart,
+      end: element.selectionEnd,
+    }, element.value.length);
+  };
+
+  const commitCurrentVoicePartial = () => {
+    const partialRange = voicePartialRangeRef.current;
+    if (!partialRange) return;
+    const currentText = voiceTextRef.current;
+    const range = normalizeTextSelection(partialRange, currentText.length);
+    finalVoiceDraftRef.current = `${finalVoiceDraftRef.current}${currentText.slice(range.start, range.end)}`;
+    voicePartialRangeRef.current = null;
+  };
+
+  const insertVoiceSegmentAtCursor = (fieldKey: string, segmentText: string, isFinal: boolean) => {
+    const currentText = voiceTextRef.current;
+    let baseText = currentText;
+    let selection = normalizeTextSelection(voiceSelectionRef.current, currentText.length);
+    const partialRange = voicePartialRangeRef.current
+      ? normalizeTextSelection(voicePartialRangeRef.current, currentText.length)
+      : null;
+
+    if (partialRange) {
+      baseText = `${currentText.slice(0, partialRange.start)}${currentText.slice(partialRange.end)}`;
+      selection = normalizeTextSelection({
+        start: adjustOffsetAfterRangeRemoval(selection.start, partialRange),
+        end: adjustOffsetAfterRangeRemoval(selection.end, partialRange),
+      }, baseText.length);
+    }
+
+    const insertRange = normalizeTextSelection(selection, baseText.length);
+    const nextText = `${baseText.slice(0, insertRange.start)}${segmentText}${baseText.slice(insertRange.end)}`;
+    const nextSelection = {
+      start: insertRange.start + segmentText.length,
+      end: insertRange.start + segmentText.length,
+    };
+
+    if (isFinal) {
+      finalVoiceDraftRef.current = `${finalVoiceDraftRef.current}${segmentText}`;
+      voicePartialRangeRef.current = null;
+    } else {
+      voicePartialRangeRef.current = {
+        start: insertRange.start,
+        end: insertRange.start + segmentText.length,
+      };
+    }
+
+    setVoiceDraftText(fieldKey, nextText, nextSelection);
   };
 
   const handleAsrMessage = (data: AsrServerMessage) => {
@@ -1067,17 +1160,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     if (!fieldKey) return;
 
     if (!data.text && data.is_final) {
-      writeVoiceTranscript(fieldKey, finalVoiceDraftRef.current);
+      commitCurrentVoicePartial();
       return;
     }
     if (!data.text) return;
 
-    const nextDraft = `${finalVoiceDraftRef.current}${data.text}`;
-    writeVoiceTranscript(fieldKey, nextDraft);
-
-    if (data.is_final !== false) {
-      finalVoiceDraftRef.current = nextDraft;
-    }
+    insertVoiceSegmentAtCursor(fieldKey, data.text, data.is_final !== false);
   };
 
   const stopAsrRecording = (sendFlush = true) => {
@@ -1125,6 +1213,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setVoicePanelOpen(false);
     voiceFieldKeyRef.current = '';
     finalVoiceDraftRef.current = '';
+    voicePartialRangeRef.current = null;
     voiceBaseContextRef.current = null;
   };
 
@@ -1138,11 +1227,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     }, 0);
   };
 
-  const handleVoiceTextChange = (nextText: string) => {
-    setVoiceText(nextText);
+  const handleVoiceTextChange = (nextText: string, selection?: VoiceTextSelection) => {
     if (!activeSession) return;
+    voicePartialRangeRef.current = null;
+    const nextSelection = selection ?? { start: nextText.length, end: nextText.length };
     if (voiceFieldKeyRef.current) {
-      finalVoiceDraftRef.current = nextText;
+      finalVoiceDraftRef.current = '';
       const editContext = fieldContext?.fieldKey === activeSession.field.key
         ? fieldContext
         : buildContext(doc, patient, activeSession);
@@ -1154,10 +1244,22 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         selectionEnd: 0,
       };
     }
-    updateSession(activeSession.field.key, (item) => ({
-      ...item,
-      value: nextText,
-    }));
+    setVoiceDraftText(activeSession.field.key, nextText, nextSelection);
+  };
+
+  const handleVoiceSelectionChange = () => {
+    updateVoiceSelectionFromElement();
+  };
+
+  const focusVoiceTextareaAtSelection = (selection: VoiceTextSelection) => {
+    voiceSelectionRef.current = selection;
+    window.setTimeout(() => {
+      const textarea = voiceTextAreaRef.current;
+      if (!textarea) return;
+      const nextSelection = normalizeTextSelection(selection, textarea.value.length);
+      textarea.focus();
+      textarea.setSelectionRange(nextSelection.start, nextSelection.end);
+    }, 0);
   };
 
   const handleToggleRecording = async () => {
@@ -1184,13 +1286,21 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     const activeContext = fieldContext?.fieldKey === targetFieldKey
       ? fieldContext
       : buildContext(doc, patient, activeSession);
+    const initialSelection = {
+      start: activeContext.fieldValue.length,
+      end: activeContext.fieldValue.length,
+    };
     stopAsrRecording(false);
     voiceFieldKeyRef.current = targetFieldKey;
     voiceBaseContextRef.current = activeContext;
     finalVoiceDraftRef.current = '';
+    voicePartialRangeRef.current = null;
+    voiceTextRef.current = activeContext.fieldValue;
+    voiceSelectionRef.current = initialSelection;
     setVoicePanelOpen(true);
     setRecording(true);
     setVoiceText(activeContext.fieldValue);
+    focusVoiceTextareaAtSelection(initialSelection);
     message.loading({ content: `正在连接语音识别服务，准备采集「${activeSession.field.label}」语音...`, key: 'doc-workspace-voice' });
 
     try {
@@ -1264,6 +1374,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       setVoicePanelOpen(false);
       voiceFieldKeyRef.current = '';
       finalVoiceDraftRef.current = '';
+      voicePartialRangeRef.current = null;
       voiceBaseContextRef.current = null;
       message.error({
         content: voiceError instanceof Error ? voiceError.message : '无法获取麦克风权限。',
@@ -1323,8 +1434,16 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       return;
     }
 
-    const applyContext = voiceBaseContextRef.current?.fieldKey === fieldKey
-      ? voiceBaseContextRef.current
+    const isVoiceDraftApply = voicePanelOpen && voiceBaseContextRef.current?.fieldKey === fieldKey;
+    const applyContext: FieldAssistContext = isVoiceDraftApply
+      ? {
+        ...fieldContext,
+        fieldValue: '',
+        selectedText: '',
+        prefix: '',
+        selectionStart: 0,
+        selectionEnd: 0,
+      }
       : fieldContext;
     const targetCompositionItemKey = applyContext.compositionItemKey && session.compositionTemplate
       ? applyContext.compositionItemKey
@@ -1332,31 +1451,34 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     const targetText = targetCompositionItemKey
       ? session.compositionValues?.[targetCompositionItemKey] ?? ''
       : getSessionDisplayValue(session);
-    const finalText = applyContext === voiceBaseContextRef.current && finalVoiceDraftRef.current.trim()
-      ? finalVoiceDraftRef.current.trim()
+    const finalText = isVoiceDraftApply
+      ? voiceText
       : targetText;
     const existingDraft = targetCompositionItemKey
       ? session.compositionDrafts?.[targetCompositionItemKey]
       : session.draft;
+    const voiceApplyDraft = isVoiceDraftApply && !existingDraft
+      ? buildSuggestionDraft(applyContext, finalText, 'voice draft writeback')
+      : null;
     const effectiveDraft = existingDraft ?? buildSuggestionDraft(applyContext, targetText, '当前字段文本回填');
     try {
       await applyFieldDraft({
         context: applyContext,
-        response: effectiveDraft.response,
+        response: (voiceApplyDraft ?? effectiveDraft).response,
         finalText,
         mode: targetCompositionItemKey
           ? 'overwrite'
-          : applyContext === voiceBaseContextRef.current
-          ? (applyContext.fieldValue.trim() ? 'replaceSelection' : 'overwrite')
+          : isVoiceDraftApply
+          ? 'overwrite'
           : undefined,
         doctorName: patient.doctor,
       });
       if (!existingDraft) {
-        addDraft(effectiveDraft);
+        addDraft(voiceApplyDraft ?? effectiveDraft);
         updateSession(fieldKey, (item) => (
           targetCompositionItemKey
-            ? updateCompositionItemInSession(item, targetCompositionItemKey, finalText, effectiveDraft)
-            : { ...item, draft: effectiveDraft }
+            ? updateCompositionItemInSession(item, targetCompositionItemKey, finalText, voiceApplyDraft ?? effectiveDraft)
+            : { ...item, draft: voiceApplyDraft ?? effectiveDraft }
         ));
       }
     } catch (applyError) {
@@ -1758,8 +1880,16 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                   </div>
                 </div>
                 <textarea
+                  ref={voiceTextAreaRef}
                   value={voiceText}
-                  onChange={(event) => handleVoiceTextChange(event.target.value)}
+                  onChange={(event) => handleVoiceTextChange(event.target.value, {
+                    start: event.target.selectionStart,
+                    end: event.target.selectionEnd,
+                  })}
+                  onSelect={handleVoiceSelectionChange}
+                  onClick={handleVoiceSelectionChange}
+                  onKeyUp={handleVoiceSelectionChange}
+                  onFocus={handleVoiceSelectionChange}
                   className="h-16 w-full resize-none rounded-md border border-blue-100 bg-white px-3 py-2 text-xs leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#1E3A8A]"
                   placeholder={recording ? '正在听写，转写结果稍后显示...' : '语音转文字结果会显示在这里'}
                   disabled={!activeSession}

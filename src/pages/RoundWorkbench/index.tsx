@@ -451,7 +451,7 @@ export default function RoundWorkbench() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-[#F8FAFC] text-slate-800 font-sans">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#F8FAFC] text-slate-800 font-sans">
       <header className="shrink-0 border-b border-slate-200 bg-white px-6 py-4 flex items-center justify-between shadow-sm">
         <button
           onClick={() => {
@@ -470,7 +470,9 @@ export default function RoundWorkbench() {
         <div className="w-10"></div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-between pb-10 pt-8 px-6">
+      <main className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-2">
+          <div className="mx-auto flex min-h-full w-full max-w-md flex-col items-center justify-start gap-5">
         {/* 中间高亮显示区域 - 🩺 正在查房：X床 - 姓名 */}
         <div className="w-full max-w-sm shrink-0">
           {currentPatient ? (
@@ -493,22 +495,22 @@ export default function RoundWorkbench() {
         </div>
 
         {/* 麦克风录音动画与时间 */}
-        <div className="flex flex-col items-center justify-center my-6">
-          <div className="relative mb-8 flex items-center justify-center">
+        <div className="flex flex-col items-center justify-center">
+          <div className="relative mb-5 flex items-center justify-center">
             {isRecording && !isFinishing && (
               <div className="absolute inset-0 animate-ping rounded-full bg-blue-400/20"></div>
             )}
-            <div className={`relative flex h-40 w-40 items-center justify-center rounded-full bg-gradient-to-br shadow-xl transition-all duration-500 ${
+            <div className={`relative flex h-32 w-32 items-center justify-center rounded-full bg-gradient-to-br shadow-xl transition-all duration-500 ${
               isRecording && !isFinishing
                 ? 'from-[#2563EB] to-[#1E3A8A] shadow-blue-500/30 scale-100' 
                 : 'from-slate-300 to-slate-400 shadow-slate-400/20 scale-95'
             }`}>
-              <AudioOutlined className={`text-5xl text-white ${isRecording && !isFinishing ? 'animate-pulse' : ''}`} />
+              <AudioOutlined className={`text-4xl text-white ${isRecording && !isFinishing ? 'animate-pulse' : ''}`} />
             </div>
           </div>
 
           <div className="text-center">
-            <div className="font-mono text-4xl font-bold tracking-widest text-slate-800">
+            <div className="font-mono text-3xl font-bold tracking-widest text-slate-800">
               {formatTime(seconds)}
             </div>
             <div className="mt-3 text-xs font-semibold tracking-widest text-[#1E3A8A] bg-blue-50 px-4 py-1 rounded-full inline-block">
@@ -534,19 +536,20 @@ export default function RoundWorkbench() {
           )}
         </div>
 
+          </div>
+        </div>
+
         {/* 结束查房按钮 */}
-        <div className="flex items-center justify-center shrink-0 w-full mt-4">
+        <div className="shrink-0 border-t border-slate-200 bg-white/95 px-6 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.06)] backdrop-blur">
           <button
             onClick={handleFinish}
             disabled={isFinishing || !isRecording}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-[#1E3A8A] text-white shadow-lg transition-all hover:bg-[#172554] hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="mx-auto flex h-12 w-full max-w-md items-center justify-center gap-2 rounded-lg bg-[#1E3A8A] px-4 text-sm font-bold tracking-widest text-white shadow-lg transition-colors hover:bg-[#172554] disabled:cursor-not-allowed disabled:opacity-50"
             title="结束查房"
             aria-label="结束查房"
           >
-            <div className="flex flex-col items-center gap-0.5">
-              <CheckOutlined className="text-lg" />
-              <span className="text-[9px] font-bold tracking-widest">结束</span>
-            </div>
+            <CheckOutlined className="text-base" />
+            <span>结束查房</span>
           </button>
         </div>
       </main>

@@ -53,7 +53,7 @@ import {
   getFieldGenerationUnavailableMessage,
 } from '../../services/fieldAssist/generation';
 import { resolveFieldAssistIntent, shouldAutoGenerateField } from '../../services/fieldAssist/intentResolver';
-import { applyFieldDraft, insertTextIntoFieldContext } from '../../services/fieldAssist/writeback';
+import { applyFieldDraft } from '../../services/fieldAssist/writeback';
 import type { FieldAssistContext, FieldAssistDraft, FieldAssistIntent } from '../../services/fieldAssist/types';
 import { getFieldAssistContextKey, getFieldAssistSnapshotKey } from '../../services/fieldAssist/types';
 import { BrowserAsrSession } from '../../services/asr/browserAsrSession';
@@ -68,6 +68,11 @@ type BubbleDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written'
 type CopyStatus = 'idle' | 'copied' | 'error';
 type FieldDraftStatus = 'idle' | 'generating' | 'ready' | 'writing' | 'written' | 'error';
 type SuggestionStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+interface VoiceTextSelection {
+  start: number;
+  end: number;
+}
 
 const GENERATION_STEPS = [
   '拉取入院记录',
@@ -84,6 +89,26 @@ const ROUND_RECORD_FIELD_LABEL = '查房记录';
 
 function getFieldContextSnapshotKey(context: FieldAssistContext) {
   return getFieldAssistSnapshotKey(context);
+}
+
+function clampTextOffset(value: number, max: number) {
+  if (!Number.isFinite(value)) return max;
+  return Math.max(0, Math.min(max, Math.trunc(value)));
+}
+
+function normalizeTextSelection(selection: VoiceTextSelection, textLength: number): VoiceTextSelection {
+  const anchor = clampTextOffset(selection.start, textLength);
+  const focus = clampTextOffset(selection.end, textLength);
+  return {
+    start: Math.min(anchor, focus),
+    end: Math.max(anchor, focus),
+  };
+}
+
+function adjustOffsetAfterRangeRemoval(offset: number, range: VoiceTextSelection) {
+  if (offset <= range.start) return offset;
+  if (offset >= range.end) return offset - (range.end - range.start);
+  return range.start;
 }
 
 function getEditContextSnapshotKey(context: BsEditAssistContext) {
@@ -161,6 +186,10 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const voiceContextKeyRef = useRef('');
+  const voiceTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const voiceTextRef = useRef('');
+  const voiceSelectionRef = useRef<VoiceTextSelection>({ start: 0, end: 0 });
+  const voicePartialRangeRef = useRef<VoiceTextSelection | null>(null);
   const finalVoiceDraftRef = useRef('');
   const voiceBaseContextRef = useRef<FieldAssistContext | null>(null);
   const voiceSessionRef = useRef<BrowserAsrSession | null>(null);
@@ -190,6 +219,10 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
       : '',
     [editContext],
   );
+
+  useEffect(() => {
+    voiceTextRef.current = voiceText;
+  }, [voiceText]);
 
   const resolveRoundTranscriptText = async (context: FieldAssistContext) => {
     if (!isRoundDrivenFieldContext(context)) {
@@ -604,11 +637,13 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     setVoicePanelOpen(false);
     voiceContextKeyRef.current = '';
     finalVoiceDraftRef.current = '';
+    voicePartialRangeRef.current = null;
     voiceBaseContextRef.current = null;
   };
 
   const clearVoiceDraft = () => {
     finalVoiceDraftRef.current = '';
+    voicePartialRangeRef.current = null;
     voiceBaseContextRef.current = fieldContext
       ? {
         ...fieldContext,
@@ -618,14 +653,79 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         selectionEnd: 0,
       }
       : null;
+    voiceTextRef.current = '';
+    voiceSelectionRef.current = { start: 0, end: 0 };
     setVoiceText('');
   };
 
-  const writeVoiceTranscript = (contextKey: string, transcriptDraft: string) => {
+  const setVoiceDraftText = (nextText: string, selection?: VoiceTextSelection) => {
+    voiceTextRef.current = nextText;
+    setVoiceText(nextText);
+    if (!selection) return;
+
+    const nextSelection = normalizeTextSelection(selection, nextText.length);
+    voiceSelectionRef.current = nextSelection;
+    window.setTimeout(() => {
+      const textarea = voiceTextAreaRef.current;
+      if (!textarea) return;
+      const currentSelection = normalizeTextSelection(voiceSelectionRef.current, textarea.value.length);
+      textarea.setSelectionRange(currentSelection.start, currentSelection.end);
+    }, 0);
+  };
+
+  const updateVoiceSelectionFromElement = (element: HTMLTextAreaElement | null = voiceTextAreaRef.current) => {
+    if (!element) return;
+    voiceSelectionRef.current = normalizeTextSelection({
+      start: element.selectionStart,
+      end: element.selectionEnd,
+    }, element.value.length);
+  };
+
+  const commitCurrentVoicePartial = () => {
+    const partialRange = voicePartialRangeRef.current;
+    if (!partialRange) return;
+    const currentText = voiceTextRef.current;
+    const range = normalizeTextSelection(partialRange, currentText.length);
+    finalVoiceDraftRef.current = `${finalVoiceDraftRef.current}${currentText.slice(range.start, range.end)}`;
+    voicePartialRangeRef.current = null;
+  };
+
+  const insertVoiceSegmentAtCursor = (contextKey: string, segmentText: string, isFinal: boolean) => {
     if (voiceContextKeyRef.current !== contextKey) return;
-    const baseContext = voiceBaseContextRef.current ?? fieldContext;
-    if (!baseContext) return;
-    setVoiceText(insertTextIntoFieldContext(baseContext, transcriptDraft).text);
+
+    const currentText = voiceTextRef.current;
+    let baseText = currentText;
+    let selection = normalizeTextSelection(voiceSelectionRef.current, currentText.length);
+    const partialRange = voicePartialRangeRef.current
+      ? normalizeTextSelection(voicePartialRangeRef.current, currentText.length)
+      : null;
+
+    if (partialRange) {
+      baseText = `${currentText.slice(0, partialRange.start)}${currentText.slice(partialRange.end)}`;
+      selection = normalizeTextSelection({
+        start: adjustOffsetAfterRangeRemoval(selection.start, partialRange),
+        end: adjustOffsetAfterRangeRemoval(selection.end, partialRange),
+      }, baseText.length);
+    }
+
+    const insertRange = normalizeTextSelection(selection, baseText.length);
+    const nextText = `${baseText.slice(0, insertRange.start)}${segmentText}${baseText.slice(insertRange.end)}`;
+    const nextSelection = {
+      start: insertRange.start + segmentText.length,
+      end: insertRange.start + segmentText.length,
+    };
+
+    if (isFinal) {
+      finalVoiceDraftRef.current = `${finalVoiceDraftRef.current}${segmentText}`;
+      voicePartialRangeRef.current = null;
+    } else {
+      voicePartialRangeRef.current = {
+        start: insertRange.start,
+        end: insertRange.start + segmentText.length,
+      };
+    }
+
+    setVoiceDraftText(nextText, nextSelection);
   };
 
   const handleAsrMessage = (data: AsrServerMessage) => {
@@ -633,21 +733,17 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     if (!contextKey) return;
 
     if (!data.text && data.is_final) {
-      writeVoiceTranscript(contextKey, finalVoiceDraftRef.current);
+      commitCurrentVoicePartial();
       return;
     }
     if (!data.text) return;
 
-    const nextDraft = `${finalVoiceDraftRef.current}${data.text}`;
-    writeVoiceTranscript(contextKey, nextDraft);
-
-    if (data.is_final !== false) {
-      finalVoiceDraftRef.current = nextDraft;
-    }
+    insertVoiceSegmentAtCursor(contextKey, data.text, data.is_final !== false);
   };
 
-  const handleVoiceTextChange = (nextText: string) => {
-    finalVoiceDraftRef.current = nextText;
+  const handleVoiceTextChange = (nextText: string, selection?: VoiceTextSelection) => {
+    finalVoiceDraftRef.current = '';
+    voicePartialRangeRef.current = null;
     voiceBaseContextRef.current = fieldContext
       ? {
         ...fieldContext,
@@ -657,7 +753,22 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         selectionEnd: 0,
       }
       : null;
-    setVoiceText(nextText);
+    setVoiceDraftText(nextText, selection ?? { start: nextText.length, end: nextText.length });
+  };
+
+  const handleVoiceSelectionChange = () => {
+    updateVoiceSelectionFromElement();
+  };
+
+  const focusVoiceTextareaAtSelection = (selection: VoiceTextSelection) => {
+    voiceSelectionRef.current = selection;
+    window.setTimeout(() => {
+      const textarea = voiceTextAreaRef.current;
+      if (!textarea) return;
+      const nextSelection = normalizeTextSelection(selection, textarea.value.length);
+      textarea.focus();
+      textarea.setSelectionRange(nextSelection.start, nextSelection.end);
+    }, 0);
   };
 
   const handleToggleVoiceRecording = async (event: MouseEvent<HTMLButtonElement>) => {
@@ -678,13 +789,21 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
     }
 
     const requestContextKey = fieldContextKey;
+    const initialSelection = {
+      start: fieldContext.fieldValue.length,
+      end: fieldContext.fieldValue.length,
+    };
     stopVoiceRecording(false);
     voiceContextKeyRef.current = requestContextKey;
     voiceBaseContextRef.current = fieldContext;
     finalVoiceDraftRef.current = '';
+    voicePartialRangeRef.current = null;
+    voiceTextRef.current = fieldContext.fieldValue;
+    voiceSelectionRef.current = initialSelection;
     setVoiceText(fieldContext.fieldValue);
     setVoicePanelOpen(true);
     setVoiceRecording(true);
+    focusVoiceTextareaAtSelection(initialSelection);
 
     try {
       const session = new BrowserAsrSession({
@@ -714,17 +833,24 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
   const handleApplyVoiceDraft = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (!fieldContext || !voiceText.trim() || fieldDraftStatus === 'writing') return;
-    const baseContext = voiceBaseContextRef.current ?? fieldContext;
+    const baseContext: FieldAssistContext = {
+      ...fieldContext,
+      fieldValue: '',
+      selectedText: '',
+      prefix: '',
+      selectionStart: 0,
+      selectionEnd: 0,
+    };
 
     const draft = buildSuggestionDraft(fieldContext, voiceText.trim(), '语音转写回填');
-    const finalText = finalVoiceDraftRef.current.trim() || voiceText.trim();
+    const finalText = voiceText;
     setFieldDraftStatus('writing');
     setFieldStatusText('正在回填语音草稿');
     void applyFieldDraft({
       context: baseContext,
       response: draft.response,
       finalText,
-      mode: baseContext.fieldValue.trim() ? 'replaceSelection' : 'overwrite',
+      mode: 'overwrite',
       doctorName: '林志远 主治医师',
     })
       .then(() => {
@@ -1009,8 +1135,16 @@ export default function BubbleShell({ onExpand }: BubbleShellProps) {
         </div>
         <textarea
           data-tauri-drag-region="false"
+          ref={voiceTextAreaRef}
           value={voiceText}
-          onChange={(event) => handleVoiceTextChange(event.target.value)}
+          onChange={(event) => handleVoiceTextChange(event.target.value, {
+            start: event.target.selectionStart,
+            end: event.target.selectionEnd,
+          })}
+          onSelect={handleVoiceSelectionChange}
+          onClick={handleVoiceSelectionChange}
+          onKeyUp={handleVoiceSelectionChange}
+          onFocus={handleVoiceSelectionChange}
           className="h-14 w-full resize-none rounded border border-blue-100 bg-white px-2 py-1.5 text-[11px] leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#1E3A8A]"
           placeholder={voiceRecording ? '正在听写，转写内容会显示在这里...' : '语音转写内容会显示在这里'}
         />
