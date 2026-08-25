@@ -3,12 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowRightOutlined,
   CheckOutlined,
+  FileProtectOutlined,
   LockOutlined,
   SafetyCertificateOutlined,
+  SyncOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { message } from 'antd';
+import LegalAgreementModal, { type AgreementKind } from '../../components/LegalAgreementModal';
 import { changePassword } from '../../services/authService';
+import { checkForApplicationUpdate } from '../../services/updateService';
 import { useAuthStore } from '../../stores/useAuthStore';
 
 export default function Profile() {
@@ -19,6 +23,8 @@ export default function Profile() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [agreementKind, setAgreementKind] = useState<AgreementKind | null>(null);
 
   if (!userInfo) return null;
 
@@ -54,6 +60,22 @@ export default function Profile() {
     }
   };
 
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const result = await checkForApplicationUpdate();
+      if (result.available && result.latestVersion) {
+        message.info(`发现新版本 ${result.latestVersion}，请联系管理员完成升级。`);
+        return;
+      }
+      message.success(`当前已是最新版本（${result.currentVersion}）。`);
+    } catch (error) {
+      message.warning(error instanceof Error ? error.message : '检查更新失败，请稍后重试。');
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#F6F8FB]">
       <div className="mx-auto w-full max-w-3xl px-5 py-5">
@@ -64,7 +86,7 @@ export default function Profile() {
           </div>
           <button
             className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
-            onClick={() => navigate(-1)}
+            onClick={() => navigate('/', { replace: true })}
             type="button"
           >
             返回
@@ -132,7 +154,74 @@ export default function Profile() {
             </button>
           </div>
         </section>
+
+        <section className="mt-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3">
+            <h2 className="text-sm font-bold text-slate-900">其他设置</h2>
+            <p className="mt-1 text-[11px] text-slate-400">应用版本与协议说明</p>
+          </div>
+          <div className="divide-y divide-slate-100 border-t border-slate-100">
+            <button
+              className="flex w-full items-center justify-between py-3 text-left hover:bg-slate-50"
+              disabled={checkingUpdate}
+              onClick={() => void handleCheckUpdate()}
+              type="button"
+            >
+              <span className="flex items-center gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-[#1E3A8A]">
+                  <SyncOutlined className={checkingUpdate ? 'animate-spin' : ''} />
+                </span>
+                <span>
+                  <span className="block text-xs font-bold text-slate-700">检查更新</span>
+                  <span className="mt-0.5 block text-[10px] text-slate-400">
+                    {checkingUpdate ? '正在检查最新版本' : '检查当前应用是否有新版本'}
+                  </span>
+                </span>
+              </span>
+              <ArrowRightOutlined className="text-xs text-slate-400" />
+            </button>
+            <button
+              className="flex w-full items-center justify-between py-3 text-left hover:bg-slate-50"
+              onClick={() => setAgreementKind('privacy')}
+              type="button"
+            >
+              <span className="flex items-center gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                  <FileProtectOutlined />
+                </span>
+                <span>
+                  <span className="block text-xs font-bold text-slate-700">隐私协议</span>
+                  <span className="mt-0.5 block text-[10px] text-slate-400">查看个人信息处理与保护说明</span>
+                </span>
+              </span>
+              <ArrowRightOutlined className="text-xs text-slate-400" />
+            </button>
+            <button
+              className="flex w-full items-center justify-between py-3 text-left hover:bg-slate-50"
+              onClick={() => setAgreementKind('service')}
+              type="button"
+            >
+              <span className="flex items-center gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+                  <SafetyCertificateOutlined />
+                </span>
+                <span>
+                  <span className="block text-xs font-bold text-slate-700">服务协议</span>
+                  <span className="mt-0.5 block text-[10px] text-slate-400">查看系统使用规范与服务说明</span>
+                </span>
+              </span>
+              <ArrowRightOutlined className="text-xs text-slate-400" />
+            </button>
+          </div>
+        </section>
       </div>
+
+      {agreementKind && (
+        <LegalAgreementModal
+          kind={agreementKind}
+          onClose={() => setAgreementKind(null)}
+        />
+      )}
 
       {passwordModalOpen && (
         <div
