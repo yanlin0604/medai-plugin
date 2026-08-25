@@ -35,6 +35,20 @@ export function resolveWindowTitleBarCopy(
   pathname: string,
   selectedDoc: DocDefinition | null,
 ): TitleBarCopy {
+  if (pathname === '/profile/edit') {
+    return {
+      title: '修改个人资料',
+      subtitle: '个人中心 · 资料编辑',
+    };
+  }
+
+  if (pathname === '/profile') {
+    return {
+      title: '个人中心',
+      subtitle: '账号资料 · 安全设置',
+    };
+  }
+
   const routeCopy = ROUTE_COPY[pathname];
   if (routeCopy) return routeCopy;
 

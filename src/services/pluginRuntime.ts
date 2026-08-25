@@ -47,6 +47,7 @@ import type {
 } from './pluginRuntimeTypes';
 import { buildGenericDocTemplate, docTemplates } from './samples/templates';
 import { isTauriRuntime } from './windowMode';
+import { useAuthStore } from '../stores/useAuthStore';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 const RUNTIME_SUCCESS_CODE = 200;
@@ -165,6 +166,14 @@ const http = axios.create({
     'X-Plugin-Key': import.meta.env.VITE_PLUGIN_API_KEY ?? 'test-plugin-key-123456',
   },
   ...(isTauriRuntime() ? { adapter: tauriRuntimeAdapter } : {}),
+});
+
+http.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().token;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 function isRuntimeApiResponse(value: unknown): value is RuntimeApiResponse<unknown> {

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { usePatientStore } from '../../stores/usePatientStore';
+import { useAuthStore } from '../../stores/useAuthStore';
 import { useBubbleStore } from '../../stores/useBubbleStore';
 import {
   SearchOutlined,
@@ -65,12 +66,20 @@ const renderIcon = (iconName: string) => {
 const isTauri = typeof window !== 'undefined' && window.__TAURI_INTERNALS__;
 
 // 无边框窗口自定义标题栏（拖拽 + 最小化/最大化/关闭）
-const WindowTitleBar = () => {
+export function WindowTitleBar({
+  titleOverride,
+  subtitleOverride,
+}: {
+  titleOverride?: string;
+  subtitleOverride?: string;
+}) {
   const collapse = useBubbleStore((state) => state.collapse);
   const selectedDoc = usePatientStore((state) => state.selectedDoc);
   const location = useLocation();
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const titleBarCopy = resolveWindowTitleBarCopy(location.pathname, selectedDoc);
+  const title = titleOverride ?? titleBarCopy.title;
+  const subtitle = subtitleOverride ?? titleBarCopy.subtitle;
 
   useEffect(() => {
     if (isTauri) {
@@ -80,9 +89,9 @@ const WindowTitleBar = () => {
 
   useEffect(() => {
     if (isTauri) {
-      void getCurrentWindow().setTitle(titleBarCopy.title);
+      void getCurrentWindow().setTitle(title);
     }
-  }, [titleBarCopy.title]);
+  }, [title]);
 
   const handleCollapseToBubble = () => {
     collapse();
@@ -128,10 +137,10 @@ const WindowTitleBar = () => {
         </div>
         <div data-tauri-drag-region className="min-w-0">
           <h3 data-tauri-drag-region className="text-sm font-bold text-white tracking-wide truncate">
-            {titleBarCopy.title}
+            {title}
           </h3>
           <p data-tauri-drag-region className="text-[10px] text-blue-200 font-medium tracking-wide mt-0.5 truncate">
-            {titleBarCopy.subtitle}
+            {subtitle}
           </p>
         </div>
       </div>
@@ -193,7 +202,7 @@ const WindowTitleBar = () => {
       </div>
     </header>
   );
-};
+}
 
 export default function AppLayout() {
   const navigate = useNavigate();
@@ -206,6 +215,8 @@ export default function AppLayout() {
     selectPatient,
     selectDoc,
   } = usePatientStore();
+  const logout = useAuthStore((state) => state.logout);
+  const authUserInfo = useAuthStore((state) => state.userInfo);
   const emrDebug = useBubbleStore((state) => state.emrDebug);
 
   const [session, setSession] = useState<HostSession | null>(null);
@@ -272,14 +283,16 @@ export default function AppLayout() {
   };
 
   const handleLogout = () => {
+    logout();
     setLoggedIn(false);
     setSession(null);
     selectPatient(null);
+    navigate('/login', { replace: true });
     message.info('已退出病历系统连接');
   };
 
-  const loginDoctorName = session?.doctorName ?? currentPatient?.doctor ?? '未识别医生';
-  const loginDeptName = session?.deptName ?? currentPatient?.deptName ?? '病历系统';
+  const loginDoctorName = authUserInfo?.userName ?? session?.doctorName ?? currentPatient?.doctor ?? '未识别医生';
+  const loginDeptName = authUserInfo?.deptName ?? session?.deptName ?? currentPatient?.deptName ?? '病历系统';
 
   // 点击文书：未关联患者先引导读取，已关联则进入智能书写工作台
   const handleSelectDoc = (doc: DocDefinition) => {
@@ -337,9 +350,19 @@ export default function AppLayout() {
         <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F0F5FF] text-[#1E3A8A]">
-                <UserOutlined className="text-lg" />
-              </div>
+              <button
+                aria-label="打开个人中心"
+                className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[#F0F5FF] text-[#1E3A8A] transition-colors hover:bg-[#DBEAFE]"
+                onClick={() => navigate('/profile')}
+                title="个人中心"
+                type="button"
+              >
+                {authUserInfo?.avatar ? (
+                  <img alt="医生头像" className="h-full w-full object-cover" src={authUserInfo.avatar} />
+                ) : (
+                  <UserOutlined className="text-lg" />
+                )}
+              </button>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-[13px] font-bold text-slate-900">{loginDeptName}</span>

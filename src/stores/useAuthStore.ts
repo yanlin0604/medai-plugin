@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 
-interface UserInfo {
+export interface UserInfo {
   userId: string;
   userName: string;
   deptCode: string;
   deptName: string;
+  title?: string;
+  avatar?: string;
   roles: string[];
 }
 
@@ -18,12 +20,35 @@ interface AuthState {
   logout: () => void;
 }
 
+const TOKEN_STORAGE_KEY = 'medaiPlugin.authToken';
+const USER_STORAGE_KEY = 'medaiPlugin.authUserInfo';
+const authStorage = typeof sessionStorage === 'undefined' ? null : sessionStorage;
+
+function readStoredUserInfo(): UserInfo | null {
+  try {
+    const raw = authStorage?.getItem(USER_STORAGE_KEY);
+    return raw ? JSON.parse(raw) as UserInfo : null;
+  } catch {
+    return null;
+  }
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
-  token: null,
-  userInfo: null,
+  token: authStorage?.getItem(TOKEN_STORAGE_KEY) ?? null,
+  userInfo: readStoredUserInfo(),
   permissions: [],
 
-  setToken: (token) => set({ token }),
-  setUserInfo: (userInfo) => set({ userInfo }),
-  logout: () => set({ token: null, userInfo: null, permissions: [] }),
+  setToken: (token) => {
+    authStorage?.setItem(TOKEN_STORAGE_KEY, token);
+    set({ token });
+  },
+  setUserInfo: (userInfo) => {
+    authStorage?.setItem(USER_STORAGE_KEY, JSON.stringify(userInfo));
+    set({ userInfo });
+  },
+  logout: () => {
+    authStorage?.removeItem(TOKEN_STORAGE_KEY);
+    authStorage?.removeItem(USER_STORAGE_KEY);
+    set({ token: null, userInfo: null, permissions: [] });
+  },
 }));
