@@ -30,7 +30,8 @@ anyhow = "1"
 whoami = "1"
 arboard = "3.4"
 writeback-engine = { path = "crates/writeback-engine" }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "multipart"] }
+base64 = "0.22"
 
 [features]
 default = ["custom-protocol"]

@@ -9,11 +9,13 @@ interface BubbleState {
   detectedContext: BubbleEmrContext | null;
   emrDebug: EmrContextDebug | null;
   activatedContextKeys: string[];
+  loginCollapsed: boolean;
 
   setDetectedContext: (context: BubbleEmrContext | null) => void;
   setEmrDebug: (debug: EmrContextDebug) => void;
   expand: (context?: BubbleEmrContext | null) => void;
   collapse: () => void;
+  setLoginCollapsed: (collapsed: boolean) => void;
   markActivated: (contextKey: string) => void;
   hasActivated: (contextKey: string) => boolean;
 }
@@ -27,6 +29,7 @@ export const useBubbleStore = create<BubbleState>((set, get) => ({
   detectedContext: null,
   emrDebug: null,
   activatedContextKeys: [],
+  loginCollapsed: false,
 
   setDetectedContext: (detectedContext) =>
     set((state) => ({
@@ -46,6 +49,8 @@ export const useBubbleStore = create<BubbleState>((set, get) => ({
     set((state) => ({
       mode: state.detectedContext ? 'detected' : 'idle',
     })),
+
+  setLoginCollapsed: (loginCollapsed) => set({ loginCollapsed }),
 
   markActivated: (contextKey) =>
     set((state) => {

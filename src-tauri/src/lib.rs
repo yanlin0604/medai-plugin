@@ -85,6 +85,8 @@ pub fn run() {
             commands::writeback::writeback_to_bs_inbox,
             commands::writeback::push_field_writeback_http,
             commands::runtime_proxy::runtime_http_request,
+            commands::runtime_proxy::runtime_multipart_request,
+            commands::runtime_proxy::runtime_binary_request,
             // 系统命令
             commands::system_tray::get_system_info,
             toggle_devtools,

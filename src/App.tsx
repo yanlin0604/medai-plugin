@@ -5,6 +5,7 @@ import { ConfigProvider, message } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import AppLayout from './components/Layout/AppLayout';
 import BubbleShell from './components/Layout/BubbleShell';
+import LoginBubbleShell from './components/Layout/LoginBubbleShell';
 import ExpandedEmrContextBridge from './components/Layout/ExpandedEmrContextBridge';
 import RoundWorkbench from './pages/RoundWorkbench';
 import DocWorkspace from './pages/DocWorkspace';
@@ -13,6 +14,7 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
 import ProfileEdit from './pages/ProfileEdit';
+import OutsideMaterials from './pages/OutsideMaterials';
 import { useAuthStore } from './stores/useAuthStore';
 import { useBubbleStore } from './stores/useBubbleStore';
 import { collapseAssistantWindow, expandAssistantWindow } from './services/windowMode';
@@ -26,17 +28,31 @@ message.config({
 
 function AppShell() {
   const mode = useBubbleStore((state) => state.mode);
+  const loginCollapsed = useBubbleStore((state) => state.loginCollapsed);
   const token = useAuthStore((state) => state.token);
 
   // 应用启动时初始化窗口位置：完整面板靠右全高，气泡模式悬浮右下角
   useEffect(() => {
-    if (!token || mode === 'expanded') {
+    if (!token) {
+      if (loginCollapsed) {
+        void collapseAssistantWindow();
+      } else {
+        void expandAssistantWindow();
+      }
+      return;
+    }
+
+    if (mode === 'expanded') {
       void expandAssistantWindow();
       return;
     }
 
     void collapseAssistantWindow();
-  }, [mode, token]);
+  }, [loginCollapsed, mode, token]);
+
+  if (!token && loginCollapsed) {
+    return <LoginBubbleShell />;
+  }
 
   if (mode !== 'expanded' && token) {
     return <BubbleShell />;
@@ -58,6 +74,7 @@ function AppShell() {
           <Route path="settings" element={<Settings />} />
           <Route path="profile" element={<Profile />} />
           <Route path="profile/edit" element={<ProfileEdit />} />
+          <Route path="materials" element={<OutsideMaterials />} />
         </Route>
       </Routes>
     </>

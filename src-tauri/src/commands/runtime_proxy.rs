@@ -1,4 +1,9 @@
-use reqwest::{header::HeaderMap, Method};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use reqwest::{
+    header::HeaderMap,
+    multipart::{Form, Part},
+    Method,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -6,9 +11,10 @@ use std::time::Instant;
 
 const RUNTIME_PROXY_BASE: &str = "http://47.113.122.118:9118/medai-admin";
 const RUNTIME_PROXY_RELATIVE_PREFIX: &str = "/medai-admin";
-const ALLOWED_RUNTIME_PROXY_BASES: [&str; 2] = [
+const ALLOWED_RUNTIME_PROXY_BASES: [&str; 3] = [
     RUNTIME_PROXY_BASE,
-    "http://192.168.1.88:8080",
+    "http://192.168.1.88:8001",
+    "http://192.168.1.88:19000",
 ];
 
 #[derive(Deserialize)]
@@ -27,6 +33,31 @@ pub struct RuntimeProxyResponse {
     data: Value,
 }
 
+#[derive(Serialize)]
+pub struct RuntimeBinaryResponse {
+    status: u16,
+    status_text: String,
+    content_type: String,
+    data_base64: String,
+}
+
+#[derive(Deserialize)]
+pub struct RuntimeMultipartRequest {
+    method: String,
+    url: String,
+    headers: Option<HashMap<String, String>>,
+    field_name: String,
+    file_name: String,
+    mime_type: Option<String>,
+    body: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+pub struct RuntimeBinaryRequest {
+    url: String,
+    headers: Option<HashMap<String, String>>,
+}
+
 #[tauri::command]
 pub async fn runtime_http_request(
     request: RuntimeProxyRequest,
@@ -36,7 +67,10 @@ pub async fn runtime_http_request(
     let started_at = Instant::now();
     log::info!("[runtime_proxy] -> {} {}", method, url);
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .user_agent("medai-plugin/1.0")
+        .build()
+        .map_err(|error| format!("runtime proxy client build failed: {error}"))?;
     let mut builder = client.request(method.clone(), url.clone());
 
     if let Some(headers) = request.headers {
@@ -61,6 +95,117 @@ pub async fn runtime_http_request(
         }
     };
 
+    read_runtime_response(response, &method, &url, started_at).await
+}
+
+#[tauri::command]
+pub async fn runtime_multipart_request(
+    request: RuntimeMultipartRequest,
+) -> Result<RuntimeProxyResponse, String> {
+    let url = resolve_runtime_url(&request.url)?;
+    let method = parse_method(&request.method)?;
+    let started_at = Instant::now();
+    log::info!("[runtime_proxy] -> {} {} (multipart)", method, url);
+
+    let client = reqwest::Client::builder()
+        .user_agent("medai-plugin/1.0")
+        .build()
+        .map_err(|error| format!("runtime proxy client build failed: {error}"))?;
+    let mut builder = client.request(method.clone(), url.clone());
+
+    if let Some(headers) = request.headers {
+        builder = builder.headers(build_headers(headers)?);
+    }
+
+    let mut part = Part::bytes(request.body).file_name(request.file_name);
+    if let Some(mime_type) = request.mime_type.filter(|value| !value.trim().is_empty()) {
+        part = part
+            .mime_str(&mime_type)
+            .map_err(|error| format!("invalid multipart mime type: {error}"))?;
+    }
+    let form = Form::new().part(request.field_name, part);
+    let response = match builder.multipart(form).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            log::warn!(
+                "[runtime_proxy] !! {} {} multipart failed after {}ms: {}",
+                method,
+                url,
+                started_at.elapsed().as_millis(),
+                error
+            );
+            return Err(format!("runtime proxy request failed: {error}"));
+        }
+    };
+
+    read_runtime_response(response, &method, &url, started_at).await
+}
+
+#[tauri::command]
+pub async fn runtime_binary_request(
+    request: RuntimeBinaryRequest,
+) -> Result<RuntimeBinaryResponse, String> {
+    let url = resolve_runtime_url(&request.url)?;
+    let started_at = Instant::now();
+    log::info!("[runtime_proxy] -> GET {} (binary)", url);
+
+    let client = reqwest::Client::builder()
+        .user_agent("medai-plugin/1.0")
+        .build()
+        .map_err(|error| format!("runtime proxy client build failed: {error}"))?;
+    let mut builder = client.get(url.clone());
+
+    if let Some(headers) = request.headers {
+        builder = builder.headers(build_headers(headers)?);
+    }
+
+    let response = match builder.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            log::warn!(
+                "[runtime_proxy] !! GET {} binary failed after {}ms: {}",
+                url,
+                started_at.elapsed().as_millis(),
+                error
+            );
+            return Err(format!("runtime proxy request failed: {error}"));
+        }
+    };
+
+    let status = response.status();
+    let status_text = status.canonical_reason().unwrap_or("").to_string();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("runtime proxy binary response read failed: {error}"))?;
+
+    log::info!(
+        "[runtime_proxy] <- GET {} {} {}ms (binary)",
+        url,
+        status.as_u16(),
+        started_at.elapsed().as_millis()
+    );
+
+    Ok(RuntimeBinaryResponse {
+        status: status.as_u16(),
+        status_text,
+        content_type,
+        data_base64: STANDARD.encode(bytes),
+    })
+}
+
+async fn read_runtime_response(
+    response: reqwest::Response,
+    method: &Method,
+    url: &str,
+    started_at: Instant,
+) -> Result<RuntimeProxyResponse, String> {
     let status = response.status();
     let status_text = status.canonical_reason().unwrap_or("").to_string();
     let headers = response
@@ -131,7 +276,9 @@ fn resolve_runtime_url(input: &str) -> Result<String, String> {
 }
 
 fn is_url_under_base(input: &str, base: &str) -> bool {
-    input == base || input.starts_with(&format!("{}/", base)) || input.starts_with(&format!("{}?", base))
+    input == base
+        || input.starts_with(&format!("{}/", base))
+        || input.starts_with(&format!("{}?", base))
 }
 
 fn parse_method(method: &str) -> Result<Method, String> {

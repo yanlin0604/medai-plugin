@@ -18,6 +18,7 @@ import type {
   FieldInputType,
   FieldSource,
   IcdItem,
+  Patient,
 } from './types';
 import type {
   RuntimeApiResponse,
@@ -48,9 +49,12 @@ import type {
 import { buildGenericDocTemplate, docTemplates } from './samples/templates';
 import { isTauriRuntime } from './windowMode';
 import { useAuthStore } from '../stores/useAuthStore';
+import { normalizePatientGender } from './patientGender';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+const DEBUG_RUNTIME_HTTP = import.meta.env.DEV || import.meta.env.VITE_DEBUG_RUNTIME_HTTP === 'true';
 const RUNTIME_SUCCESS_CODE = 200;
+const RUNTIME_COMPAT_SUCCESS_CODE = 0;
 const RUNTIME_BASE_PATH = '/medical/pluginRuntime';
 const LOCAL_TEMPLATE_FIRST_DOC_CODES = new Set<string>([]);
 const STRICT_RUNTIME_TEMPLATE_DOC_CODES = new Set(['DOC010']);
@@ -141,14 +145,24 @@ function buildRuntimeRequestUrl(config: InternalAxiosRequestConfig): string {
 }
 
 const tauriRuntimeAdapter: AxiosAdapter = async (config) => {
+  const method = String(config.method ?? 'GET').toUpperCase();
+  const requestUrl = buildRuntimeRequestUrl(config);
+  if (DEBUG_RUNTIME_HTTP) {
+    console.info('[runtime-http] ->', method, requestUrl);
+  }
+
   const response = await invoke<TauriRuntimeProxyResponse>('runtime_http_request', {
     request: {
-      method: String(config.method ?? 'GET').toUpperCase(),
-      url: buildRuntimeRequestUrl(config),
+      method,
+      url: requestUrl,
       headers: toHeaderRecord(config.headers),
       body: parseRequestBody(config.data) ?? null,
     },
   });
+
+  if (DEBUG_RUNTIME_HTTP) {
+    console.info('[runtime-http] <-', method, requestUrl, response.status);
+  }
 
   return {
     data: response.data,
@@ -197,11 +211,15 @@ function normalizeRuntimeError(error: unknown): Error {
   return new Error('运行时接口请求失败');
 }
 
+function isRuntimeSuccessCode(code: unknown): boolean {
+  return code === RUNTIME_SUCCESS_CODE || code === RUNTIME_COMPAT_SUCCESS_CODE;
+}
+
 async function requestRuntime<T>(request: Promise<AxiosResponse<RuntimeApiResponse<T>>>): Promise<T> {
   try {
     const response = await request;
     const body = response.data;
-    if (!body || body.code !== RUNTIME_SUCCESS_CODE) {
+    if (!body || !isRuntimeSuccessCode(body.code)) {
       throw new Error(body?.msg || '运行时接口返回失败');
     }
     return body.data;
@@ -554,6 +572,300 @@ export async function getEditAssistSuggestions(
   );
 }
 
+interface RuntimePatientDto {
+  id?: string | number;
+  patientNo?: string | number;
+  patientId?: string | number;
+  patientIdHis?: string | number;
+  inpatientNo?: string | number;
+  admissionNo?: string | number;
+  patientName?: string;
+  name?: string;
+  gender?: string;
+  sex?: string;
+  age?: string | number;
+  bedNo?: string | number;
+  bedNumber?: string | number;
+  bedName?: string | number;
+  deptName?: string;
+  deptCode?: string;
+  admissionDate?: string;
+  inTime?: string;
+  admissionDays?: number;
+  hospitalDays?: number;
+  doctor?: string;
+  doctorName?: string;
+  attendingDoctorName?: string;
+  diagnosis?: string;
+  mainDiagnosis?: string;
+  diagnoseName?: string;
+}
+
+interface PatientListPayload {
+  records?: RuntimePatientDto[];
+  list?: RuntimePatientDto[];
+  rows?: RuntimePatientDto[];
+  total?: number;
+}
+
+export interface PatientListResult {
+  patients: Patient[];
+  total: number;
+}
+
+export type OcrStatus = 'success' | 'failed';
+export type OcrEngine = 'baidu' | 'vlm' | 'llm';
+
+export interface OcrBlockLocation {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface OcrBlock {
+  words: string;
+  location: OcrBlockLocation | null;
+}
+
+export interface BizOcrResultVo {
+  id?: number;
+  bizType?: string;
+  bizId?: string;
+  fileName?: string;
+  fileUrl?: string;
+  fileSize?: number;
+  ocrMode?: string;
+  ocrText?: string;
+  blockCount?: number;
+  costMs?: number;
+  status?: OcrStatus | string;
+  errorMsg?: string;
+  userId?: number;
+  createTime?: string;
+}
+
+export interface OcrRecognizeResult {
+  ocrId?: number;
+  text?: string;
+  blocks?: OcrBlock[];
+  engine?: string;
+  fileName?: string;
+  fileUrl?: string;
+  costMs?: number;
+  status?: string;
+}
+
+export interface OcrRecognizeOptions {
+  bizType?: string;
+  bizId?: string;
+  engine?: OcrEngine;
+}
+
+export interface OcrListParams {
+  bizId: string;
+  bizType?: string;
+}
+
+export interface OcrListResult {
+  total: number;
+  rows: BizOcrResultVo[];
+}
+
+interface OcrListPayload {
+  total?: number;
+  rows?: OcrRecordDto[];
+  records?: OcrRecordDto[];
+  list?: OcrRecordDto[];
+  code?: number;
+  msg?: string;
+  data?: OcrListPayload | OcrRecordDto[];
+}
+
+type OcrRecordDto = BizOcrResultVo & OcrRecognizeResult & {
+  createdTime?: string;
+  uploadTime?: string;
+};
+
+function hasOcrListShape(value: unknown): value is OcrListPayload | OcrRecordDto[] {
+  if (Array.isArray(value)) return true;
+  if (typeof value !== 'object' || value === null) return false;
+  return ['total', 'rows', 'records', 'list'].some((key) => key in value);
+}
+
+function readText(...values: unknown[]): string {
+  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  return value === undefined ? '' : String(value).trim();
+}
+
+function readNumber(...values: unknown[]): number {
+  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function readOptionalNumber(...values: unknown[]): number | undefined {
+  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function normalizePatient(dto: RuntimePatientDto): Patient | null {
+  const id = readText(dto.patientIdHis, dto.patientNo, dto.inpatientNo, dto.admissionNo, dto.patientId, dto.id);
+  const name = readText(dto.patientName, dto.name);
+  if (!id || !name) return null;
+
+  return {
+    id,
+    name,
+    gender: normalizePatientGender(readText(dto.gender, dto.sex)),
+    age: readText(dto.age),
+    bedNo: readText(dto.bedNo, dto.bedNumber, dto.bedName),
+    deptName: readText(dto.deptName, dto.deptCode),
+    admissionDate: readText(dto.admissionDate, dto.inTime),
+    admissionDays: readNumber(dto.admissionDays, dto.hospitalDays),
+    doctor: readText(dto.doctor, dto.doctorName, dto.attendingDoctorName),
+    diagnosis: readText(dto.diagnosis, dto.mainDiagnosis, dto.diagnoseName),
+  };
+}
+
+function unwrapPatientListPayload(payload: unknown): PatientListPayload {
+  if (Array.isArray(payload)) {
+    return { records: payload as RuntimePatientDto[], total: payload.length };
+  }
+
+  if (typeof payload !== 'object' || payload === null) {
+    return { records: [], total: 0 };
+  }
+
+  const record = payload as PatientListPayload;
+  const records = record.records ?? record.list ?? record.rows ?? [];
+  return {
+    records,
+    total: record.total ?? records.length,
+  };
+}
+
+export async function listPatients(): Promise<PatientListResult> {
+  const requestUrl = `${API_BASE_URL}/medical/patient/list`;
+  console.info('[patient-list] GET', requestUrl);
+
+  const payload = await requestRuntime<unknown>(
+    http.get('/medical/patient/list'),
+  );
+  const { records, total } = unwrapPatientListPayload(payload);
+  const patients = records.map(normalizePatient).filter((patient): patient is Patient => Boolean(patient));
+  console.info('[patient-list] response', {
+    total,
+    rawCount: records.length,
+    patientCount: patients.length,
+    payload,
+  });
+
+  return {
+    patients,
+    total,
+  };
+}
+
+async function requestRuntimeUpload<T>(request: Promise<Response>): Promise<T> {
+  const response = await request;
+  const body = await response.json() as RuntimeApiResponse<T>;
+  if (!response.ok || !body || !isRuntimeSuccessCode(body.code)) {
+    throw new Error(body?.msg || `请求失败：${response.status}`);
+  }
+  return body.data;
+}
+
+function normalizeOcrRecord(dto: OcrRecordDto): BizOcrResultVo {
+  return {
+    id: readOptionalNumber(dto.id, dto.ocrId),
+    bizType: readText(dto.bizType) || undefined,
+    bizId: readText(dto.bizId) || undefined,
+    fileName: readText(dto.fileName) || undefined,
+    fileUrl: readText(dto.fileUrl) || undefined,
+    fileSize: readOptionalNumber(dto.fileSize),
+    ocrMode: readText(dto.ocrMode, dto.engine) || undefined,
+    ocrText: readText(dto.ocrText, dto.text) || undefined,
+    blockCount: readOptionalNumber(dto.blockCount, dto.blocks?.length),
+    costMs: readOptionalNumber(dto.costMs),
+    status: readText(dto.status) || undefined,
+    errorMsg: readText(dto.errorMsg) || undefined,
+    userId: readOptionalNumber(dto.userId),
+    createTime: readText(dto.createTime, dto.createdTime, dto.uploadTime) || undefined,
+  };
+}
+
+function unwrapOcrListPayload(payload: unknown): OcrListResult {
+  if (Array.isArray(payload)) {
+    const rows = (payload as OcrRecordDto[]).map(normalizeOcrRecord);
+    return { total: rows.length, rows };
+  }
+  if (typeof payload !== 'object' || payload === null) {
+    return { total: 0, rows: [] };
+  }
+
+  const record = payload as OcrListPayload;
+  const rows = record.rows ?? record.records ?? record.list ?? [];
+  return {
+    total: record.total ?? rows.length,
+    rows: rows.map(normalizeOcrRecord),
+  };
+}
+
+async function requestOcrList(request: Promise<AxiosResponse<unknown>>): Promise<OcrListResult> {
+  try {
+    const response = await request;
+    const body = response.data as (OcrListPayload & { code?: number; msg?: string; data?: OcrListPayload }) | null;
+    if (!body || typeof body !== 'object') {
+      throw new Error('查询识别记录返回为空');
+    }
+    if (body.code !== undefined && !isRuntimeSuccessCode(body.code)) {
+      throw new Error(body.msg || '查询识别记录失败');
+    }
+    const payload = hasOcrListShape(body.data) ? body.data : body;
+    return unwrapOcrListPayload(payload);
+  } catch (error) {
+    throw normalizeRuntimeError(error);
+  }
+}
+
+export async function listOcrRecords(params: OcrListParams): Promise<OcrListResult> {
+  const requestUrl = appendParams(`${API_BASE_URL}${RUNTIME_BASE_PATH}/ocr/records`, params);
+  console.info('[ocr] GET', requestUrl);
+  return requestOcrList(http.get(`${RUNTIME_BASE_PATH}/ocr/records`, { params }));
+}
+
+export async function recognizeOcrImage(
+  file: File,
+  options: OcrRecognizeOptions = {},
+): Promise<OcrRecognizeResult> {
+  const engine: OcrEngine = options.engine === 'vlm' || options.engine === 'llm' ? 'vlm' : 'baidu';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const token = useAuthStore.getState().token;
+  const headers: Record<string, string> = {
+    'X-Plugin-Key': import.meta.env.VITE_PLUGIN_API_KEY ?? 'test-plugin-key-123456',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const requestUrl = appendParams(`${API_BASE_URL}${RUNTIME_BASE_PATH}/ocr`, {
+    bizType: options.bizType,
+    bizId: options.bizId,
+    engine,
+  });
+  console.info('[ocr] POST', requestUrl, file.name);
+  return requestRuntimeUpload<OcrRecognizeResult>(
+    fetch(requestUrl, {
+      method: 'POST',
+      headers,
+      body: formData,
+    }),
+  );
+}
+
 export interface RoundPendingSegment {
   id: number;
   roundTaskId: number;
@@ -669,6 +981,9 @@ export const pluginRuntimeApi = {
   rewriteText,
   updateRewriteStatus,
   getEditAssistSuggestions,
+  listPatients,
+  listOcrRecords,
+  recognizeOcrImage,
   getRoundRoster,
   getRoundPendingStatus,
   markRoundStatus,

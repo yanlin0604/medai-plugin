@@ -1,5 +1,6 @@
 import { getDocByCode } from '../../config/docRegistry';
 import type { Patient } from '../../stores/usePatientStore';
+import { normalizePatientGender } from '../patientGender';
 import type { EmrContext } from './types';
 
 export interface EmrContextActivation {
@@ -18,7 +19,7 @@ export function buildPatientFromEmrContext(context: EmrContext): Patient {
   return {
     id: patientIdHis || inpatientNo || context.patientId,
     name: context.patientName,
-    gender: optionalText(context.gender),
+    gender: normalizePatientGender(context.gender),
     age: optionalText(context.age),
     bedNo: optionalText(context.bedNo),
     deptName: optionalText(context.deptName),

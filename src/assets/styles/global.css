@@ -125,3 +125,50 @@ body {
   background: #94a3b8;
 }
 
+/* 协议富文本内容排版 */
+.agreement-rich-text {
+  color: #475569;
+  line-height: 1.75;
+  word-break: break-word;
+}
+.agreement-rich-text p {
+  margin: 0 0 0.75em;
+}
+.agreement-rich-text p:last-child {
+  margin-bottom: 0;
+}
+.agreement-rich-text h1,
+.agreement-rich-text h2,
+.agreement-rich-text h3,
+.agreement-rich-text h4 {
+  margin: 1em 0 0.5em;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.4;
+}
+.agreement-rich-text h1 { font-size: 1.15em; }
+.agreement-rich-text h2 { font-size: 1.05em; }
+.agreement-rich-text h3,
+.agreement-rich-text h4 { font-size: 1em; }
+.agreement-rich-text ul,
+.agreement-rich-text ol {
+  margin: 0 0 0.75em;
+  padding-left: 1.4em;
+}
+.agreement-rich-text li {
+  margin: 0.25em 0;
+}
+.agreement-rich-text a {
+  color: #1e3a8a;
+  text-decoration: underline;
+}
+.agreement-rich-text strong,
+.agreement-rich-text b {
+  color: #334155;
+  font-weight: 700;
+}
+.agreement-rich-text img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}

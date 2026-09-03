@@ -7,6 +7,7 @@ export interface UserInfo {
   deptName: string;
   title?: string;
   avatar?: string;
+  avatarOssId?: string;
   roles: string[];
 }
 

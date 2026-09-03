@@ -1,3 +1,6 @@
+import { useCallback, useEffect, useState } from 'react';
+import { fetchPublishedAgreement, type PublishedAgreement } from '../services/agreementService';
+
 export type AgreementKind = 'privacy' | 'service';
 
 interface LegalAgreementModalProps {
@@ -5,7 +8,68 @@ interface LegalAgreementModalProps {
   onClose: () => void;
 }
 
+const TITLE_FALLBACK: Record<AgreementKind, string> = {
+  privacy: '隐私协议',
+  service: '服务协议',
+};
+
+function isHtmlText(value: string): boolean {
+  return /<[a-z][^>]*>/i.test(value);
+}
+
+function AgreementBody({ agreement }: { agreement: PublishedAgreement }) {
+  const content = agreement.content.trim();
+
+  if (!content) {
+    return <p className="text-slate-500">暂无协议内容。</p>;
+  }
+
+  if (isHtmlText(content)) {
+    return (
+      <div
+        className="agreement-rich-text"
+        dangerouslySetInnerHTML={{ __html: content }}
+      />
+    );
+  }
+
+  const paragraphs = content.split(/\n{2,}/);
+
+  return (
+    <div className="agreement-rich-text whitespace-pre-wrap">
+      {paragraphs.map((paragraph, index) => (
+        <p key={`${index}-${paragraph.slice(0, 12)}`} className={index === 0 ? '' : 'mt-3'}>
+          {paragraph}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export default function LegalAgreementModal({ kind, onClose }: LegalAgreementModalProps) {
+  const [agreement, setAgreement] = useState<PublishedAgreement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadAgreement = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchPublishedAgreement(kind);
+      setAgreement(result);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '协议内容获取失败，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  }, [kind]);
+
+  useEffect(() => {
+    loadAgreement();
+  }, [loadAgreement]);
+
+  const title = agreement?.title?.trim() || TITLE_FALLBACK[kind];
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-5"
@@ -21,7 +85,7 @@ export default function LegalAgreementModal({ kind, onClose }: LegalAgreementMod
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <h2 id="legal-agreement-title" className="text-sm font-bold text-slate-900">
-            {kind === 'privacy' ? '隐私协议' : '服务协议'}
+            {title}
           </h2>
           <button
             aria-label="关闭协议"
@@ -33,25 +97,25 @@ export default function LegalAgreementModal({ kind, onClose }: LegalAgreementMod
           </button>
         </div>
         <div className="custom-scrollbar max-h-[58vh] overflow-y-auto px-5 py-4 text-xs leading-6 text-slate-600">
-          {kind === 'privacy' ? (
-            <>
-              <p className="font-bold text-slate-800">一、信息收集</p>
-              <p>为完成账号登录、权限校验和病历书写服务，系统可能处理账号、姓名、科室、角色以及业务操作记录等必要信息。</p>
-              <p className="mt-3 font-bold text-slate-800">二、信息使用</p>
-              <p>相关信息仅用于身份认证、功能授权、系统运行和安全审计，不会超出医疗业务场景使用。</p>
-              <p className="mt-3 font-bold text-slate-800">三、信息保护</p>
-              <p>系统将按照医院信息安全管理要求采取访问控制、传输保护和日志审计等措施。涉及患者的信息应仅用于授权的诊疗工作。</p>
-            </>
-          ) : (
-            <>
-              <p className="font-bold text-slate-800">一、服务内容</p>
-              <p>本系统为医疗人员提供病历书写辅助、查房记录整理及相关工作流支持，具体功能以当前版本为准。</p>
-              <p className="mt-3 font-bold text-slate-800">二、使用规范</p>
-              <p>用户应使用本人账号登录，妥善保管账号密码，并在授权范围内使用系统，不得擅自共享账号或越权访问医疗信息。</p>
-              <p className="mt-3 font-bold text-slate-800">三、责任说明</p>
-              <p>系统生成内容仅作为书写辅助，不能替代医生的专业判断。提交或回写病历前，用户应完成必要的核对、修改和确认。</p>
-            </>
-          )}
+          {loading ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-10 text-slate-400">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-[#1E3A8A]" />
+              <span>协议内容加载中…</span>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <p className="text-slate-500">{error}</p>
+              <button
+                className="rounded-md bg-[#1E3A8A] px-4 py-2 text-xs font-bold text-white hover:bg-[#172554]"
+                onClick={loadAgreement}
+                type="button"
+              >
+                重新加载
+              </button>
+            </div>
+          ) : agreement ? (
+            <AgreementBody agreement={agreement} />
+          ) : null}
         </div>
         <div className="border-t border-slate-100 px-5 py-3 text-right">
           <button

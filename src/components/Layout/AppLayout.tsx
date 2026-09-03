@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { usePatientStore } from '../../stores/usePatientStore';
+import { usePatientStore, type Patient } from '../../stores/usePatientStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { useBubbleStore } from '../../stores/useBubbleStore';
 import {
@@ -36,8 +36,10 @@ import type { DocDefinition } from '../../config/docRegistry';
 import { getActivePatient, getHostSession, HostSession } from '../../services/emsBridge';
 import { collapseAssistantWindow } from '../../services/windowMode';
 import { pluginRuntimeApi } from '../../services/pluginRuntime';
+import { logoutFromServer } from '../../services/authService';
 import { formatEmrContextDebugLabel } from '../../services/emrContext/debugLabel';
 import { resolveWindowTitleBarCopy } from './titleBar';
+import PatientSwitchModal from './PatientSwitchModal';
 
 // 文书图标映射
 const renderIcon = (iconName: string) => {
@@ -74,6 +76,8 @@ export function WindowTitleBar({
   subtitleOverride?: string;
 }) {
   const collapse = useBubbleStore((state) => state.collapse);
+  const setLoginCollapsed = useBubbleStore((state) => state.setLoginCollapsed);
+  const token = useAuthStore((state) => state.token);
   const selectedDoc = usePatientStore((state) => state.selectedDoc);
   const location = useLocation();
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
@@ -94,6 +98,12 @@ export function WindowTitleBar({
   }, [title]);
 
   const handleCollapseToBubble = () => {
+    if (!token) {
+      setLoginCollapsed(true);
+      void collapseAssistantWindow();
+      return;
+    }
+
     collapse();
     void collapseAssistantWindow();
   };
@@ -223,6 +233,8 @@ export default function AppLayout() {
   const [runtimeDocs, setRuntimeDocs] = useState<DocDefinition[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState('');
+  const [patientPickerOpen, setPatientPickerOpen] = useState(false);
+  const pendingPatientActionRef = useRef<((patient: Patient) => void) | null>(null);
 
   const loadRuntimeDocs = useCallback(async () => {
     setDocsLoading(true);
@@ -255,22 +267,35 @@ export default function AppLayout() {
   }, [loadRuntimeDocs]);
 
   // 从宿主病历系统读取当前活动患者
-  const handleReadActivePatient = async () => {
+  const handleReadActivePatient = async (afterSelect?: (patient: Patient) => void) => {
     const p = await getActivePatient();
     if (p) {
       selectPatient(p);
+      pendingPatientActionRef.current = null;
+      afterSelect?.(p);
       message.success(`已读取病历系统当前患者：${p.name}（住院号 ${p.id}）`);
       return true;
-    } else {
-      message.warning('病历系统当前无活动患者，请先在病历系统中选定患者');
-      return false;
     }
+
+    pendingPatientActionRef.current = afterSelect ?? null;
+    setPatientPickerOpen(true);
+    message.info('当前未检测到 HIS 患者，已打开患者列表。');
+    return false;
   };
 
-  // 解除患者关联
-  const handleDisconnect = () => {
-    selectPatient(null);
-    message.info('已解除当前患者关联');
+  // 打开患者切换列表
+  const handleOpenPatientPicker = () => {
+    pendingPatientActionRef.current = null;
+    setPatientPickerOpen(true);
+  };
+
+  const handleSelectPatient = (patient: Patient) => {
+    selectPatient(patient);
+    setPatientPickerOpen(false);
+    const pendingAction = pendingPatientActionRef.current;
+    pendingPatientActionRef.current = null;
+    pendingAction?.(patient);
+    // message.success(`已切换患者：${patient.name}`);
   };
 
   // 重新建立宿主系统连接
@@ -282,13 +307,19 @@ export default function AppLayout() {
     message.success({ content: '病历系统连接已就绪', key: 'reconnect', duration: 2 });
   };
 
-  const handleLogout = () => {
-    logout();
-    setLoggedIn(false);
-    setSession(null);
-    selectPatient(null);
-    navigate('/login', { replace: true });
-    message.info('已退出病历系统连接');
+  const handleLogout = async () => {
+    try {
+      await logoutFromServer(token);
+    } catch (error) {
+      console.warn('[auth] logout request failed', error);
+    } finally {
+      logout();
+      setLoggedIn(false);
+      setSession(null);
+      selectPatient(null);
+      navigate('/login', { replace: true });
+      message.info('已退出病历系统连接');
+    }
   };
 
   const loginDoctorName = authUserInfo?.userName ?? session?.doctorName ?? currentPatient?.doctor ?? '未识别医生';
@@ -304,10 +335,10 @@ export default function AppLayout() {
         okText: '读取并进入',
         cancelText: '取消',
         onOk: async () => {
-          const linked = await handleReadActivePatient();
-          if (!linked) return;
-          selectDoc(doc);
-          navigate(`/doc/${doc.code}`);
+          await handleReadActivePatient(() => {
+            selectDoc(doc);
+            navigate(`/doc/${doc.code}`);
+          });
         },
       });
       return;
@@ -423,13 +454,23 @@ export default function AppLayout() {
                   住院号 {currentPatient.id} · {currentPatient.diagnosis}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={handleDisconnect}
-                className="shrink-0 rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
-              >
-                切换患者
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/materials')}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[#1E3A8A] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#172554]"
+                >
+                  <SnippetsOutlined />
+                  资料
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenPatientPicker}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+                >
+                  切换患者
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-3">
@@ -523,6 +564,16 @@ export default function AppLayout() {
       >
         <AudioOutlined />
       </button>
+
+      <PatientSwitchModal
+        open={patientPickerOpen}
+        currentPatientId={currentPatient?.id ?? undefined}
+        onClose={() => {
+          pendingPatientActionRef.current = null;
+          setPatientPickerOpen(false);
+        }}
+        onSelect={handleSelectPatient}
+      />
     </div>
   );
 }

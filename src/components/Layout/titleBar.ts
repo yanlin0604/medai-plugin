@@ -24,6 +24,10 @@ const ROUTE_COPY: Record<string, TitleBarCopy> = {
     title: '系统设置',
     subtitle: '助手配置 · 运行参数',
   },
+  '/materials': {
+    title: '外院资料',
+    subtitle: '检验检查资料 · OCR 识别',
+  },
 };
 
 function getDocCodeFromPath(pathname: string): string | null {

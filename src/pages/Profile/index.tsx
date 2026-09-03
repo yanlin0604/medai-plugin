@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRightOutlined,
@@ -11,13 +11,15 @@ import {
 } from '@ant-design/icons';
 import { message } from 'antd';
 import LegalAgreementModal, { type AgreementKind } from '../../components/LegalAgreementModal';
-import { changePassword } from '../../services/authService';
+import { changePassword, getProfile, resolveAvatarDisplayUrl } from '../../services/authService';
 import { checkForApplicationUpdate } from '../../services/updateService';
 import { useAuthStore } from '../../stores/useAuthStore';
 
 export default function Profile() {
   const navigate = useNavigate();
+  const token = useAuthStore((state) => state.token);
   const userInfo = useAuthStore((state) => state.userInfo);
+  const setUserInfo = useAuthStore((state) => state.setUserInfo);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -25,6 +27,41 @@ export default function Profile() {
   const [changingPassword, setChangingPassword] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [agreementKind, setAgreementKind] = useState<AgreementKind | null>(null);
+  const [avatarDisplayUrl, setAvatarDisplayUrl] = useState('');
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    void getProfile()
+      .then((profile) => {
+        if (active) setUserInfo(profile);
+      })
+      .catch((error) => {
+        if (active) {
+          message.warning(error instanceof Error ? error.message : '加载个人资料失败');
+        }
+      })
+
+    return () => {
+      active = false;
+    };
+  }, [setUserInfo, token]);
+
+  useEffect(() => {
+    let active = true;
+    setAvatarDisplayUrl('');
+    void resolveAvatarDisplayUrl(userInfo?.avatar)
+      .then((url) => {
+        if (active) setAvatarDisplayUrl(url);
+      })
+      .catch(() => {
+        if (active) setAvatarDisplayUrl('');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [userInfo?.avatar]);
 
   if (!userInfo) return null;
 
@@ -97,8 +134,8 @@ export default function Profile() {
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-blue-50 bg-[#EAF1FF] text-2xl font-bold text-[#1E3A8A]">
-                {userInfo.avatar ? (
-                  <img alt="医生头像" className="h-full w-full object-cover" src={userInfo.avatar} />
+                {avatarDisplayUrl ? (
+                  <img alt="医生头像" className="h-full w-full object-cover" src={avatarDisplayUrl} />
                 ) : (
                   displayName.slice(0, 1) || <UserOutlined />
                 )}
@@ -125,12 +162,12 @@ export default function Profile() {
             </button>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-100 pt-4">
+          {/* <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-100 pt-4">
             <CompactInfo label="姓名" value={userInfo.userName || '未设置'} />
             <CompactInfo label="科室" value={userInfo.deptName || '未设置'} />
             <CompactInfo label="职称" value={userInfo.title || '未设置'} />
             <CompactInfo label="账号角色" value={userInfo.roles.join('、') || '医生'} />
-          </div>
+          </div> */}
         </section>
 
         <section className="mt-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
