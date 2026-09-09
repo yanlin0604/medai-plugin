@@ -324,6 +324,7 @@ export default function AppLayout() {
 
   const loginDoctorName = authUserInfo?.userName ?? session?.doctorName ?? currentPatient?.doctor ?? '未识别医生';
   const loginDeptName = authUserInfo?.deptName ?? session?.deptName ?? currentPatient?.deptName ?? '病历系统';
+  const showEmrContextDebug = !['/profile', '/materials'].some((path) => location.pathname.startsWith(path));
 
   // 点击文书：未关联患者先引导读取，已关联则进入智能书写工作台
   const handleSelectDoc = (doc: DocDefinition) => {
@@ -353,7 +354,7 @@ export default function AppLayout() {
     return (
       <div className="h-screen w-screen bg-[#F8FAFC] overflow-hidden flex flex-col font-sans select-none relative">
         <WindowTitleBar />
-        {emrDebug ? (
+        {showEmrContextDebug && emrDebug ? (
           <div className={[
             'shrink-0 border-b px-4 py-1 text-[11px] font-medium',
             emrDebug.status === 'accepted'

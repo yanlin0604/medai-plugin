@@ -628,8 +628,10 @@ export interface OcrBlock {
   location: OcrBlockLocation | null;
 }
 
+export type OcrRecordId = string | number;
+
 export interface BizOcrResultVo {
-  id?: number;
+  id?: OcrRecordId;
   bizType?: string;
   bizId?: string;
   fileName?: string;
@@ -646,7 +648,7 @@ export interface BizOcrResultVo {
 }
 
 export interface OcrRecognizeResult {
-  ocrId?: number;
+  ocrId?: OcrRecordId;
   text?: string;
   blocks?: OcrBlock[];
   engine?: string;
@@ -708,6 +710,12 @@ function readOptionalNumber(...values: unknown[]): number | undefined {
   const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function readOptionalId(...values: unknown[]): OcrRecordId | undefined {
+  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  if (value === undefined) return undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : String(value).trim();
 }
 
 function normalizePatient(dto: RuntimePatientDto): Patient | null {
@@ -779,7 +787,7 @@ async function requestRuntimeUpload<T>(request: Promise<Response>): Promise<T> {
 
 function normalizeOcrRecord(dto: OcrRecordDto): BizOcrResultVo {
   return {
-    id: readOptionalNumber(dto.id, dto.ocrId),
+    id: readOptionalId(dto.id, dto.ocrId),
     bizType: readText(dto.bizType) || undefined,
     bizId: readText(dto.bizId) || undefined,
     fileName: readText(dto.fileName) || undefined,
@@ -863,6 +871,12 @@ export async function recognizeOcrImage(
       headers,
       body: formData,
     }),
+  );
+}
+
+export async function deleteOcrRecord(id: OcrRecordId): Promise<void> {
+  await requestRuntime<null>(
+    http.delete(`${RUNTIME_BASE_PATH}/ocr/${encodePath(id)}`),
   );
 }
 
@@ -984,6 +998,7 @@ export const pluginRuntimeApi = {
   listPatients,
   listOcrRecords,
   recognizeOcrImage,
+  deleteOcrRecord,
   getRoundRoster,
   getRoundPendingStatus,
   markRoundStatus,

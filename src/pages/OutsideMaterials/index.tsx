@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { message } from 'antd';
+import { message, Modal } from 'antd';
 import {
   ArrowLeftOutlined,
   CloseOutlined,
+  DeleteOutlined,
   EyeOutlined,
   FileTextOutlined,
   LoadingOutlined,
@@ -11,9 +12,11 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import {
+  deleteOcrRecord,
   listOcrRecords,
   recognizeOcrImage,
   type BizOcrResultVo,
+  type OcrRecordId,
   type OcrRecognizeResult,
 } from '../../services/pluginRuntime';
 import { usePatientStore } from '../../stores/usePatientStore';
@@ -56,6 +59,13 @@ const T = {
   cost: '耗时',
   size: '大小',
   view: '查看',
+  delete: '删除',
+  deleteTitle: '删除外院资料',
+  deleteConfirm: '删除后将同时清理 OCR 识别记录和 OSS 原图，确认删除吗？',
+  deleteOk: '确认删除',
+  deleteCancel: '取消',
+  deleteSuccess: '外院资料已删除',
+  deleteFailed: '外院资料删除失败',
   detail: '识别详情',
   originalImage: '原图',
   fullText: '识别全文',
@@ -365,6 +375,7 @@ export default function OutsideMaterials() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [detail, setDetail] = useState<BizOcrResultVo | null>(null);
+  const [deletingId, setDeletingId] = useState<OcrRecordId | null>(null);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
   const pagedRecords = useMemo(() => {
@@ -431,7 +442,9 @@ export default function OutsideMaterials() {
       message.success(T.uploadSuccess);
       setPageNum(1);
       const refreshedRecords = await loadRecords();
-      const uploadedRecord = refreshedRecords.find((record) => record.id === result.ocrId);
+      const uploadedRecord = result.ocrId === undefined || result.ocrId === null
+        ? undefined
+        : refreshedRecords.find((record) => String(record.id) === String(result.ocrId));
       setDetail(uploadedRecord ?? toRecord(result, currentPatient.id));
     } catch (error) {
       message.error(error instanceof Error ? error.message : T.uploadFailed);
@@ -442,6 +455,39 @@ export default function OutsideMaterials() {
 
   const openDetail = (record: BizOcrResultVo) => {
     setDetail(record);
+  };
+
+  const handleDelete = (record: BizOcrResultVo) => {
+    const recordId = record.id;
+    if (recordId === undefined || recordId === null) {
+      message.warning('缺少识别记录 ID，无法删除');
+      return;
+    }
+
+    Modal.confirm({
+      title: T.deleteTitle,
+      content: T.deleteConfirm,
+      okText: T.deleteOk,
+      cancelText: T.deleteCancel,
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setDeletingId(recordId);
+        try {
+          await deleteOcrRecord(recordId);
+          message.success(T.deleteSuccess);
+          if (String(detail?.id) === String(recordId)) setDetail(null);
+          const nextTotal = Math.max(0, total - 1);
+          const nextTotalPages = Math.max(1, Math.ceil(nextTotal / PAGE_SIZE));
+          if (pageNum > nextTotalPages) setPageNum(nextTotalPages);
+          await loadRecords();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : T.deleteFailed);
+          throw error;
+        } finally {
+          setDeletingId(null);
+        }
+      },
+    });
   };
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -548,7 +594,9 @@ export default function OutsideMaterials() {
               pagedRecords.map((record) => (
                 <MaterialCard
                   key={record.id ?? `${record.fileName}-${record.createTime}`}
+                  deleting={String(deletingId) === String(record.id)}
                   record={record}
+                  onDelete={() => handleDelete(record)}
                   onView={() => openDetail(record)}
                 />
               ))
@@ -604,10 +652,14 @@ function InfoCell({ label, value }: { label: string; value?: string | number }) 
 }
 
 function MaterialCard({
+  deleting,
   record,
+  onDelete,
   onView,
 }: {
+  deleting: boolean;
   record: BizOcrResultVo;
+  onDelete: () => void;
   onView: () => void;
 }) {
   const status = getStatusMeta(record.status);
@@ -640,15 +692,27 @@ function MaterialCard({
           </div>
           <div className="mt-2 flex items-center justify-between gap-3">
             <p className="min-w-0 flex-1 truncate text-[11px] leading-5 text-slate-500">{summary}</p>
-            <button
-              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 text-[11px] font-bold text-slate-500 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
-              onClick={onView}
-              title={T.view}
-              type="button"
-            >
-              <EyeOutlined />
-              {T.view}
-            </button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-[11px] font-bold text-slate-500 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+                onClick={onView}
+                title={T.view}
+                type="button"
+              >
+                <EyeOutlined />
+                {T.view}
+              </button>
+              <button
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-rose-100 px-2 text-[11px] font-bold text-rose-500 hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={deleting}
+                onClick={onDelete}
+                title={T.delete}
+                type="button"
+              >
+                {deleting ? <LoadingOutlined className="animate-spin" /> : <DeleteOutlined />}
+                {T.delete}
+              </button>
+            </div>
           </div>
         </div>
       </div>
