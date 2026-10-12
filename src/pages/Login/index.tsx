@@ -13,6 +13,7 @@ import { WindowTitleBar } from '../../components/Layout/AppLayout';
 import LegalAgreementModal from '../../components/LegalAgreementModal';
 import { loginWithPassword } from '../../services/authService';
 import { useAuthStore } from '../../stores/useAuthStore';
+import { useBubbleStore } from '../../stores/useBubbleStore';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -20,10 +21,18 @@ export default function Login() {
   const token = useAuthStore((state) => state.token);
   const setToken = useAuthStore((state) => state.setToken);
   const setUserInfo = useAuthStore((state) => state.setUserInfo);
-  const [username, setUsername] = useState('');
+  const bubbleMode = useBubbleStore((state) => state.mode);
+  const rememberedUsername = (() => {
+    try {
+      return localStorage.getItem('medaiPlugin.loginUsername') ?? '';
+    } catch {
+      return '';
+    }
+  })();
+  const [username, setUsername] = useState(rememberedUsername);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberUsername, setRememberUsername] = useState(false);
+  const [rememberUsername, setRememberUsername] = useState(Boolean(rememberedUsername));
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreementModal, setAgreementModal] = useState<'privacy' | 'service' | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -31,9 +40,7 @@ export default function Login() {
   useEffect(() => {
     if (token) {
       navigate('/', { replace: true });
-      return;
     }
-    localStorage.removeItem('medaiPlugin.loginUsername');
   }, [navigate, token]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -63,7 +70,11 @@ export default function Login() {
       }
 
       const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
-      message.success('登录成功，欢迎回来。');
+      // 登录成功后即将收起为气泡时，窗口会立刻缩成 236×68 小窗，
+      // antd toast 会被裁剪并遮挡气泡内容，此时静默收起；仅保持展开时才弹 toast。
+      if (bubbleMode === 'expanded') {
+        message.success('登录成功，欢迎回来。');
+      }
       navigate(from && from !== '/login' ? from : '/', { replace: true });
     } catch (error) {
       message.error(error instanceof Error ? error.message : '登录失败，请稍后重试。');
@@ -147,7 +158,7 @@ export default function Login() {
                   onChange={(event) => setRememberUsername(event.target.checked)}
                   type="checkbox"
                 />
-                记住账号（仅保存在本机）
+                记住账号
               </label>
 
               <label className="flex cursor-pointer items-start gap-2 text-[11px] leading-5 text-slate-500">
