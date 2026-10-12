@@ -431,12 +431,7 @@ export async function listRuntimeDocumentDefinitions(): Promise<RuntimeDocDefini
 export async function listRuntimeDocuments(): Promise<DocDefinition[]> {
   try {
     const definitions = await listRuntimeDocumentDefinitions();
-    const runtimeDocs = definitions.map(toDocDefinition);
-    const runtimeCodes = new Set(runtimeDocs.map((doc) => doc.code));
-    return dedupeDisplayDocuments([
-      ...runtimeDocs,
-      ...DOC_REGISTRY.filter((doc) => !runtimeCodes.has(doc.code)),
-    ]);
+    return dedupeDisplayDocuments(definitions.map(toDocDefinition));
   } catch {
     return dedupeDisplayDocuments(DOC_REGISTRY);
   }
