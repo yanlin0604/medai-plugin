@@ -57,7 +57,7 @@ export default function ProfileEdit() {
   const setUserInfo = useAuthStore((state) => state.setUserInfo);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(userInfo?.userName ?? '');
-  const [deptCode, setDeptCode] = useState(userInfo?.deptCode ?? '');
+  const deptCode = userInfo?.deptCode ?? '';
   const [title, setTitle] = useState(userInfo?.title ?? '');
   const [avatar, setAvatar] = useState(userInfo?.avatar ?? '');
   const [avatarDisplayUrl, setAvatarDisplayUrl] = useState('');

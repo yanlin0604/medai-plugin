@@ -761,7 +761,9 @@ export async function listPatients(): Promise<PatientListResult> {
   const payload = await requestRuntime<unknown>(
     http.get('/medical/patient/list'),
   );
-  const { records, total } = unwrapPatientListPayload(payload);
+  const listPayload = unwrapPatientListPayload(payload);
+  const records = listPayload.records ?? [];
+  const total = listPayload.total ?? records.length;
   const patients = records.map(normalizePatient).filter((patient): patient is Patient => Boolean(patient));
   console.info('[patient-list] response', {
     total,

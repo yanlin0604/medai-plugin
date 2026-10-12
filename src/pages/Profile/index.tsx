@@ -314,15 +314,6 @@ export default function Profile() {
   );
 }
 
-function CompactInfo({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span className="block text-[10px] font-medium text-slate-400">{label}</span>
-      <span className="mt-1 block truncate text-xs font-bold text-slate-700">{value}</span>
-    </div>
-  );
-}
-
 function PasswordField({
   label,
   value,

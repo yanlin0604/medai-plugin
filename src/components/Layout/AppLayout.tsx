@@ -225,6 +225,7 @@ export default function AppLayout() {
     selectPatient,
     selectDoc,
   } = usePatientStore();
+  const token = useAuthStore((state) => state.token);
   const logout = useAuthStore((state) => state.logout);
   const authUserInfo = useAuthStore((state) => state.userInfo);
   const emrDebug = useBubbleStore((state) => state.emrDebug);
@@ -486,7 +487,7 @@ export default function AppLayout() {
               </div>
               <button
                 type="button"
-                onClick={handleReadActivePatient}
+                onClick={() => void handleReadActivePatient()}
                 className="shrink-0 rounded-md bg-[#1E3A8A] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#172554]"
               >
                 读取患者
