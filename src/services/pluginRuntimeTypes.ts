@@ -332,6 +332,8 @@ export type RuntimeDocValues = RuntimeDocValueBundleDto;
 export interface RuntimeDocValueGenerationRequest {
   patientIdHis: string;
   skipGeneration?: boolean;
+  /** 目标字段键（可选，单字段生成模式）：传入后后端仅生成该字段，返回值包只含它 */
+  fieldKey?: string;
   doctorCode?: string;
   doctorName?: string;
   deptCode?: string;
@@ -339,6 +341,12 @@ export interface RuntimeDocValueGenerationRequest {
   clientId?: string;
   /** 字段级组合模板选择（fieldKey → templateId）；缺失自动选择，-1 表示不使用组合模板 */
   compositionTemplateIds?: Record<string, number>;
+  /**
+   * 结构化转写 JSON（String 承载）：{"source":"dialog|round","text":"...","segments":[...]}。
+   * 把医患对话/口述录音的 ASR 转写一次性传入，作为主诉/现病史等 AI 字段的对话证据
+   * （与后端 RuntimeDocValueGenerationRequest.transcript 契约同步）。
+   */
+  transcript?: string;
 }
 
 export interface RuntimeFieldValueDto {
