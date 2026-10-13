@@ -165,18 +165,39 @@ export class FieldExtractionService {
     };
   }
 
+  private sessionClosedResolvers: Array<() => void> = [];
+
+  /**
+   * 断开连接：发送 close_session 后等待后台回执 session_closed 再关闭，
+   * 确保后台关闭前的最终提取候选能送达本端。
+   */
   disconnect(): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      console.info('[field-extraction] 发送 close_session:', this.config.sessionId);
-      this.ws.send(JSON.stringify({
-        action: 'close_session',
-        session_id: this.config.sessionId,
-      }));
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      ws?.close();
+      this.ws = null;
+      this.isConnected = false;
+      return;
     }
 
-    this.ws?.close();
-    this.ws = null;
-    this.isConnected = false;
+    const closedPromise = new Promise<void>((resolve) => {
+      this.sessionClosedResolvers.push(resolve);
+      // 兜底超时：后台 3s 内未回执也照常关闭，避免页面卸载被卡住
+      window.setTimeout(resolve, 3000);
+    });
+
+    console.info('[field-extraction] 发送 close_session:', this.config.sessionId);
+    ws.send(JSON.stringify({
+      action: 'close_session',
+      session_id: this.config.sessionId,
+    }));
+
+    void closedPromise.then(() => {
+      if (this.ws === ws) this.ws = null;
+      this.isConnected = false;
+      ws.close();
+      console.info('[field-extraction] 连接已断开（等待后台最终提取完成）');
+    });
   }
 
   getConnectionState(): boolean {
@@ -217,6 +238,8 @@ export class FieldExtractionService {
         return;
       case 'session_closed':
         console.info('[field-extraction] 会话已关闭:', message.session_id);
+        this.sessionClosedResolvers.forEach((resolve) => resolve());
+        this.sessionClosedResolvers = [];
         return;
       case 'update_fields':
         this.handleFieldUpdate(message);
