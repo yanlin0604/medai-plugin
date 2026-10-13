@@ -48,6 +48,7 @@ export default function FieldAssistPanel() {
   const drafts = useFieldAssistStore((state) => state.drafts);
   const addDraft = useFieldAssistStore((state) => state.addDraft);
   const setContext = useFieldAssistStore((state) => state.setContext);
+  const docVoiceTranscript = useFieldAssistStore((state) => state.docVoiceTranscript);
   const currentPatient = usePatientStore((state) => state.currentPatient);
   const selectedDoc = usePatientStore((state) => state.selectedDoc);
   const [instruction, setInstruction] = useState('');
@@ -111,7 +112,9 @@ export default function FieldAssistPanel() {
     }
     setGenerating(true);
     try {
-      const draft = await generateFieldDraft(context, nextInstruction);
+      // 入院记录语音录入的转写全文：与当前文书匹配时作为对话证据传给后端
+      const docTranscript = docVoiceTranscript?.docCode === context.docCode ? docVoiceTranscript.text : undefined;
+      const draft = await generateFieldDraft(context, nextInstruction, docTranscript);
       addDraft(draft);
       setInstruction('');
       message.success('字段内容已生成');
@@ -177,7 +180,10 @@ export default function FieldAssistPanel() {
 
     setGenerating(true);
     try {
-      const draft = await generateFieldDraft(context, '根据语音转写生成当前字段', text);
+      // 合并文书级语音转写（入院记录语音录入）与面板自身采集的语音文本
+      const docTranscript = docVoiceTranscript?.docCode === context.docCode ? docVoiceTranscript.text : undefined;
+      const combinedTranscript = [docTranscript, text].filter((item) => item?.trim()).join('\n');
+      const draft = await generateFieldDraft(context, '根据语音转写生成当前字段', combinedTranscript || undefined);
       addDraft(draft);
       message.success('已根据语音生成字段草稿');
     } catch (error) {
