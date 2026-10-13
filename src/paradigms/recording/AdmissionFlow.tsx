@@ -537,6 +537,10 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     preFilledFields: voicePreFilledFields,
     protectedDocumentFieldKeys: [],
     documentFieldLabels: voiceFieldLabels,
+    allowedDocumentFieldKeys: useMemo(
+      () => (runtimeState ? runtimeState.sections.map((section) => section.key) : []),
+      [runtimeState],
+    ),
   });
   const stopVoiceSession = voiceSession.stop;
   const disconnectVoiceAnalysis = voiceSession.disconnectAnalysis;
