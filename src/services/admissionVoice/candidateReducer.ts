@@ -1,5 +1,4 @@
 import {
-  ADMISSION_DOCUMENT_FIELD_KEYS,
   ADMISSION_DOCUMENT_FIELD_LABELS,
   TEMP_PATIENT_FIELD_LABELS,
   type AdmissionCandidate,
@@ -13,6 +12,8 @@ type CandidateAction =
     update: FieldExtractionCandidateUpdate;
     protectedDocumentFieldKeys: string[];
     documentFieldLabels?: Record<string, string>;
+    /** 运行时模板合法字段键集合（后台模板驱动，key 为 fieldKey）；缺省时不做白名单限制 */
+    allowedDocumentFieldKeys?: string[];
   }
   | { type: 'accept_document'; fieldKey: string }
   | { type: 'accept_documents'; fieldKeys: string[] }
@@ -20,8 +21,6 @@ type CandidateAction =
   | { type: 'ignore_document'; fieldKey: string }
   | { type: 'ignore_patient'; fieldKey: string }
   | { type: 'clear' };
-
-const ALLOWED_DOCUMENT_FIELDS = new Set<string>(ADMISSION_DOCUMENT_FIELD_KEYS);
 
 export function createInitialCandidateState(): AdmissionCandidateState {
   return {
@@ -38,7 +37,7 @@ export function candidateReducer(
 ): AdmissionCandidateState {
   switch (action.type) {
     case 'merge':
-      return mergeCandidateUpdate(state, action);
+      return mergeCandidateUpdate(state, action, action.allowedDocumentFieldKeys);
     case 'accept_document':
       return acceptCandidate(state, 'documentFields', 'acceptedDocumentFields', [action.fieldKey]);
     case 'accept_documents':
@@ -72,6 +71,7 @@ export function selectSafeDocumentCandidates(
 function mergeCandidateUpdate(
   state: AdmissionCandidateState,
   action: Extract<CandidateAction, { type: 'merge' }>,
+  allowedDocumentFieldKeys?: string[],
 ): AdmissionCandidateState {
   const protectedKeys = new Set(action.protectedDocumentFieldKeys);
   const documentLabels = {
@@ -87,7 +87,8 @@ function mergeCandidateUpdate(
       incoming: action.update.documentFields,
       labels: documentLabels,
       group: 'document',
-      allowedKeys: ALLOWED_DOCUMENT_FIELDS,
+      // 运行时白名单：模板加载后按 fieldKey 过滤；模板未就绪时放行（标签仍可展示）
+      allowedKeys: allowedDocumentFieldKeys?.length ? new Set(allowedDocumentFieldKeys) : undefined,
       protectedKeys,
     }),
     patientFields: mergeGroup({

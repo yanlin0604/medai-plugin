@@ -16,7 +16,10 @@ import { usePatientStore } from '../../stores/usePatientStore';
 import { buildSubmitSnapshot } from '../../services/documentFlow';
 import { saveDraft, loadDraft } from '../../services/draftService';
 import { backendRuntimeVersionAdapter } from '../../services/versionService';
+import { buildVoiceTranscriptPayload, buildVoiceTranscriptText, completeField } from '../../services/pluginRuntime';
+import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
 import {
+  admissionFieldUsesAi,
   applyAdmissionFieldAutomation,
   clearAdmissionRuntimeCache,
   isAdmissionMetaSection,
@@ -39,6 +42,7 @@ import type {
   IcdItem,
   PatientBrief,
 } from '../../services/types';
+import type { RuntimeFieldValueDto } from '../../services/pluginRuntimeTypes';
 import {
   getLatestFieldAssistContext,
   isUsableFieldAssistContext,
@@ -343,6 +347,44 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
 
   const finalContent = submitSnapshot.content;
 
+  // ==================== 语音功能（入院记录独有） ====================
+  const fieldsByKey = useMemo(() => {
+    if (!runtimeState) return new Map<string, ClinicalSection>();
+    return new Map(runtimeState.sections.map((section) => [section.key, section]));
+  }, [runtimeState]);
+
+  const voiceFieldLabels = useMemo(() => {
+    if (!runtimeState) return {};
+    return Object.fromEntries(runtimeState.sections.map((section) => [section.key, section.title]));
+  }, [runtimeState]);
+
+  const voicePreFilledFields = useMemo(
+    () =>
+      Object.fromEntries(
+        submitSnapshot.fields
+          ? Object.entries(submitSnapshot.fields).filter(([, value]) => value.trim())
+          : [],
+      ),
+    [submitSnapshot.fields],
+  );
+
+  const voiceSession = useAdmissionVoiceSession({
+    enabled: !readOnlyEntry && !locked && !mismatch,
+    docCode: doc.code,
+    patientMode,
+    patientId: null,
+    patientIdHis: patientMode === 'existing' ? patient.admissionNo : null,
+    asrWebSocketUrl: ASR_WS_URL,
+    fieldExtractionWebSocketUrl: FIELD_EXTRACTION_WS_URL,
+    preFilledFields: voicePreFilledFields,
+    protectedDocumentFieldKeys: [],
+    documentFieldLabels: voiceFieldLabels,
+    allowedDocumentFieldKeys: useMemo(
+      () => (runtimeState ? runtimeState.sections.map((section) => section.key) : []),
+      [runtimeState],
+    ),
+  });
+
   // ==================== 草稿自动保存 ====================
   useEffect(() => {
     if (readOnlyEntry || !hydratedRef.current || locked) return;
@@ -411,7 +453,11 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
 
     try {
       clearAdmissionRuntimeCache(doc.code, patient.admissionNo);
-      const runtime = await loadAdmissionRuntime(doc.code, patient.admissionNo, patient, { forceRefresh: true });
+      const transcript = buildVoiceTranscriptPayload(voiceSession.segments);
+      const runtime = await loadAdmissionRuntime(doc.code, patient.admissionNo, patient, {
+        forceRefresh: true,
+        transcript,
+      });
       applyRuntimeState(runtime, { restoreDraft: false });
       bumpSectionResetKeys(runtime.sections.map((section) => section.key));
       message.success('已重新生成全部字段。');
@@ -430,6 +476,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     patient,
     runtimeRegenerating,
     runtimeValuesLoading,
+    voiceSession.segments,
   ]);
 
   const regenerateSection = useCallback(async (sectionKey: string) => {
@@ -455,7 +502,63 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
 
     setRegeneratingSectionKey(sectionKey);
     try {
-      const fieldState = await loadAdmissionRuntimeField(doc.code, patient.admissionNo, sectionKey, runtimeState.template);
+      const transcript = buildVoiceTranscriptPayload(voiceSession.segments);
+      const templateField = runtimeState.template.fields.find((field) => field.fieldKey === sectionKey);
+
+      if (templateField && admissionFieldUsesAi(templateField)) {
+        // AI 策略字段：直接调 /field-completions（/values 内部 AI 字段走的就是同一生成核心）
+        const currentText = sections.find((section) => section.key === sectionKey)?.text ?? '';
+        const completion = await completeField({
+          patientId: patient.admissionNo,
+          visitId: patient.admissionNo,
+          documentType: doc.name,
+          docCode: doc.code,
+          fieldKey: sectionKey,
+          fieldName: templateField.fieldLabel || currentSection.title,
+          currentText: currentText.trim() || undefined,
+          mode: 'generate',
+          transcriptText: transcript,
+          doctorName: `${doctor} 医师`,
+        });
+        const aiValue: RuntimeFieldValueDto = {
+          fieldKey: sectionKey,
+          value: completion.generatedText,
+          generationId: completion.generationId,
+          usedEvidenceIds: completion.usedEvidenceIds,
+          warnings: completion.warnings,
+        };
+        setRuntimeState((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            values: {
+              ...current.values,
+              values: { ...(current.values.values ?? {}), [sectionKey]: aiValue },
+              resolvedAt: new Date().toISOString(),
+            },
+            sections: current.sections.map((section) =>
+              section.key === sectionKey ? { ...section, text: completion.generatedText } : section,
+            ),
+          };
+        });
+        setSections((current) => applyAdmissionFieldAutomation(
+          current.map((section) =>
+            section.key === sectionKey ? { ...section, text: completion.generatedText } : section,
+          ),
+        ));
+        bumpSectionResetKey(sectionKey);
+        message.success(`已重新生成${currentSection.title}`);
+        return;
+      }
+
+      // 非 AI 字段（直填/计算/提取）：走 /values 单字段模式，不调 AI
+      const fieldState = await loadAdmissionRuntimeField(
+        doc.code,
+        patient.admissionNo,
+        sectionKey,
+        runtimeState.template,
+        { transcript },
+      );
       const generatedValue = fieldState.values.values?.[sectionKey];
       setRuntimeState((current) => {
         if (!current) return current;
@@ -495,6 +598,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   }, [
     bumpSectionResetKey,
     doc.code,
+    doctor,
     locked,
     mismatch,
     patient.admissionNo,
@@ -502,44 +606,19 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     runtimeRegenerating,
     runtimeState,
     runtimeValuesLoading,
+    voiceSession.segments,
     sections,
   ]);
 
-  // ==================== 语音功能（入院记录独有） ====================
-  const fieldsByKey = useMemo(() => {
-    if (!runtimeState) return new Map<string, ClinicalSection>();
-    return new Map(runtimeState.sections.map((section) => [section.key, section]));
-  }, [runtimeState]);
-
-  const voiceFieldLabels = useMemo(() => {
-    if (!runtimeState) return {};
-    return Object.fromEntries(runtimeState.sections.map((section) => [section.key, section.title]));
-  }, [runtimeState]);
-
-  const voicePreFilledFields = useMemo(
-    () =>
-      Object.fromEntries(
-        submitSnapshot.fields
-          ? Object.entries(submitSnapshot.fields).filter(([, value]) => value.trim())
-          : [],
-      ),
-    [submitSnapshot.fields],
-  );
-
-  const voiceSession = useAdmissionVoiceSession({
-    enabled: !readOnlyEntry && !locked && !mismatch,
-    docCode: doc.code,
-    patientMode,
-    patientId: null,
-    patientIdHis: patientMode === 'existing' ? patient.admissionNo : null,
-    asrWebSocketUrl: ASR_WS_URL,
-    fieldExtractionWebSocketUrl: FIELD_EXTRACTION_WS_URL,
-    preFilledFields: voicePreFilledFields,
-    protectedDocumentFieldKeys: [],
-    documentFieldLabels: voiceFieldLabels,
-  });
   const stopVoiceSession = voiceSession.stop;
   const disconnectVoiceAnalysis = voiceSession.disconnectAnalysis;
+
+  // 语音转写同步到字段助手 store：字段助手生成时可把本次录音转写作为对话证据
+  const setDocVoiceTranscript = useFieldAssistStore((state) => state.setDocVoiceTranscript);
+  useEffect(() => {
+    const text = buildVoiceTranscriptText(voiceSession.segments);
+    setDocVoiceTranscript(text ? { docCode: doc.code, text } : null);
+  }, [doc.code, setDocVoiceTranscript, voiceSession.segments]);
 
   const activeVoiceSectionLabel = useMemo(() => {
     const activeField = fieldsByKey.get(activeVoiceSectionKey);

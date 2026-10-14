@@ -41,6 +41,8 @@ const runtimeCache = new Map<string, Promise<AdmissionRuntimeState>>();
 
 interface LoadAdmissionRuntimeOptions {
   forceRefresh?: boolean;
+  /** 实时语音转写（结构化 JSON）：传入后 AI 字段生成将对话证据纳入提取 */
+  transcript?: string;
 }
 
 function runtimeCacheKey(docCode: string, patientIdHis: string): string {
@@ -76,7 +78,9 @@ export async function loadAdmissionRuntime(
     const skipGeneration = !options.forceRefresh && hasDraft(docCode, patientIdHis);
     promise = Promise.all([
       pluginRuntimeApi.getRuntimeTemplate(docCode),
-      pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, skipGeneration),
+      pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, skipGeneration, {
+        transcript: options.transcript,
+      }),
     ])
       .then(([template, values]) => buildAdmissionRuntime(template, values, patient))
       .catch((error) => {
@@ -116,8 +120,13 @@ export async function loadAdmissionRuntimeField(
   patientIdHis: string,
   fieldKey: string,
   template: RuntimeDocTemplateDto,
+  options: { transcript?: string } = {},
 ): Promise<AdmissionRuntimeFieldState> {
-  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, false);
+  // 单字段模式：传 fieldKey 让后端只生成该字段（避免全字段 AI 调用）
+  const values = await pluginRuntimeApi.resolveRuntimeValues(docCode, patientIdHis, false, {
+    fieldKey,
+    transcript: options.transcript,
+  });
   return buildAdmissionRuntimeField(template, values, fieldKey);
 }
 
@@ -171,6 +180,30 @@ export function buildAdmissionRuntimeField(
 
 export function isAdmissionMetaSection(section: ClinicalSection, metaFieldKeys: string[]): boolean {
   return metaFieldKeys.includes(section.key);
+}
+
+/**
+ * 判断模板字段是否由 AI 策略生成（ai_summary / evidence_summary / hybrid）。
+ *
+ * 判定顺序与后端 GenerationRuleResolver.inferStrategy 保持一致：
+ * calculate / completionMode=direct 的字段以及 merge.todayDocs、提取类字段不走 AI。
+ * 供「单字段重新生成」分流：AI 字段直接调 /field-completions（与 /values 内部
+ * AI 字段同一生成核心），其余字段走 /values 单字段模式（无 AI 调用，毫秒级）。
+ */
+export function admissionFieldUsesAi(field: RuntimeDocFieldDto): boolean {
+  const rule = field.renderRule;
+  const sourceType = field.sourceType?.trim().toLowerCase();
+  if (!rule) {
+    return sourceType === 'ai';
+  }
+  if (rule.calculate?.type) return false;
+  const mode = rule.completionMode?.trim().toLowerCase();
+  if (mode === 'evidence' || mode === 'subjective' || mode === 'hybrid') return true;
+  if (mode === 'direct') return false;
+  if (sourceType === 'ai') return true;
+  if (rule.evidence?.sources?.length) return true;
+  if (rule.prompt) return true;
+  return false;
 }
 
 // ==================== 内部辅助函数 ====================

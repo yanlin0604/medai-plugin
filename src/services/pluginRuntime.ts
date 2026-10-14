@@ -148,7 +148,7 @@ const tauriRuntimeAdapter: AxiosAdapter = async (config) => {
   const method = String(config.method ?? 'GET').toUpperCase();
   const requestUrl = buildRuntimeRequestUrl(config);
   if (DEBUG_RUNTIME_HTTP) {
-    console.info('[runtime-http] ->', method, requestUrl);
+    console.info('[runtime-http] ->', method, requestUrl, parseRequestBody(config.data) ?? '');
   }
 
   const response = await invoke<TauriRuntimeProxyResponse>('runtime_http_request', {
@@ -161,7 +161,7 @@ const tauriRuntimeAdapter: AxiosAdapter = async (config) => {
   });
 
   if (DEBUG_RUNTIME_HTTP) {
-    console.info('[runtime-http] <-', method, requestUrl, response.status);
+    console.info('[runtime-http] <-', method, requestUrl, response.status, response.data);
   }
 
   return {
@@ -470,6 +470,42 @@ export async function resolveRuntimeValues(
       ...context,
     }),
   );
+}
+
+/**
+ * 把实时语音转写分段构造成后端批量生成接口约定的结构化转写 JSON。
+ * 无分段时返回 undefined（不传 transcript，保持后端既有兜底逻辑）。
+ */
+export function buildVoiceTranscriptPayload(
+  segments: Array<{ speaker: string; text: string; timestamp: number }>,
+): string | undefined {
+  const text = buildVoiceTranscriptText(segments);
+  if (!text) return undefined;
+  return JSON.stringify({
+    source: 'dialog',
+    text,
+    segments: segments
+      .filter((segment) => segment.text.trim())
+      .map((segment) => ({
+        speaker: segment.speaker,
+        text: segment.text.trim(),
+        timestamp: segment.timestamp,
+      })),
+  });
+}
+
+/**
+ * 把实时语音转写分段拼接为 "[说话人] 内容" 多行纯文本（字段助手 transcriptText 用）。
+ * 无有效分段时返回 undefined。
+ */
+export function buildVoiceTranscriptText(
+  segments: Array<{ speaker: string; text: string; timestamp: number }>,
+): string | undefined {
+  const text = segments
+    .filter((segment) => segment.text.trim())
+    .map((segment) => `[${segment.speaker}] ${segment.text.trim()}`)
+    .join('\n');
+  return text || undefined;
 }
 
 export async function getEvidence(request: RuntimeEvidenceQueryRequest): Promise<RuntimeEvidenceBundleDto> {

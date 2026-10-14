@@ -96,6 +96,7 @@ export class FieldExtractionService {
 
       ws.onopen = () => {
         this.isConnected = true;
+        console.info('[field-extraction] WebSocket 已连接:', webSocketUrl);
         this.initSession();
         settled = true;
         resolve();
@@ -103,6 +104,7 @@ export class FieldExtractionService {
 
       ws.onerror = () => {
         const error = new Error('字段分析 WebSocket 连接失败');
+        console.warn('[field-extraction] WebSocket 连接失败:', webSocketUrl);
         this.handleError(error.message);
         if (!settled) {
           settled = true;
@@ -119,12 +121,14 @@ export class FieldExtractionService {
       ws.onclose = () => {
         if (this.ws === ws) this.ws = null;
         this.isConnected = false;
+        console.info('[field-extraction] WebSocket 连接关闭');
       };
     });
   }
 
   forwardFinalTranscript(turn: DialogTurn): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('[field-extraction] 连接未就绪，丢弃转写片段:', turn.text);
       this.handleError('字段分析连接未就绪，无法分析当前转写片段。');
       return false;
     }
@@ -136,6 +140,7 @@ export class FieldExtractionService {
       speaker: turn.speaker || '未知',
       timestamp: turn.timestamp,
     }));
+    console.info(`[field-extraction] 转发转写片段: speaker=${turn.speaker || '未知'}, text=${previewText(turn.text)}`);
     return true;
   }
 
@@ -160,17 +165,39 @@ export class FieldExtractionService {
     };
   }
 
+  private sessionClosedResolvers: Array<() => void> = [];
+
+  /**
+   * 断开连接：发送 close_session 后等待后台回执 session_closed 再关闭，
+   * 确保后台关闭前的最终提取候选能送达本端。
+   */
   disconnect(): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        action: 'close_session',
-        session_id: this.config.sessionId,
-      }));
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      ws?.close();
+      this.ws = null;
+      this.isConnected = false;
+      return;
     }
 
-    this.ws?.close();
-    this.ws = null;
-    this.isConnected = false;
+    const closedPromise = new Promise<void>((resolve) => {
+      this.sessionClosedResolvers.push(resolve);
+      // 兜底超时：后台 3s 内未回执也照常关闭，避免页面卸载被卡住
+      window.setTimeout(resolve, 3000);
+    });
+
+    console.info('[field-extraction] 发送 close_session:', this.config.sessionId);
+    ws.send(JSON.stringify({
+      action: 'close_session',
+      session_id: this.config.sessionId,
+    }));
+
+    void closedPromise.then(() => {
+      if (this.ws === ws) this.ws = null;
+      this.isConnected = false;
+      ws.close();
+      console.info('[field-extraction] 连接已断开（等待后台最终提取完成）');
+    });
   }
 
   getConnectionState(): boolean {
@@ -184,7 +211,7 @@ export class FieldExtractionService {
   private initSession(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    this.ws.send(JSON.stringify({
+    const payload = {
       action: 'init_session',
       session_id: this.config.sessionId,
       doc_code: this.config.docCode,
@@ -192,7 +219,9 @@ export class FieldExtractionService {
       patient_id_his: this.config.patientIdHis ?? null,
       patient_mode: this.config.patientMode ?? 'existing',
       pre_filled_fields: this.config.preFilledFields ?? {},
-    }));
+    };
+    console.info('[field-extraction] 发送 init_session:', payload);
+    this.ws.send(JSON.stringify(payload));
   }
 
   private handleMessage(data: string): void {
@@ -205,7 +234,12 @@ export class FieldExtractionService {
 
     switch (message.action) {
       case 'session_initialized':
+        console.info('[field-extraction] 会话初始化成功:', message.session_id);
+        return;
       case 'session_closed':
+        console.info('[field-extraction] 会话已关闭:', message.session_id);
+        this.sessionClosedResolvers.forEach((resolve) => resolve());
+        this.sessionClosedResolvers = [];
         return;
       case 'update_fields':
         this.handleFieldUpdate(message);
@@ -240,12 +274,17 @@ export class FieldExtractionService {
       return;
     }
 
+    console.info(
+      `[field-extraction] 收到字段候选: documentFields=${Object.keys(update.documentFields).length},`
+      + ` patientFields=${Object.keys(update.patientFields).length}, confidence=${update.confidence ?? '-'}`
+    );
     this.candidateUpdateCallbacks.forEach((callback) => callback(update));
     const legacyFields = flattenCandidateMap(update.documentFields);
     this.fieldUpdateCallbacks.forEach((callback) => callback(legacyFields, confidence));
   }
 
   private handleError(errorMessage: string): void {
+    console.warn('[field-extraction] 错误:', errorMessage);
     this.errorCallbacks.forEach((callback) => callback(errorMessage));
   }
 }
@@ -316,4 +355,8 @@ function toNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function previewText(text: string): string {
+  return text.length > 60 ? `${text.slice(0, 60)}…` : text;
 }

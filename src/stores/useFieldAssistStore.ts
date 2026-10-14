@@ -6,7 +6,10 @@ import { getFieldAssistContextKey, getFieldIdentityKey } from '../services/field
 interface FieldAssistState {
   context: FieldAssistContext | null;
   drafts: FieldAssistDraft[];
+  /** 文书语音录入的转写全文（文本前缀标注说话人），供字段助手生成时作为 transcriptText 证据 */
+  docVoiceTranscript: { docCode: string; text: string } | null;
   setContext: (context: FieldAssistContext | null) => void;
+  setDocVoiceTranscript: (payload: { docCode: string; text: string } | null) => void;
   addDraft: (draft: FieldAssistDraft) => void;
   getCurrentDrafts: () => FieldAssistDraft[];
 }
@@ -14,8 +17,11 @@ interface FieldAssistState {
 export const useFieldAssistStore = create<FieldAssistState>((set, get) => ({
   context: null,
   drafts: loadFieldAssistHistory(),
+  docVoiceTranscript: null,
 
   setContext: (context) => set({ context }),
+
+  setDocVoiceTranscript: (payload) => set({ docVoiceTranscript: payload }),
 
   addDraft: (draft) => {
     saveFieldAssistDraft(draft);

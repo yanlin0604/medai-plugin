@@ -26,6 +26,8 @@ interface UseAdmissionVoiceSessionOptions {
   preFilledFields?: Record<string, unknown>;
   protectedDocumentFieldKeys?: string[];
   documentFieldLabels?: Record<string, string>;
+  /** 运行时模板合法文书字段键集合（用于候选过滤白名单） */
+  allowedDocumentFieldKeys?: string[];
 }
 
 export interface UseAdmissionVoiceSessionResult {
@@ -65,6 +67,7 @@ export function useAdmissionVoiceSession(
 
   const configRef = useRef(options);
   const protectedKeysRef = useRef(options.protectedDocumentFieldKeys ?? []);
+  const allowedKeysRef = useRef(options.allowedDocumentFieldKeys);
   const asrSessionRef = useRef<BrowserAsrSession | null>(null);
   const fieldServiceRef = useRef<FieldExtractionService | null>(null);
   const sessionIdRef = useRef(createSessionId(options.docCode));
@@ -102,6 +105,7 @@ export function useAdmissionVoiceSession(
   const ensureFieldService = useCallback(async (): Promise<FieldExtractionService | null> => {
     const config = configRef.current;
     if (!config.fieldExtractionWebSocketUrl.trim()) {
+      console.warn('[admission-voice] 未配置 VITE_FIELD_EXTRACTION_WS_URL，仅保留语音转文字');
       setAnalysisError('未配置 VITE_FIELD_EXTRACTION_WS_URL，当前仅保留语音转文字。');
       setAnalysisConnected(false);
       return null;
@@ -126,6 +130,7 @@ export function useAdmissionVoiceSession(
         update,
         protectedDocumentFieldKeys: protectedKeysRef.current,
         documentFieldLabels: configRef.current.documentFieldLabels,
+        allowedDocumentFieldKeys: allowedKeysRef.current,
       });
     });
     service.onError((errorMessage) => {
@@ -142,23 +147,30 @@ export function useAdmissionVoiceSession(
     } catch (error) {
       service.disconnect();
       setAnalysisConnected(false);
+      console.error('[admission-voice] 字段分析服务连接失败:', error);
       setAnalysisError(error instanceof Error ? error.message : '字段分析服务连接失败，当前仅保留语音转文字。');
       return null;
     }
   }, []);
 
   const handleFinalMessage = useCallback((message: AsrServerMessage) => {
-    // 如果服务端指定了 mode 且不为精修模式，则跳过（避免 2pass 模式下重复采纳录音片段）
-    if (message.mode && message.mode !== 'refined') {
+    // 2-pass 协议：is_final=true 的精修定稿 mode 为 "2pass-offline"，一遍快速结果不携带 is_final，
+    // 这里只采纳 final 消息（避免重复采纳录音片段）
+    if (message.is_final !== true) {
+      console.debug(`[admission-voice] 跳过非 final 消息: mode=${message.mode ?? '-'}, text=${(message.text ?? '').slice(0, 40)}`);
       return;
     }
 
     const text = (message.text ?? '').trim();
     setPartialText('');
-    if (!text) return;
+    if (!text) {
+      console.debug('[admission-voice] 忽略空文本 final 消息');
+      return;
+    }
 
     const timestamp = Date.now();
     const speaker = message.speaker || '未知';
+    console.info(`[admission-voice] 收到精修转写: speaker=${speaker}, text=${text.slice(0, 60)}`);
     setSegments((prev) => [
       ...prev,
       {
@@ -169,11 +181,14 @@ export function useAdmissionVoiceSession(
       },
     ]);
 
-    fieldServiceRef.current?.forwardFinalTranscript({
+    const forwarded = fieldServiceRef.current?.forwardFinalTranscript({
       text,
       speaker,
       timestamp,
     });
+    if (!forwarded) {
+      console.warn('[admission-voice] 转写片段未转发到字段分析服务');
+    }
   }, []);
 
   const start = useCallback(async () => {
@@ -203,6 +218,7 @@ export function useAdmissionVoiceSession(
         },
         onFinal: handleFinalMessage,
         onError: (error) => {
+          console.error('[admission-voice] ASR 连接异常:', error.message);
           setAsrError(error.message);
         },
         onClose: () => {
