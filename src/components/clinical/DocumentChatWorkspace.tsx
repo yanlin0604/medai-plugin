@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { message } from 'antd';
 import {
   CheckOutlined,
+  ClearOutlined,
   CloseOutlined,
   Loading3QuartersOutlined,
   ReloadOutlined,
@@ -40,6 +41,7 @@ interface Props {
   sectionToolbarActions?: Record<string, ReactNode>;
   sectionBottomNodes?: Record<string, ReactNode>;
   sectionBadgeLabel?: string;
+  hideSectionBadge?: boolean;
   hideHeader?: boolean;
   hideBadges?: boolean;
   regeneratingSectionKey?: string | null;
@@ -50,6 +52,7 @@ interface Props {
   optimize?: SectionOptimize;
   optimizeSection?: SectionListOptimize;
   onRewriteStatusChange?: SectionRewriteStatusHandler;
+  voiceInsertion?: { sectionKey: string; sequence: number; text: string } | null;
 }
 
 function displayText(
@@ -84,6 +87,7 @@ export default function DocumentChatWorkspace({
   sectionToolbarActions,
   sectionBottomNodes,
   sectionBadgeLabel = '概括总结',
+  hideSectionBadge,
   hideHeader,
   hideBadges,
   regeneratingSectionKey,
@@ -94,11 +98,30 @@ export default function DocumentChatWorkspace({
   optimize,
   optimizeSection,
   onRewriteStatusChange,
+  voiceInsertion,
 }: Props) {
   const [optimizingSectionKey, setOptimizingSectionKey] = useState('');
   const [pendingRewrite, setPendingRewrite] = useState<PendingRewrite | null>(null);
+  const textareaRefs = useRef(new Map<string, HTMLTextAreaElement>());
+  const textareaSelections = useRef(new Map<string, { start: number; end: number }>());
+  const lastVoiceInsertionSequence = useRef(0);
   const metaCells = flattenMetaRows(metaRows);
   const canOptimize = Boolean(optimize || optimizeSection);
+
+  useEffect(() => {
+    if (!voiceInsertion || voiceInsertion.sequence <= lastVoiceInsertionSequence.current) return;
+    lastVoiceInsertionSequence.current = voiceInsertion.sequence;
+    const textarea = textareaRefs.current.get(voiceInsertion.sectionKey);
+    if (!textarea || !voiceInsertion.text) return;
+    const saved = textareaSelections.current.get(voiceInsertion.sectionKey);
+    const start = Math.max(0, Math.min(saved?.start ?? textarea.value.length, textarea.value.length));
+    const end = Math.max(start, Math.min(saved?.end ?? start, textarea.value.length));
+    textarea.focus();
+    textarea.setRangeText(voiceInsertion.text, start, end, 'end');
+    const nextPosition = start + voiceInsertion.text.length;
+    textareaSelections.current.set(voiceInsertion.sectionKey, { start: nextPosition, end: nextPosition });
+    onChange(voiceInsertion.sectionKey, textarea.value);
+  }, [onChange, voiceInsertion]);
 
   const runOptimize = async (section: ClinicalSection) => {
     const currentText = displayText(section, sectionEdits).trim();
@@ -202,9 +225,11 @@ export default function DocumentChatWorkspace({
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md bg-[#F0F5FF] px-2 py-1 text-[11px] font-extrabold text-[#1E3A8A]">
-                        {sectionBadgeLabel}
-                      </span>
+                      {!hideSectionBadge ? (
+                        <span className="rounded-md bg-[#F0F5FF] px-2 py-1 text-[11px] font-extrabold text-[#1E3A8A]">
+                          {sectionBadgeLabel}
+                        </span>
+                      ) : null}
                       {!hideBadges && section.required ? (
                         <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
                           必填
@@ -217,7 +242,7 @@ export default function DocumentChatWorkspace({
                       ) : null}
                       {suffix}
                     </div>
-                    <h4 className="mt-2 truncate text-sm font-extrabold text-slate-900">{section.title}</h4>
+                    <h4 className={`${hideSectionBadge ? 'mt-0' : 'mt-2'} truncate text-sm font-extrabold text-slate-900`}>{section.title}</h4>
                   </div>
 
                   {!disabled ? (
@@ -263,14 +288,55 @@ export default function DocumentChatWorkspace({
                   ) : null}
                 </div>
 
+                <div className="relative">
                 <textarea
+                  ref={(element) => {
+                    if (element) textareaRefs.current.set(section.key, element);
+                    else textareaRefs.current.delete(section.key);
+                  }}
                   value={text}
                   disabled={disabled}
                   onFocus={() => onFocusSection?.(section.key)}
-                  onChange={(event) => onChange(section.key, event.target.value)}
-                  className="min-h-[112px] w-full resize-y rounded-lg border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800 outline-none transition-colors placeholder:text-slate-300 focus:border-[#1E3A8A] focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
+                  onBlur={(event) => textareaSelections.current.set(section.key, {
+                    start: event.currentTarget.selectionStart,
+                    end: event.currentTarget.selectionEnd,
+                  })}
+                  onSelect={(event) => textareaSelections.current.set(section.key, {
+                    start: event.currentTarget.selectionStart,
+                    end: event.currentTarget.selectionEnd,
+                  })}
+                  onClick={(event) => textareaSelections.current.set(section.key, {
+                    start: event.currentTarget.selectionStart,
+                    end: event.currentTarget.selectionEnd,
+                  })}
+                  onKeyUp={(event) => textareaSelections.current.set(section.key, {
+                    start: event.currentTarget.selectionStart,
+                    end: event.currentTarget.selectionEnd,
+                  })}
+                  onChange={(event) => {
+                    textareaSelections.current.set(section.key, {
+                      start: event.currentTarget.selectionStart,
+                      end: event.currentTarget.selectionEnd,
+                    });
+                    onChange(section.key, event.target.value);
+                  }}
+                  className="min-h-[112px] w-full resize-y rounded-lg border border-slate-200 bg-[#FBFDFF] px-3 py-2 pr-10 text-sm leading-6 text-slate-800 outline-none transition-colors placeholder:text-slate-300 focus:border-[#1E3A8A] focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
                   placeholder={`填写${section.title}`}
                 />
+                  <button
+                    type="button"
+                    disabled={disabled || !text.trim() || regenerating || optimizing}
+                    onClick={() => {
+                      textareaSelections.current.set(section.key, { start: 0, end: 0 });
+                      onChange(section.key, '');
+                    }}
+                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={`清空${section.title}`}
+                    aria-label={`清空${section.title}`}
+                  >
+                    <ClearOutlined />
+                  </button>
+                </div>
 
                 {sectionBottomNodes?.[section.key] ? (
                   <div className="mt-3">

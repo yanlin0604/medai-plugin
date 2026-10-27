@@ -11,6 +11,7 @@ interface UseDocumentSubmitOptions {
   patientId: string;
   editor: string;
   versionAdapter?: DocumentVersionAdapter;
+  lockAfterSubmit?: boolean;
 }
 
 interface SubmitInput {
@@ -32,6 +33,7 @@ export function useDocumentSubmit({
   patientId,
   editor,
   versionAdapter = localVersionAdapter,
+  lockAfterSubmit = true,
 }: UseDocumentSubmitOptions) {
   const [locked, setLocked] = useState(false);
   const [mismatch, setMismatch] = useState(false);
@@ -130,7 +132,7 @@ export function useDocumentSubmit({
           });
           versionNo = version.versionNo;
         } catch (error) {
-          setLocked(true);
+          if (lockAfterSubmit) setLocked(true);
           setSubmitProgress(100);
           setSubmitText('版本失败');
           const detail = error instanceof Error ? error.message : '历史版本生成失败';
@@ -139,7 +141,7 @@ export function useDocumentSubmit({
         }
 
         setVersionCount((count) => Math.max(count + 1, versionNo));
-        setLocked(true);
+        if (lockAfterSubmit) setLocked(true);
         setSubmitProgress(100);
         setSubmitText('已提交');
         message.success(res.message);
@@ -150,7 +152,7 @@ export function useDocumentSubmit({
         setSubmitText('');
       }
     },
-    [docCode, docName, editor, locked, mismatch, patientId, submitting, versionAdapter],
+    [docCode, docName, editor, lockAfterSubmit, locked, mismatch, patientId, submitting, versionAdapter],
   );
 
   return {

@@ -130,7 +130,7 @@ export default function AdmissionVoicePanel({
             safeCount={safeDocumentCandidateCount}
             disabled={disabled}
             onAccept={onAcceptDocument}
-            onIgnore={onIgnoreDocument}
+            onIgnore={onIgnoreDocument} 
             onAcceptAllSafe={onAcceptAllSafe}
           />
         </div>

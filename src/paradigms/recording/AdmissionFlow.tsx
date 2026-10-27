@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { message, Modal } from 'antd';
-import {
-  ReloadOutlined,
-} from '@ant-design/icons';
+import { ReloadOutlined } from '@ant-design/icons';
 import ParadigmShell from '../ParadigmShell';
 import type { ParadigmProps } from '../types';
 import DocumentChatWorkspace from '../../components/clinical/DocumentChatWorkspace';
 import MeltdownAlert from '../../components/clinical/MeltdownAlert';
-import AdmissionVoiceTray from '../../components/admissionVoice/AdmissionVoiceTray';
+import AdmissionVoiceTray, { type AdmissionVoiceInputMode } from '../../components/admissionVoice/AdmissionVoiceTray';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useDocumentSubmit } from '../../hooks/useDocumentSubmit';
 import { usePatientStore } from '../../stores/usePatientStore';
@@ -113,11 +111,15 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
   const [regeneratingSectionKey, setRegeneratingSectionKey] = useState<string | null>(null);
   const [sectionResetKeys, setSectionResetKeys] = useState<Record<string, number>>({});
   const [activeVoiceSectionKey, setActiveVoiceSectionKey] = useState('');
+  const [voiceInsertion, setVoiceInsertion] = useState<{ sectionKey: string; sequence: number; text: string } | null>(null);
+  const [voiceInputMode, setVoiceInputMode] = useState<AdmissionVoiceInputMode>('smart');
   const [applyingSectionKey, setApplyingSectionKey] = useState<string | null>(null);
   const [fieldContext, setFieldContext] = useState<FieldAssistContext | null>(null);
   const latestFieldSnapshotKeyRef = useRef('');
   const hydratedRef = useRef(false);
   const templateSectionTextsRef = useRef<Record<string, string>>({});
+  const dictationProcessedSegmentCountRef = useRef(0);
+  const voiceInsertionSequenceRef = useRef(0);
 
   const {
     locked,
@@ -131,6 +133,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     patientId: patient.admissionNo,
     editor: `${doctor} 医师`,
     versionAdapter: backendRuntimeVersionAdapter,
+    lockAfterSubmit: false,
   });
 
   // ==================== 运行时加载（对齐出院记录渐进式加载） ====================
@@ -154,7 +157,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     setAcceptedDiagnoses(
       saved ? (saved.values.admissionDiagnoses as IcdItem[] | undefined) ?? runtime.icdCandidates : runtime.icdCandidates,
     );
-    setLocked(saved?.status === 'submitted');
+    setLocked(false);
     hydratedRef.current = true;
   }, [doc.code, patient.admissionNo, setLocked]);
 
@@ -629,6 +632,18 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     setActiveVoiceSectionKey(sectionKey);
   };
 
+  const handleVoiceModeChange = useCallback((mode: AdmissionVoiceInputMode) => {
+    if (mode === voiceInputMode) return;
+    if (mode === 'dictation') {
+      dictationProcessedSegmentCountRef.current = voiceSession.segments.length;
+      if (!activeVoiceSectionKey) {
+        const firstEditableSection = bodySections.find((section) => section.editable);
+        if (firstEditableSection) setActiveVoiceSectionKey(firstEditableSection.key);
+      }
+    }
+    setVoiceInputMode(mode);
+  }, [activeVoiceSectionKey, bodySections, voiceInputMode, voiceSession.segments.length]);
+
   useEffect(() => {
     if (readOnlyEntry || locked || mismatch) {
       stopVoiceSession(false);
@@ -641,8 +656,54 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     bumpSectionResetKey(candidate.key);
   }, [updateSection, bumpSectionResetKey]);
 
+  const handleAcceptPatientCandidate = (fieldKey: string) => {
+    const candidate = voiceSession.candidates.patientFields[fieldKey];
+    if (!candidate || locked || mismatch || readOnlyEntry) return;
+    setTempPatientInfo((prev) => applyTempPatientField(prev, fieldKey, candidate.value));
+    voiceSession.markPatientAccepted(fieldKey);
+    message.success(`已采纳${candidate.label}临时信息。`);
+  };
+
+  useEffect(() => {
+    if (voiceInputMode !== 'dictation') {
+      dictationProcessedSegmentCountRef.current = voiceSession.segments.length;
+      return;
+    }
+    const processedSegmentCount = Math.min(
+      dictationProcessedSegmentCountRef.current,
+      voiceSession.segments.length,
+    );
+    const newSegments = voiceSession.segments.slice(processedSegmentCount);
+    dictationProcessedSegmentCountRef.current = voiceSession.segments.length;
+
+    if (locked || mismatch || readOnlyEntry) return;
+
+    if (!newSegments.length) return;
+
+    const sectionKey = activeVoiceSectionKey || bodySections.find((section) => section.editable)?.key;
+    if (!sectionKey) return;
+
+    const textToAppend = newSegments.map((segment) => segment.text.trim()).filter(Boolean).join('');
+    if (!textToAppend) return;
+
+    setVoiceInsertion({
+      sectionKey,
+      sequence: ++voiceInsertionSequenceRef.current,
+      text: textToAppend,
+    });
+  }, [
+    activeVoiceSectionKey,
+    bodySections,
+    locked,
+    mismatch,
+    readOnlyEntry,
+    voiceInputMode,
+    voiceSession.segments,
+  ]);
+
   // 语音识别到的文书字段候选直接填入对应字段（无需手动采纳），新识别结果会覆盖原内容。
   useEffect(() => {
+    if (voiceInputMode !== 'smart') return;
     if (locked || mismatch || readOnlyEntry) return;
     const candidates = Object.values(voiceSession.candidates.documentFields).filter(
       (candidate) =>
@@ -660,15 +721,8 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
     locked,
     mismatch,
     readOnlyEntry,
+    voiceInputMode,
   ]);
-
-  const handleAcceptPatientCandidate = (fieldKey: string) => {
-    const candidate = voiceSession.candidates.patientFields[fieldKey];
-    if (!candidate || locked || mismatch || readOnlyEntry) return;
-    setTempPatientInfo((prev) => applyTempPatientField(prev, fieldKey, candidate.value));
-    voiceSession.markPatientAccepted(fieldKey);
-    message.success(`已采纳${candidate.label}临时信息。`);
-  };
 
   // ==================== 提交流程（对齐出院记录） ====================
   const doSubmit = async () => {
@@ -688,6 +742,25 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
       changeSummary: submitSnapshot.changeSummary,
       draftValues: values,
       draftStep: 1,
+    });
+  };
+
+  const handleClearAllFields = () => {
+    if (locked || mismatch || readOnlyEntry) return;
+
+    Modal.confirm({
+      title: '确认清空所有病历字段？',
+      content: '正文中的字段内容将被全部清空，此操作无法撤销。',
+      okText: '清空字段',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        const fieldKeys = bodySections.map((section) => section.key);
+        setSections((previous) => applyAdmissionFieldAutomation(
+          previous.map((section) => fieldKeys.includes(section.key) ? { ...section, text: '' } : section),
+        ));
+        bumpSectionResetKeys(fieldKeys);
+      },
     });
   };
 
@@ -860,6 +933,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                   patient={patient}
                   sections={bodySections}
                   sectionBadgeLabel="病历段落"
+                  hideSectionBadge={true}
                   hideHeader={true}
                   hideBadges={true}
                   sectionToolbarActions={sectionToolbarActions}
@@ -870,6 +944,7 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                   onChange={updateSection}
                   onRegenerateSection={(sectionKey) => void regenerateSection(sectionKey)}
                   onFocusSection={handleFocusSection}
+                  voiceInsertion={voiceInsertion}
                 />
               </div>
 
@@ -877,20 +952,22 @@ export default function AdmissionFlow({ doc }: ParadigmProps) {
                 <AdmissionVoiceTray
                   status={voiceSession.status}
                   disabled={locked || mismatch || readOnlyEntry}
-                  patientMode={patientMode}
+                  mode={voiceInputMode}
                   activeSectionLabel={activeVoiceSectionLabel}
                   partialText={voiceSession.partialText}
                   segments={voiceSession.segments}
                   candidates={voiceSession.candidates}
-                  tempPatientInfo={tempPatientInfo}
-                  asrError={voiceSession.asrError}
-                  analysisError={voiceSession.analysisError}
-                  analysisConnected={voiceSession.analysisConnected}
-                  onStart={voiceSession.start}
-                  onStop={() => voiceSession.stop(true)}
-                  onClearTranscripts={voiceSession.clearTranscripts}
                   onAcceptPatient={handleAcceptPatientCandidate}
                   onIgnorePatient={voiceSession.ignorePatientCandidate}
+                  onModeChange={handleVoiceModeChange}
+                  onStart={voiceSession.start}
+                  onStop={() => voiceSession.stop(true)}
+                  onEnd={() => {
+                    voiceSession.stop(true);
+                    voiceSession.disconnectAnalysis();
+                  }}
+                  onClearTranscripts={voiceSession.clearTranscripts}
+                  onClearFields={handleClearAllFields}
                 />
               </div>
             </div>

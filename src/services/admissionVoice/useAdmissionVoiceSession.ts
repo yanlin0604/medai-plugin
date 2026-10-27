@@ -41,7 +41,7 @@ export interface UseAdmissionVoiceSessionResult {
   asrError: string;
   analysisError: string;
   analysisConnected: boolean;
-  start: () => Promise<void>;
+  start: (options: { useFieldExtraction: boolean; restartAnalysis?: boolean }) => Promise<void>;
   stop: (sendFlush?: boolean) => void;
   disconnectAnalysis: () => void;
   clearTranscripts: () => void;
@@ -70,6 +70,8 @@ export function useAdmissionVoiceSession(
   const allowedKeysRef = useRef(options.allowedDocumentFieldKeys);
   const asrSessionRef = useRef<BrowserAsrSession | null>(null);
   const fieldServiceRef = useRef<FieldExtractionService | null>(null);
+  const pendingTranscriptsRef = useRef<Array<{ text: string; speaker: string; timestamp: number }>>([]);
+  const restartingAnalysisRef = useRef(false);
   const sessionIdRef = useRef(createSessionId(options.docCode));
   const contextKey = `${options.docCode}|${options.patientMode}|${options.patientIdHis ?? ''}|${options.patientId ?? ''}`;
   const currentProtectedKeys = options.protectedDocumentFieldKeys ?? [];
@@ -77,6 +79,14 @@ export function useAdmissionVoiceSession(
 
   configRef.current = options;
   protectedKeysRef.current = currentProtectedKeys;
+
+  const flushPendingTranscripts = useCallback((service: FieldExtractionService) => {
+    while (pendingTranscriptsRef.current.length) {
+      const turn = pendingTranscriptsRef.current[0];
+      if (!service.forwardFinalTranscript(turn)) return;
+      pendingTranscriptsRef.current.shift();
+    }
+  }, []);
 
   useEffect(() => {
     sessionIdRef.current = createSessionId(configRef.current.docCode);
@@ -102,13 +112,20 @@ export function useAdmissionVoiceSession(
     }
   }, [options.enabled]);
 
-  const ensureFieldService = useCallback(async (): Promise<FieldExtractionService | null> => {
+  const ensureFieldService = useCallback(async (restart = false): Promise<FieldExtractionService | null> => {
     const config = configRef.current;
     if (!config.fieldExtractionWebSocketUrl.trim()) {
       console.warn('[admission-voice] 未配置 VITE_FIELD_EXTRACTION_WS_URL，仅保留语音转文字');
       setAnalysisError('未配置 VITE_FIELD_EXTRACTION_WS_URL，当前仅保留语音转文字。');
       setAnalysisConnected(false);
       return null;
+    }
+
+    if (restart) {
+      fieldServiceRef.current?.disconnect();
+      fieldServiceRef.current = null;
+      sessionIdRef.current = createSessionId(config.docCode);
+      setAnalysisConnected(false);
     }
 
     const existing = fieldServiceRef.current;
@@ -138,20 +155,25 @@ export function useAdmissionVoiceSession(
       setAnalysisConnected(false);
     });
 
+    fieldServiceRef.current = service;
     try {
       await service.connect();
-      fieldServiceRef.current = service;
       setAnalysisError('');
       setAnalysisConnected(true);
+      flushPendingTranscripts(service);
+      restartingAnalysisRef.current = false;
       return service;
     } catch (error) {
       service.disconnect();
+      if (fieldServiceRef.current === service) fieldServiceRef.current = null;
+      pendingTranscriptsRef.current = [];
+      restartingAnalysisRef.current = false;
       setAnalysisConnected(false);
       console.error('[admission-voice] 字段分析服务连接失败:', error);
       setAnalysisError(error instanceof Error ? error.message : '字段分析服务连接失败，当前仅保留语音转文字。');
       return null;
     }
-  }, []);
+  }, [flushPendingTranscripts]);
 
   const handleFinalMessage = useCallback((message: AsrServerMessage) => {
     // 2-pass 协议：is_final=true 的精修定稿 mode 为 "2pass-offline"，一遍快速结果不携带 is_final，
@@ -181,17 +203,24 @@ export function useAdmissionVoiceSession(
       },
     ]);
 
-    const forwarded = fieldServiceRef.current?.forwardFinalTranscript({
+    const forwarded = restartingAnalysisRef.current ? false : fieldServiceRef.current?.forwardFinalTranscript({
       text,
       speaker,
       timestamp,
     });
     if (!forwarded) {
+      if (configRef.current.fieldExtractionWebSocketUrl.trim()) {
+        pendingTranscriptsRef.current.push({ text, speaker, timestamp });
+      }
+      console.info('[admission-voice] 字段分析连接未就绪，已暂存转写片段等待转发');
+      return;
+    }
+    if (!forwarded) {
       console.warn('[admission-voice] 转写片段未转发到字段分析服务');
     }
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (startOptions: { useFieldExtraction: boolean; restartAnalysis?: boolean }) => {
     const config = configRef.current;
     if (!config.enabled || recording || connecting) return;
 
@@ -203,9 +232,19 @@ export function useAdmissionVoiceSession(
     setConnecting(true);
     setAsrError('');
     setAnalysisError('');
+    if (startOptions?.restartAnalysis) {
+      restartingAnalysisRef.current = true;
+      pendingTranscriptsRef.current = [];
+    }
+    if (!startOptions.useFieldExtraction) {
+      fieldServiceRef.current?.disconnect();
+      fieldServiceRef.current = null;
+      pendingTranscriptsRef.current = [];
+      restartingAnalysisRef.current = false;
+      setAnalysisConnected(false);
+    }
 
     try {
-      await ensureFieldService();
       const session = new BrowserAsrSession({
         websocketUrl: config.asrWebSocketUrl,
         mode: '2',
@@ -229,6 +268,13 @@ export function useAdmissionVoiceSession(
       });
       asrSessionRef.current = session;
       await session.start();
+      if (startOptions.useFieldExtraction) {
+        const fieldService = await ensureFieldService(startOptions.restartAnalysis);
+        if (!fieldService) {
+          restartingAnalysisRef.current = false;
+          pendingTranscriptsRef.current = [];
+        }
+      }
     } catch (error) {
       asrSessionRef.current?.stop({ sendFlush: false });
       asrSessionRef.current = null;
@@ -249,6 +295,7 @@ export function useAdmissionVoiceSession(
   const disconnectAnalysis = useCallback(() => {
     fieldServiceRef.current?.disconnect();
     fieldServiceRef.current = null;
+    pendingTranscriptsRef.current = [];
     setAnalysisConnected(false);
   }, []);
 

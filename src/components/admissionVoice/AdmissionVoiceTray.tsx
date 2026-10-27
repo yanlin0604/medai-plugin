@@ -1,185 +1,303 @@
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   AudioOutlined,
   CheckOutlined,
   ClearOutlined,
   CloseOutlined,
-  Loading3QuartersOutlined,
+  InfoCircleOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons';
 import type {
   AdmissionCandidateState,
   AdmissionTranscriptSegment,
-  PatientMode,
-  TempPatientInfo,
 } from '../../services/admissionVoice/types';
+
+export type AdmissionVoiceInputMode = 'smart' | 'dictation';
 
 interface Props {
   status: 'idle' | 'connecting' | 'recording';
   disabled?: boolean;
-  patientMode: PatientMode;
+  mode: AdmissionVoiceInputMode;
   activeSectionLabel?: string;
   partialText: string;
   segments: AdmissionTranscriptSegment[];
   candidates: AdmissionCandidateState;
-  tempPatientInfo: TempPatientInfo;
-  asrError?: string;
-  analysisError?: string;
-  analysisConnected?: boolean;
-  onStart: () => Promise<void>;
-  onStop: () => void;
-  onClearTranscripts: () => void;
   onAcceptPatient: (fieldKey: string) => void;
   onIgnorePatient: (fieldKey: string) => void;
+  onModeChange: (mode: AdmissionVoiceInputMode) => void;
+  onStart: (options: { useFieldExtraction: boolean; restartAnalysis?: boolean }) => Promise<void>;
+  onStop: () => void;
+  onEnd: () => void;
+  onClearTranscripts: () => void;
+  onClearFields: () => void;
 }
 
 export default function AdmissionVoiceTray({
   status,
   disabled,
-  patientMode,
-  activeSectionLabel,
+  mode,
   partialText,
   segments,
   candidates,
-  asrError,
-  analysisError,
-  analysisConnected,
-  onStart,
-  onStop,
-  onClearTranscripts,
   onAcceptPatient,
   onIgnorePatient,
+  onModeChange,
+  onStart,
+  onStop,
+  onEnd,
+  onClearTranscripts,
+  onClearFields,
 }: Props) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [voiceFloating, setVoiceFloating] = useState(false);
+  const [floatingPosition, setFloatingPosition] = useState({ right: 16, bottom: 16 });
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startRight: number;
+    startBottom: number;
+  } | null>(null);
   const recording = status === 'recording';
   const connecting = status === 'connecting';
-  const latestSegment = segments[segments.length - 1];
-  const patientCandidates = Object.values(candidates.patientFields);
+  const patientCandidates = Object.values(candidates.patientFields).filter((candidate) => candidate.status === 'pending' || candidate.status === 'conflict');
+
+  const startWithMode = (nextMode: AdmissionVoiceInputMode) => {
+    onModeChange(nextMode);
+    setVoiceFloating(true);
+    void onStart({
+      useFieldExtraction: nextMode === 'smart',
+      restartAnalysis: nextMode === 'smart',
+    });
+  };
+
+  useEffect(() => {
+    if (disabled) setVoiceFloating(false);
+  }, [disabled]);
+
+  const handleFloatingPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startRight: floatingPosition.right,
+      startBottom: floatingPosition.bottom,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleFloatingPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const width = 300;
+    const height = 52;
+    setFloatingPosition({
+      right: Math.max(8, Math.min(window.innerWidth - width - 8, drag.startRight + drag.startX - event.clientX)),
+      bottom: Math.max(8, Math.min(window.innerHeight - height - 8, drag.startBottom + drag.startY - event.clientY)),
+    });
+  };
+
+  const handleFloatingPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+  };
 
   return (
-    <div className="border-t border-slate-200/50 bg-white/80 pb-4 pt-3 backdrop-blur-xl shadow-[0_-12px_40px_rgba(0,0,0,0.04)]">
-      <div className="mx-auto max-w-[980px] px-4">
-        {/* Top Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-             <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 shadow-sm shadow-blue-600/30">
-               {recording ? (
-                 <div className="absolute inset-0 rounded-full animate-ping bg-blue-600 opacity-20" />
-               ) : null}
-               <AudioOutlined className="text-white text-sm" />
-             </div>
-             <div>
-               <div className="flex items-center gap-2">
-                 <h3 className="text-sm font-bold text-slate-800">智能语音录入</h3>
-                 {statusTag(status)}
-                 {analysisConnected ? (
-                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 ring-1 ring-inset ring-emerald-200/50">分析中</span>
-                 ) : null}
-               </div>
-               <div className="text-[11px] font-medium text-slate-500">
-                 当前段落：<span className="text-blue-600">{activeSectionLabel || '未选择'}</span>
-               </div>
-             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Buttons */}
-             {recording || connecting ? (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  className="flex h-8 items-center gap-1.5 rounded-full bg-slate-100 px-3 text-xs font-bold text-slate-700 hover:bg-slate-200 transition-colors"
-                >
-                  {connecting ? <Loading3QuartersOutlined className="animate-spin" /> : <PauseCircleOutlined />}
-                  {connecting ? '连接中' : '结束录音'}
-                </button>
-             ) : (
+    <>
+      {!voiceFloating ? (
+        <section className="border-t border-slate-200 bg-white/95 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+          <div className="mx-auto flex min-h-[68px] max-w-[980px] items-center justify-center gap-3 px-4 py-3">
                 <button
                   type="button"
                   disabled={disabled}
-                  onClick={() => void onStart()}
-                  className="flex h-8 items-center gap-1.5 rounded-full bg-[#1E3A8A] px-3 text-xs font-bold text-white shadow-sm hover:bg-[#172554] disabled:opacity-50 transition-colors"
+                  onClick={() => startWithMode('smart')}
+                  className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    mode === 'smart'
+                      ? 'bg-[#1E3A8A] text-white shadow-sm hover:bg-[#172554]'
+                      : 'border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  }`}
+                  title="智能语音录入：识别内容并自动填入病历字段"
                 >
                   <PlayCircleOutlined />
-                  开始语音
+                  <span className="max-[419px]:hidden">智能语音录入</span>
                 </button>
-             )}
-             <button
-               type="button"
-               disabled={!partialText && !segments.length}
-               onClick={onClearTranscripts}
-               className="flex h-8 items-center justify-center w-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 disabled:opacity-40 transition-colors"
-               title="清空"
-             >
-               <ClearOutlined />
-             </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => startWithMode('dictation')}
+                  className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    mode === 'dictation'
+                      ? 'bg-[#0F766E] text-white shadow-sm hover:bg-[#115E59]'
+                      : 'border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100'
+                  }`}
+                  title="语音录入：将识别内容写入当前病历字段"
+                >
+                  <AudioOutlined />
+                  <span>语音录入</span>
+                </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onClearFields}
+              className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title="清空所有病历字段"
+            >
+              <ClearOutlined />
+              <span>清空字段</span>
+            </button>
           </div>
-        </div>
+        </section>
+      ) : null}
 
-        {/* Content Area */}
-        <div className="mt-3 flex gap-3">
-          <div className="flex-1 rounded-xl border border-slate-200/60 bg-slate-50/50 p-3 relative overflow-hidden">
-             <div className="absolute top-0 right-0 w-24 h-24 bg-blue-100 rounded-full blur-3xl opacity-30 -mr-10 -mt-10" />
-             <div className="relative">
-               <div className="text-[10px] font-bold text-slate-400 mb-1">
-                 {partialText ? '正在倾听...' : latestSegment ? '最近识别' : '等待语音输入'}
-               </div>
-               <p className="text-xs leading-5 text-slate-700 font-medium min-h-[40px] line-clamp-2 break-words">
-                 {partialText || latestSegment?.text || '点击开始语音后，请开始询问患者，内容将自动填充到对应字段。'}
-               </p>
-             </div>
-          </div>
-          
-          {patientMode === 'new' && patientCandidates.length > 0 && (
-             <div className="w-[320px] shrink-0">
-               <div className="rounded-xl border border-slate-200/60 bg-white p-2 shadow-sm">
-                 <div className="px-2 pt-1 pb-2 text-[10px] font-bold text-slate-500">待建档信息发现</div>
-                 <div className="max-h-[72px] overflow-y-auto space-y-1.5 px-1 pb-1">
-                    {patientCandidates.map(c => (
-                      <div key={c.key} className="flex items-center justify-between rounded-lg bg-slate-50 p-1.5 pl-2">
-                        <div className="min-w-0 flex-1">
-                           <div className="flex items-center gap-1.5">
-                             <span className="text-[11px] font-bold text-slate-800">{c.label}</span>
-                             <span className="truncate text-[11px] text-blue-600">{c.value}</span>
-                           </div>
-                        </div>
-                        <div className="flex shrink-0 gap-1 ml-2">
-                          <button
-                            disabled={disabled || c.status === 'accepted'}
-                            onClick={() => onAcceptPatient(c.key)}
-                            className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
-                          ><CheckOutlined className="text-[10px]" /></button>
-                          <button
-                            disabled={disabled}
-                            onClick={() => onIgnorePatient(c.key)}
-                            className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-40"
-                          ><CloseOutlined className="text-[10px]" /></button>
+      {voiceFloating ? (
+        <div
+          className="fixed z-[65] flex h-12 select-none items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-1.5 shadow-[0_8px_28px_rgba(15,23,42,0.2)] backdrop-blur-xl"
+          style={{ right: floatingPosition.right, bottom: floatingPosition.bottom, touchAction: 'none' }}
+          onPointerDown={handleFloatingPointerDown}
+          onPointerMove={handleFloatingPointerMove}
+          onPointerUp={handleFloatingPointerUp}
+          onPointerCancel={handleFloatingPointerUp}
+          title="拖动悬浮条"
+        >
+          <span className={`mx-1 h-2 w-2 rounded-full ${recording ? 'animate-pulse bg-rose-500' : 'bg-slate-300'}`} />
+          <span className="min-w-[56px] text-xs font-bold text-slate-700">{recording || connecting ? (mode === 'smart' ? '对话中' : '录入中') : '已暂停'}</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (recording || connecting) onStop();
+              else void onStart({ useFieldExtraction: mode === 'smart' });
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100"
+            title={recording || connecting ? '暂停对话' : '继续对话'}
+            aria-label={recording || connecting ? '暂停对话' : '继续对话'}
+          >
+            {recording || connecting ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDetailsOpen(true)}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-blue-600 hover:bg-blue-50"
+            title="查看对话详情"
+            aria-label="查看对话详情"
+          >
+            <InfoCircleOutlined />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onEnd();
+              onClearTranscripts();
+              setDetailsOpen(false);
+              setVoiceFloating(false);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+            title="结束对话"
+            aria-label="结束对话"
+          >
+            <CloseOutlined />
+          </button>
+        </div>
+      ) : null}
+
+      {detailsOpen ? (
+        <div
+          className="pointer-events-none fixed inset-0 z-[70] flex items-end justify-center bg-transparent p-3 pb-20"
+          role="presentation"
+        >
+          <section
+            className="pointer-events-auto flex max-h-[min(680px,80vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-[4px] bg-white shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admission-voice-details-title"
+          >
+            <header className="flex min-h-[56px] items-start justify-between border-b border-slate-200 bg-white px-4 py-2.5">
+              <div>
+                <h2 id="admission-voice-details-title" className="text-base font-bold leading-6 text-slate-800">会话详情</h2>
+                <p className="mt-0.5 text-xs leading-5 text-slate-400">本次入院记录语音识别内容</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailsOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                title="关闭详情"
+                aria-label="关闭详情"
+              >
+                <CloseOutlined />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto bg-white px-3 py-2 sm:px-4">
+              {patientCandidates.length ? (
+                <div className="mb-2 rounded-md border border-amber-100 bg-amber-50 px-3 py-2">
+                  <div className="mb-1.5 text-xs font-bold text-amber-800">待确认患者信息</div>
+                  <div className="space-y-1.5">
+                    {patientCandidates.map((candidate) => (
+                      <div key={candidate.key} className="flex items-center justify-between gap-3 rounded bg-white px-2.5 py-1.5">
+                        <div className="min-w-0 text-xs"><span className="font-bold text-slate-700">{candidate.label}</span><span className="ml-2 break-words text-slate-600">{candidate.value}</span></div>
+                        <div className="flex shrink-0 gap-1">
+                          <button type="button" onClick={() => onAcceptPatient(candidate.key)} className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700" title="采纳"><CheckOutlined /></button>
+                          <button type="button" onClick={() => onIgnorePatient(candidate.key)} className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200" title="忽略"><CloseOutlined /></button>
                         </div>
                       </div>
                     ))}
-                 </div>
-               </div>
-             </div>
-          )}
+                  </div>
+                </div>
+              ) : null}
+              {segments.map((segment) => {
+                const palette = getSpeakerPalette(segment.speaker);
+                return (
+                <div key={segment.id} className="flex items-start gap-1 py-0">
+                  <div className="flex w-[48px] shrink-0 items-center pt-1.5">
+                    <span className="truncate text-xs font-semibold text-slate-600">{displaySpeaker(segment.speaker)}</span>
+                  </div>
+                  <div className="relative min-w-0 max-w-[calc(100%-53px)] rounded-[3px] px-2 py-1 text-[13px] leading-5 shadow-sm" style={{ backgroundColor: palette.background, color: palette.text }}>
+                    <span className="absolute left-[-5px] top-[7px] h-0 w-0 border-y-[5px] border-y-transparent border-r-[5px]" style={{ borderRightColor: palette.background }} />
+                    <p className="break-words">{segment.text}</p>
+                  </div>
+                </div>
+                );
+              })}
+              {partialText ? (
+                <div className="flex items-start gap-1 py-0">
+                  <div className="flex w-[48px] shrink-0 items-center pt-1.5">
+                    <span className="truncate text-xs font-semibold text-slate-600">未知</span>
+                  </div>
+                  <div className="relative min-w-0 max-w-[calc(100%-53px)] rounded-[3px] px-2 py-1 text-[13px] leading-5 text-slate-700 shadow-sm" style={{ backgroundColor: getSpeakerPalette('未知').background }}>
+                    <span className="absolute left-[-5px] top-[7px] h-0 w-0 border-y-[5px] border-y-transparent border-r-[5px] border-r-[#cfe8fb]" />
+                    <p className="break-words">{partialText}</p>
+                  </div>
+                </div>
+              ) : null}
+              {!segments.length && !partialText ? <div className="py-12 text-center text-sm text-slate-400">暂无语音内容</div> : null}
+            </div>
+            <footer className="flex justify-end border-t border-slate-200 bg-white px-4 py-2.5">
+              <button type="button" onClick={() => setDetailsOpen(false)} className="h-8 rounded-md border border-slate-200 bg-slate-50 px-4 text-xs font-bold text-slate-700 hover:bg-slate-100">关闭</button>
+            </footer>
+          </section>
         </div>
-        
-        {/* Errors */}
-        {(asrError || analysisError) && (
-          <div className="mt-2 text-[11px] font-medium space-y-1">
-             {asrError && <div className="text-rose-500 bg-rose-50 px-2 py-1 rounded border border-rose-100">{asrError}</div>}
-             {analysisError && <div className="text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100">{analysisError}</div>}
-          </div>
-        )}
-      </div>
-    </div>
+      ) : null}
+    </>
   );
 }
 
-function statusTag(status: string) {
-  if (status === 'recording') {
-    return <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600 ring-1 ring-inset ring-blue-200/50"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />录音中</span>;
-  }
-  if (status === 'connecting') {
-    return <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600 ring-1 ring-inset ring-amber-200/50">连接中</span>;
-  }
-  return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">就绪</span>;
+function isUnknownSpeaker(speaker: string) {
+  return !speaker || speaker === '未知' || speaker === 'unknown';
+}
+
+function displaySpeaker(speaker: string) {
+  return isUnknownSpeaker(speaker) ? '未知' : speaker;
+}
+
+const SPEAKER_PALETTE = [
+  { background: '#d8efd7', text: '#334e36' },
+  { background: '#d9e9fb', text: '#2f4968' },
+  { background: '#f8e2c9', text: '#6b4930' },
+  { background: '#eadcf5', text: '#5a3f6d' },
+];
+
+function getSpeakerPalette(speaker: string) {
+  if (isUnknownSpeaker(speaker)) return { background: '#cfe8fb', text: '#334e68' };
+  let hash = 0;
+  for (let index = 0; index < speaker.length; index += 1) hash = (hash * 31 + speaker.charCodeAt(index)) >>> 0;
+  return SPEAKER_PALETTE[hash % SPEAKER_PALETTE.length];
 }

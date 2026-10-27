@@ -5,6 +5,7 @@ import {
   CloseOutlined,
   FileTextOutlined,
   Loading3QuartersOutlined,
+  PauseCircleOutlined,
   ReloadOutlined,
   SendOutlined,
   UploadOutlined,
@@ -26,6 +27,7 @@ import { submitDocument } from '../../services/emsBridge';
 import { loadDraft, saveDraft } from '../../services/draftService';
 import { stripCitations } from '../../services/documentFlow';
 import { localVersionAdapter } from '../../services/versionService';
+import { FieldExtractionService } from '../../services/fieldExtractionService';
 import { useFieldAssistStore } from '../../stores/useFieldAssistStore';
 import type { Patient } from '../../stores/usePatientStore';
 import { getLatestFieldAssistContext, isUsableFieldAssistContext } from '../../services/fieldAssist/contextBridge';
@@ -76,6 +78,8 @@ interface VoiceTextSelection {
   end: number;
 }
 
+type VoiceInputMode = 'smart' | 'dictation';
+
 type AudioContextWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
@@ -95,9 +99,13 @@ const EMPTY_SESSION_META = {
 } as const;
 const FIELD_CONTEXT_POLL_MS = 1800;
 const ASR_WS_URL = String(import.meta.env.VITE_ASR_WS_URL ?? '').trim();
+const FIELD_EXTRACTION_WS_URL = String(
+  import.meta.env.VITE_FIELD_EXTRACTION_WS_URL ?? 'ws://192.168.1.88:8001/ws/field-extraction',
+).trim();
 // 演示模式：跳过一键回填的必填字段校验（生产环境不要设置该变量）
 const SKIP_WRITEBACK_VALIDATION = String(import.meta.env.VITE_SKIP_WRITEBACK_VALIDATION ?? '').trim() === '1';
 const ASR_MODE = '2';
+const SURGERY_DOC_CODES = new Set(['DOC013', 'D0C013']);
 
 function buildAsrWsUrl(baseUrl: string, mode: string) {
   const separator = baseUrl.includes('?') ? '&' : '?';
@@ -122,6 +130,16 @@ function adjustOffsetAfterRangeRemoval(offset: number, range: VoiceTextSelection
   if (offset <= range.start) return offset;
   if (offset >= range.end) return offset - (range.end - range.start);
   return range.start;
+}
+
+function appendRecognizedText(currentText: string, nextText: string): string {
+  const normalizedText = nextText.trim();
+  if (!normalizedText) return currentText;
+  return currentText ? `${currentText}${normalizedText}` : normalizedText;
+}
+
+function createVoiceAnalysisSessionId(docCode: string): string {
+  return `${docCode.toLowerCase()}-field-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function valueToText(value: unknown): string {
@@ -570,9 +588,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const [sessions, setSessions] = useState<FieldSession[]>([]);
   const [fieldContext, setFieldContext] = useState<FieldAssistContext | null>(null);
   const [activeFieldKey, setActiveFieldKey] = useState('');
+  const [voiceInputMode, setVoiceInputMode] = useState<VoiceInputMode>('smart');
   const [voiceText, setVoiceText] = useState('');
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [voiceAnalysisConnected, setVoiceAnalysisConnected] = useState(false);
+  const [voiceAnalysisError, setVoiceAnalysisError] = useState('');
   const [wholeGenerating, setWholeGenerating] = useState(false);
   const [wholeWriting, setWholeWriting] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -590,14 +611,19 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const fieldExtractionServiceRef = useRef<FieldExtractionService | null>(null);
+  const fieldExtractionSessionIdRef = useRef('');
   const voiceTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const voiceTextRef = useRef('');
   const voiceSelectionRef = useRef<VoiceTextSelection>({ start: 0, end: 0 });
   const voicePartialRangeRef = useRef<VoiceTextSelection | null>(null);
   const voiceFieldKeyRef = useRef('');
+  const activeFieldKeyRef = useRef('');
+  const voiceInputModeRef = useRef<VoiceInputMode>('smart');
   const finalVoiceDraftRef = useRef('');
   const voiceBaseContextRef = useRef<FieldAssistContext | null>(null);
   const fieldCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const isSurgeryDoc = SURGERY_DOC_CODES.has(doc.code) || doc.name.includes('手术记录');
   const topSessions = useMemo(
     () => sessions.filter((session) => isTopWorkbenchField(session.field)),
     [sessions],
@@ -620,12 +646,21 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
   }, [voiceText]);
 
   useEffect(() => {
+    activeFieldKeyRef.current = activeFieldKey;
+  }, [activeFieldKey]);
+
+  useEffect(() => {
+    voiceInputModeRef.current = voiceInputMode;
+  }, [voiceInputMode]);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
 
     const loadWorkspace = async () => {
       try {
+        disconnectSurgeryFieldAnalysis();
         const [nextTemplate, values] = await Promise.all([
           pluginRuntimeApi.getRuntimeDocTemplate(doc.code),
           resolveInitialValues(doc.code, patient.id),
@@ -659,6 +694,8 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         setVoiceText('');
         setVoicePanelOpen(false);
         setRecording(false);
+        setVoiceAnalysisConnected(false);
+        setVoiceAnalysisError('');
         setLoading(false);
 
         if (isRoundRecordDocCode(doc.code)) {
@@ -743,11 +780,15 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       latestFieldSnapshotKeyRef.current = nextSnapshotKey;
       setFieldContext(usableContext);
       if (bodySessions.some((session) => session.field.key === usableContext.fieldKey)) {
-        stopAsrRecording();
-        voiceFieldKeyRef.current = '';
-        finalVoiceDraftRef.current = '';
-        setVoiceText('');
-        setVoicePanelOpen(false);
+        if (isSurgeryDoc && voiceInputModeRef.current === 'dictation') {
+          voiceFieldKeyRef.current = usableContext.fieldKey;
+        } else {
+          stopAsrRecording();
+          voiceFieldKeyRef.current = '';
+          finalVoiceDraftRef.current = '';
+          setVoiceText('');
+          setVoicePanelOpen(false);
+        }
         setActiveFieldKey(usableContext.fieldKey);
         scrollToField(usableContext.fieldKey);
       }
@@ -762,12 +803,79 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [bodySessions, doc.code, patient.id]);
+  }, [bodySessions, doc.code, isSurgeryDoc, patient.id]);
 
   const updateSession = (fieldKey: string, updater: (session: FieldSession) => FieldSession) => {
     setSessions((current) => current.map((session) => (
       session.field.key === fieldKey ? updater(session) : session
     )));
+  };
+
+  const applySurgeryAnalysisFields = (fields: Record<string, { value: string }>) => {
+    setSessions((current) => {
+      const allowedKeys = new Set(current.map((session) => session.field.key));
+      let changed = false;
+      const next = current.map((session) => {
+        if (!allowedKeys.has(session.field.key) || session.compositionTemplate) return session;
+        const candidate = fields[session.field.key];
+        const nextValue = candidate?.value?.trim();
+        if (!nextValue || nextValue === session.value) return session;
+        changed = true;
+        return { ...session, value: nextValue };
+      });
+      return changed ? next : current;
+    });
+  };
+
+  const disconnectSurgeryFieldAnalysis = () => {
+    fieldExtractionServiceRef.current?.disconnect();
+    fieldExtractionServiceRef.current = null;
+    setVoiceAnalysisConnected(false);
+  };
+
+  const ensureSurgeryFieldAnalysis = async (): Promise<FieldExtractionService | null> => {
+    if (!isSurgeryDoc) return null;
+    if (!FIELD_EXTRACTION_WS_URL) {
+      setVoiceAnalysisError('未配置字段分析 WebSocket，当前智能语音无法自动分析字段。');
+      setVoiceAnalysisConnected(false);
+      return null;
+    }
+
+    const existing = fieldExtractionServiceRef.current;
+    if (existing?.getConnectionState()) return existing;
+
+    const sessionId = createVoiceAnalysisSessionId(doc.code);
+    fieldExtractionSessionIdRef.current = sessionId;
+    const service = new FieldExtractionService({
+      sessionId,
+      docCode: doc.code,
+      patientId: null,
+      patientIdHis: patient.id,
+      patientMode: 'existing',
+      preFilledFields: Object.fromEntries(sessions.map((session) => [session.field.key, getSessionDisplayValue(session)])),
+      webSocketUrl: FIELD_EXTRACTION_WS_URL,
+    });
+
+    service.onCandidateUpdate((update) => {
+      applySurgeryAnalysisFields(update.documentFields);
+    });
+    service.onError((errorMessage) => {
+      setVoiceAnalysisError(errorMessage);
+      setVoiceAnalysisConnected(false);
+    });
+
+    try {
+      await service.connect();
+      fieldExtractionServiceRef.current = service;
+      setVoiceAnalysisConnected(true);
+      setVoiceAnalysisError('');
+      return service;
+    } catch (analysisError) {
+      service.disconnect();
+      setVoiceAnalysisConnected(false);
+      setVoiceAnalysisError(analysisError instanceof Error ? analysisError.message : '字段分析服务连接失败。');
+      return null;
+    }
   };
 
   const updateCompositionItemValue = (fieldKey: string, itemKey: string, nextText: string) => {
@@ -1155,15 +1263,63 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     setVoiceDraftText(fieldKey, nextText, nextSelection);
   };
 
+  const appendDictationSegmentToField = (fieldKey: string, segmentText: string) => {
+    const normalizedText = segmentText.trim();
+    if (!normalizedText) return;
+    updateSession(fieldKey, (item) => ({
+      ...item,
+      value: appendRecognizedText(item.value, normalizedText),
+    }));
+    setVoiceText(normalizedText);
+    voiceTextRef.current = normalizedText;
+  };
+
   const handleAsrMessage = (data: AsrServerMessage) => {
-    const fieldKey = voiceFieldKeyRef.current;
+    const fieldKey = voiceFieldKeyRef.current || activeFieldKeyRef.current;
     if (!fieldKey) return;
+
+    if (voiceInputModeRef.current === 'dictation') {
+      const text = data.text?.trim() ?? '';
+      if (!text) return;
+      if (data.is_final === false) {
+        setVoiceText(text);
+        voiceTextRef.current = text;
+        return;
+      }
+      appendDictationSegmentToField(fieldKey, text);
+      return;
+    }
 
     if (!data.text && data.is_final) {
       commitCurrentVoicePartial();
       return;
     }
     if (!data.text) return;
+
+    if (isSurgeryDoc) {
+      const text = data.text.trim();
+      if (!text) return;
+      if (data.is_final === false) {
+        setVoiceText(text);
+        voiceTextRef.current = text;
+        return;
+      }
+
+      const nextVoiceText = appendRecognizedText(voiceTextRef.current, text);
+      setVoiceText(nextVoiceText);
+      voiceTextRef.current = nextVoiceText;
+      if (data.is_final === true) {
+        const forwarded = fieldExtractionServiceRef.current?.forwardFinalTranscript({
+          text,
+          speaker: '医生',
+          timestamp: Date.now(),
+        });
+        if (forwarded === false) {
+          setVoiceAnalysisError('字段分析连接未就绪，当前转写未进入智能分析。');
+        }
+      }
+      return;
+    }
 
     insertVoiceSegmentAtCursor(fieldKey, data.text, data.is_final !== false);
   };
@@ -1210,6 +1366,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
   const closeVoicePanel = () => {
     stopAsrRecording();
+    disconnectSurgeryFieldAnalysis();
     setVoicePanelOpen(false);
     voiceFieldKeyRef.current = '';
     finalVoiceDraftRef.current = '';
@@ -1225,6 +1382,39 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
         inline: 'nearest',
       });
     }, 0);
+  };
+
+  const handleVoiceInputModeChange = (mode: VoiceInputMode) => {
+    if (mode === voiceInputMode) return;
+    voicePartialRangeRef.current = null;
+    finalVoiceDraftRef.current = '';
+
+    if (mode === 'dictation') {
+      disconnectSurgeryFieldAnalysis();
+      voiceFieldKeyRef.current = activeSession?.field.key ?? activeFieldKeyRef.current;
+      voiceBaseContextRef.current = null;
+      setVoiceText('');
+      voiceTextRef.current = '';
+    } else if (isSurgeryDoc && activeSession) {
+      voiceFieldKeyRef.current = activeSession.field.key;
+      voiceBaseContextRef.current = null;
+      setVoiceText('');
+      voiceTextRef.current = '';
+    } else if (activeSession) {
+      const activeContext = fieldContext?.fieldKey === activeSession.field.key
+        ? fieldContext
+        : buildContext(doc, patient, activeSession);
+      voiceFieldKeyRef.current = activeSession.field.key;
+      voiceBaseContextRef.current = activeContext;
+      setVoiceText(activeContext.fieldValue);
+      voiceTextRef.current = activeContext.fieldValue;
+      voiceSelectionRef.current = {
+        start: activeContext.fieldValue.length,
+        end: activeContext.fieldValue.length,
+      };
+    }
+
+    setVoiceInputMode(mode);
   };
 
   const handleVoiceTextChange = (nextText: string, selection?: VoiceTextSelection) => {
@@ -1286,22 +1476,36 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
     const activeContext = fieldContext?.fieldKey === targetFieldKey
       ? fieldContext
       : buildContext(doc, patient, activeSession);
+    const dictationMode = voiceInputMode === 'dictation';
+    const surgerySmartMode = isSurgeryDoc && !dictationMode;
     const initialSelection = {
       start: activeContext.fieldValue.length,
       end: activeContext.fieldValue.length,
     };
     stopAsrRecording(false);
     voiceFieldKeyRef.current = targetFieldKey;
-    voiceBaseContextRef.current = activeContext;
+    voiceBaseContextRef.current = dictationMode || surgerySmartMode ? null : activeContext;
     finalVoiceDraftRef.current = '';
     voicePartialRangeRef.current = null;
-    voiceTextRef.current = activeContext.fieldValue;
+    voiceTextRef.current = dictationMode || surgerySmartMode ? '' : activeContext.fieldValue;
     voiceSelectionRef.current = initialSelection;
     setVoicePanelOpen(true);
     setRecording(true);
-    setVoiceText(activeContext.fieldValue);
-    focusVoiceTextareaAtSelection(initialSelection);
-    message.loading({ content: `正在连接语音识别服务，准备采集「${activeSession.field.label}」语音...`, key: 'doc-workspace-voice' });
+    setVoiceText(dictationMode || surgerySmartMode ? '' : activeContext.fieldValue);
+    if (!dictationMode && !surgerySmartMode) focusVoiceTextareaAtSelection(initialSelection);
+    if (isSurgeryDoc) {
+      if (dictationMode) {
+        disconnectSurgeryFieldAnalysis();
+      } else {
+        await ensureSurgeryFieldAnalysis();
+      }
+    }
+    message.loading({
+      content: dictationMode
+        ? `正在连接语音识别服务，后续内容将追加到「${activeSession.field.label}」...`
+        : `正在连接语音识别服务，准备采集「${activeSession.field.label}」语音...`,
+      key: 'doc-workspace-voice',
+    });
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
@@ -1349,7 +1553,13 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
         source.connect(processor);
         processor.connect(audioContext.destination);
-        message.success({ content: `正在语音转写「${activeSession.field.label}」`, key: 'doc-workspace-voice', duration: 1.5 });
+        message.success({
+          content: dictationMode
+            ? `正在识别语音，目标字段「${activeSession.field.label}」`
+            : `正在语音转写「${activeSession.field.label}」`,
+          key: 'doc-workspace-voice',
+          duration: 1.5,
+        });
       };
 
       ws.onmessage = (event) => {
@@ -1385,6 +1595,7 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
   useEffect(() => () => {
     stopAsrRecording(false);
+    disconnectSurgeryFieldAnalysis();
   }, []);
 
   const handleApply = async (fieldKey: string) => {
@@ -1630,8 +1841,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                   }}
                   onClick={() => {
                     if (session.field.key !== activeFieldKey) {
-                      closeVoicePanel();
-                      setVoiceText('');
+                      if (isSurgeryDoc && voiceInputMode === 'dictation' && recording) {
+                        voiceFieldKeyRef.current = session.field.key;
+                      } else {
+                        closeVoicePanel();
+                        setVoiceText('');
+                      }
                     }
                     setActiveFieldKey(session.field.key);
                   }}
@@ -1809,6 +2024,23 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                           </div>
                         ) : null}
                       </div>
+                    ) : isSurgeryDoc ? (
+                      <textarea
+                        value={displayValue}
+                        onChange={(event) => updateSession(session.field.key, (item) => ({
+                          ...item,
+                          value: event.target.value,
+                        }))}
+                        onFocus={() => {
+                          setActiveFieldKey(session.field.key);
+                          if (voiceInputMode === 'dictation' && recording) {
+                            voiceFieldKeyRef.current = session.field.key;
+                          }
+                        }}
+                        rows={session.field.key === 'operationContent' || session.field.label.includes('经过') ? 7 : 4}
+                        className="min-h-[104px] w-full resize-y rounded-lg border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#1E3A8A] focus:bg-white focus:ring-2 focus:ring-blue-100"
+                        placeholder="这个字段还没有内容。"
+                      />
                     ) : (
                       <div className="max-w-[92%] rounded-lg rounded-bl-sm border border-slate-200 bg-[#FBFDFF] px-3 py-2 text-sm leading-6 text-slate-800">
                         {displayValue ? (
@@ -1839,6 +2071,131 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
 
         <section className="border-t border-slate-200 bg-white px-3 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.06)]">
           <div className="mx-auto max-w-[980px]">
+            {isSurgeryDoc ? (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 shadow-sm shadow-blue-600/30">
+                      {recording ? <div className="absolute inset-0 rounded-full bg-blue-600 opacity-20 animate-ping" /> : null}
+                      <AudioOutlined className="text-sm text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="flex h-6 items-center rounded-md bg-slate-100 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleVoiceInputModeChange('smart')}
+                            className={`h-5 rounded px-1.5 text-[11px] font-bold leading-none transition-colors ${
+                              voiceInputMode === 'smart'
+                                ? 'bg-white text-[#1E3A8A] shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            智能
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleVoiceInputModeChange('dictation')}
+                            className={`h-5 rounded px-1.5 text-[11px] font-bold leading-none transition-colors ${
+                              voiceInputMode === 'dictation'
+                                ? 'bg-white text-[#0F766E] shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            识别
+                          </button>
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-800">语音录入</h3>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset ${
+                          recording
+                            ? 'bg-blue-50 text-blue-600 ring-blue-200/50'
+                            : 'bg-slate-100 text-slate-500 ring-slate-200/60'
+                        }`}
+                        >
+                          {recording ? '录音中' : '就绪'}
+                        </span>
+                        {voiceInputMode === 'smart' && voiceAnalysisConnected ? (
+                          <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 ring-1 ring-inset ring-emerald-200/50">分析中</span>
+                        ) : null}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-500">
+                        <span className="shrink-0">当前字段：</span>
+                        <select
+                          value={activeSession?.field.key ?? ''}
+                          onChange={(event) => {
+                            const nextFieldKey = event.target.value;
+                            if (voiceInputMode === 'dictation' && recording) {
+                              voiceFieldKeyRef.current = nextFieldKey;
+                            } else {
+                              closeVoicePanel();
+                              setVoiceText('');
+                            }
+                            setActiveFieldKey(nextFieldKey);
+                            scrollToField(nextFieldKey);
+                          }}
+                          title="语音写入字段"
+                          className="h-6 max-w-[180px] rounded border border-slate-200 bg-white px-1.5 text-[11px] font-bold text-[#1E3A8A] outline-none focus:border-[#1E3A8A]"
+                        >
+                          {bodySessions.map((session) => (
+                            <option key={session.field.key} value={session.field.key}>{session.field.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleToggleRecording}
+                      disabled={!activeSession || Boolean(activeSession.compositionTemplate)}
+                      className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-bold transition-colors disabled:opacity-50 ${
+                        recording
+                          ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          : 'bg-[#1E3A8A] text-white shadow-sm hover:bg-[#172554]'
+                      }`}
+                      title="语音输入"
+                      aria-label="语音输入"
+                    >
+                      {recording ? <PauseCircleOutlined /> : <AudioOutlined />}
+                      {recording ? '结束录音' : '开始语音'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!voiceText.trim()}
+                      onClick={() => {
+                        setVoiceText('');
+                        voiceTextRef.current = '';
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors hover:bg-slate-200 disabled:opacity-40"
+                      title="清空最近识别"
+                      aria-label="清空最近识别"
+                    >
+                      <CloseOutlined />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-xl border border-slate-200/60 bg-slate-50/50 p-3">
+                  <div className="text-[10px] font-bold text-slate-400">
+                    {voiceText ? '最近识别' : voiceInputMode === 'smart' ? '等待语音输入' : '等待识别输入'}
+                  </div>
+                  <p className="mt-1 min-h-[40px] break-words text-xs font-medium leading-5 text-slate-700 line-clamp-2">
+                    {voiceText || (
+                      voiceInputMode === 'smart'
+                        ? '点击开始语音后，系统将按当前字段采集口述内容，可生成字段草稿。'
+                        : '点击开始语音后，识别文本将追加到当前字段；切换字段后，后续语音写入新字段。'
+                    )}
+                  </p>
+                </div>
+                {voiceAnalysisError ? (
+                  <div className="mt-2 rounded border border-amber-100 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-600">
+                    {voiceAnalysisError}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
             {voicePanelOpen ? (
               <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 p-2">
                 <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -1903,8 +2260,12 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
                 value={activeSession?.field.key ?? ''}
                 onChange={(event) => {
                   const nextFieldKey = event.target.value;
-                  closeVoicePanel();
-                  setVoiceText('');
+                  if (isSurgeryDoc && voiceInputMode === 'dictation' && recording) {
+                    voiceFieldKeyRef.current = nextFieldKey;
+                  } else {
+                    closeVoicePanel();
+                    setVoiceText('');
+                  }
                   setActiveFieldKey(nextFieldKey);
                   scrollToField(nextFieldKey);
                 }}
@@ -1943,6 +2304,8 @@ export default function UnifiedDocWorkspace({ doc, patient }: Props) {
               <span className="hidden sm:inline">生成</span>
             </button>
             </div>
+              </>
+            )}
           </div>
         </section>
       </main>
